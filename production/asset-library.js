@@ -800,7 +800,7 @@
     const items = library.media.filter((item) => item.kind === kind && item.name.toLowerCase().includes(query));
     return `<section class="pf-media-grid pf-media-grid--${kind} pf-usage-media-grid">${items.map((item) => kind === "reference"
       ? `<article class="pf-media-item pf-reference-card" draggable="true" data-drag-kind="media" data-id="${item.id}"><button class="pf-reference-thumb" data-action="media-apply" data-id="${item.id}" aria-label="从图库添加 ${escapeHtml(item.name)}"><div data-thumb="${item.assetId}">载入中</div></button><footer class="pf-reference-meta"><strong title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</strong><button class="danger" data-action="media-delete" data-id="${item.id}" aria-label="删除素材 ${escapeHtml(item.name)}" title="删除">${libraryCardIcon("delete")}</button></footer></article>`
-      : `<article class="pf-media-item" draggable="true" data-drag-kind="media" data-id="${item.id}"><div data-thumb="${item.assetId}">载入中</div><strong title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</strong><footer><button data-action="media-apply" data-id="${item.id}">应用到画布</button></footer></article>`).join("") || "<p class=\"pf-empty\">还没有可调用的图片素材</p>"}</section>`;
+      : `<article class="pf-media-item pf-product-card" draggable="true" data-drag-kind="media" data-id="${item.id}"><button class="pf-product-thumb" data-action="media-apply" data-id="${item.id}" aria-label="从产品素材库添加 ${escapeHtml(item.name)}"><div data-thumb="${item.assetId}">载入中</div></button><strong title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</strong></article>`).join("") || "<p class=\"pf-empty\">还没有可调用的图片素材</p>"}</section>`;
   }
 
   function templateUsageList(library, query) {

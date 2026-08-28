@@ -204,7 +204,8 @@ test("libraries separate outside management from inside usage", async () => {
   assert.match(source, /data-action="open-library-management"/);
   assert.match(source, /prompts: \["提示词库"/);
   assert.match(source, /调用提示词/);
-  assert.match(source, /应用到画布/);
+  const usageMediaList = source.slice(source.indexOf("function mediaUsageList"), source.indexOf("function templateUsageList"));
+  assert.doesNotMatch(usageMediaList, /应用到画布/);
   assert.match(source, /前往库管理/);
   const managementPromptList = source.slice(source.indexOf("function promptList"), source.indexOf("function mediaList"));
   const managementMediaList = source.slice(source.indexOf("function mediaList"), source.indexOf("function promptUsageList"));
@@ -327,6 +328,20 @@ test("gallery calling cards use Pinterest-style names and icon management action
   assert.doesNotMatch(referenceBranch, /应用到画布/);
   assert.match(styles, /\.pf-reference-meta\{display:flex;align-items:center;gap:5px/);
   assert.match(styles, /\.pf-reference-meta>strong\{min-width:0;flex:1;overflow:hidden/);
+});
+
+test("product calling cards apply by clicking the image instead of a separate button", async () => {
+  const source = await readFile(new URL("production/asset-library.js", root), "utf8");
+  const styles = await readFile(new URL("production/pixel-flow-theme.css", root), "utf8");
+  const usageList = source.slice(source.indexOf("function mediaUsageList"), source.indexOf("function templateUsageList"));
+  const productBranch = usageList.slice(usageList.indexOf(": `<article"));
+  assert.match(productBranch, /pf-product-card/);
+  assert.match(productBranch, /pf-product-thumb/);
+  assert.match(productBranch, /data-action="media-apply"/);
+  assert.match(productBranch, /aria-label="从产品素材库添加/);
+  assert.doesNotMatch(productBranch, /应用到画布/);
+  assert.match(styles, /\.pf-product-thumb\{display:block;width:100%/);
+  assert.match(styles, /\.pf-product-thumb:hover,\.pf-product-thumb:focus-visible/);
 });
 
 test("canvas images can be saved into the gallery by double-click without duplicates", async () => {
