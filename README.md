@@ -85,7 +85,7 @@ npm run build
 
 ## 生图模式
 
-- 每张任务卡可选择 `浏览器` 或 `API Key`，默认使用原版浏览器模式。
+- 每张任务卡可选择 `GPT-web` 或 `API`，新建任务和新建生图模板默认使用 API 模式；已有任务保留原先保存的模式。
 - API 模式在顶部“API 设置”中保存 Key；Key 只进入 `chrome.storage.local`，不会写入项目、备份、日志或源码。
 - 无参考图：`POST https://aihub.rbmanon.cn/v1/images/generations`。
 - 有参考图：`POST https://aihub.rbmanon.cn/v1/images/edits`，使用 JSON `images[].image_url` Base64 Data URL；该网关不接受 multipart。

@@ -543,7 +543,7 @@
     const taskCount = project.graph.nodes.filter((node) => node.kind === "task").length;
     const position = canvasPosition(window.innerWidth / 2, window.innerHeight / 2);
     const taskId = makeId("task");
-    const task = { id: taskId, kind: "task", name: `生图任务 ${String(taskCount + 1).padStart(2, "0")}`, prompt: prompt.content, position, inputEdgeOrder: [], runCount: 0, status: "idle", aspectRatio: "auto", generationMode: "browser" };
+    const task = { id: taskId, kind: "task", name: `生图任务 ${String(taskCount + 1).padStart(2, "0")}`, prompt: prompt.content, position, inputEdgeOrder: [], runCount: 0, status: "idle", aspectRatio: "auto", generationMode: "api" };
     const selectedIds = selectedCanvasNodeIds();
     const selectedSource = selectedIds.length === 1 ? project.graph.nodes.find((node) => node.id === selectedIds[0] && (node.kind === "image" || node.kind === "result")) : void 0;
     if (selectedSource) {
@@ -630,7 +630,7 @@
   }
 
   function blankTemplate() {
-    return { id: "", name: "未命名生图模板", copy: "", background: "", composition: "", extra: "", productIds: [], referenceIds: [], aspectRatio: "auto", count: 1, generationMode: "browser" };
+    return { id: "", name: "未命名生图模板", copy: "", background: "", composition: "", extra: "", productIds: [], referenceIds: [], aspectRatio: "auto", count: 1, generationMode: "api" };
   }
 
   function formTemplate(root = panel) {
@@ -643,7 +643,7 @@
       copy: String(data.get("copy") || "").trim(), background: String(data.get("background") || "").trim(),
       composition: String(data.get("composition") || "").trim(), extra: String(data.get("extra") || "").trim(),
       productIds: data.getAll("productIds").map(String), referenceIds: data.getAll("referenceIds").map(String), aspectRatio: String(data.get("aspectRatio") || "auto"),
-      count: Math.min(4, Math.max(1, Number(data.get("count") || 1))), generationMode: String(data.get("generationMode") || "browser")
+      count: Math.min(4, Math.max(1, Number(data.get("count") || 1))), generationMode: String(data.get("generationMode") || "api")
     };
   }
 

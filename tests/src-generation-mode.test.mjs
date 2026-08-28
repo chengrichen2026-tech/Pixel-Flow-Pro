@@ -11,7 +11,7 @@ test("rebuilt tasks own generation mode instead of requiring DOM injection", asy
   assert.match(types, /export type GenerationMode = "browser" \| "api"/);
   assert.match(types, /generationMode\?: GenerationMode/);
   assert.match(types, /apiJobId\?: string/);
-  assert.match(store, /generationMode:"browser"/);
+  assert.match(store, /generationMode:"api"/);
   assert.match(app, /className="generation-mode"/);
   assert.match(app, /aria-label="生图模式"/);
   assert.match(app, /n\.generationMode==='api'\?'api':'browser'/);

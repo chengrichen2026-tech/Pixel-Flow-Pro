@@ -319,7 +319,7 @@
       <h2>五、API Key 生图</h2>
       <div class="steps">
         <div class="step"><b>保存 API Key</b>点击顶部“API 设置”，确认接口、模型与质量，然后输入并保存完整 Key。</div>
-        <div class="step"><b>选择任务模式</b>在目标任务卡的“模式”中选择“API Key”；其他任务可以继续使用浏览器模式。</div>
+        <div class="step"><b>确认任务模式</b>新建任务和新建生图模板默认使用 API；需要时可在任务卡中手动切换为 GPT-web。已有任务保留原先保存的模式。</div>
         <div class="step"><b>运行并回写</b>点击“运行任务”。纯文字任务调用 generations；参考图通过 JSON Base64 Data URL 调用 edits；返回图片自动写回画布。</div>
       </div>
       <div class="notice"><strong>数据边界：</strong>API Key 只保存在当前浏览器本地；API 模式会把任务提示词和连接的参考图片发送到 <code>aihub.rbmanon.cn</code>。</div>

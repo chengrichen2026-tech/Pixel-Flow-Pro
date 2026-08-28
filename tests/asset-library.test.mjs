@@ -18,6 +18,13 @@ test("production loads the local asset and generation template module", async ()
   assert.match(build, /production", "asset-library\.js/);
 });
 
+test("new prompt tasks and templates default to API generation", async () => {
+  const source = await readFile(new URL("production/asset-library.js", root), "utf8");
+  assert.match(source, /prompt\.content[^}]+generationMode: "api"/s);
+  assert.match(source, /name: "未命名生图模板"[^}]+generationMode: "api"/s);
+  assert.match(source, /data\.get\("generationMode"\) \|\| "api"/);
+});
+
 test("the asset enhancer waits for the original canvas database to be ready", async () => {
   const source = await readFile(new URL("production/asset-library.js", root), "utf8");
   assert.match(source, /if \(!projectId\) return null/);
