@@ -6344,7 +6344,7 @@ function appendResult(graph, taskId, imageAssetId) {
     kind: "result",
     assetId: imageAssetId,
     taskId: owner.id,
-    title: `\u751F\u6210\u7ED3\u679C ${existingResults + 1}`,
+    title: `\u751F\u6210\u7ED3\u679C${existingResults + 1}`,
     position: { x: owner.position.x + 560 + existingResults * 360, y: owner.position.y }
   };
   return {

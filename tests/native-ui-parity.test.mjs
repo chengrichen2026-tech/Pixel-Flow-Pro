@@ -98,8 +98,13 @@ test("connected task images render ordered thumbnails including container items"
   assert.match(app, /task\.inputEdgeOrder\.map/);
   assert.match(app, /source\?\.kind==='image_container'/);
   assert.match(app, /className="task-input-thumbnails"/);
-  assert.match(app, /data-container-input/);
-  assert.match(styles, /\.task-input-thumbnails img\{/);
+  assert.match(app, /<figcaption>图\{index\+1\}<\/figcaption>/);
+  assert.match(app, /className="task-batch-summary"/);
+  assert.match(styles, /\.task-inputs\{height:auto;min-height:82px/);
+  assert.match(styles, /\.task-input-thumbnails figcaption\{/);
+  assert.match(styles, /\.task-batch-summary\{display:block/);
+  assert.match(app, /`生成结果\$\{Math\.max\(0,resultIndex\)\+1\}`/);
+  assert.match(app, /<label className="media-node__label">\{libraryName\}<\/label>/);
 });
 
 test("task result edges stay animated and dashed after completion", async () => {

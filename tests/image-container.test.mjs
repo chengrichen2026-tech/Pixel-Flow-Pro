@@ -47,6 +47,11 @@ test("batch results are laid out side by side and expose a download control", as
   assert.match(icons, /download: DownloadSimple/);
 });
 
+test("generated image titles are numbered without a duplicated generic label", async () => {
+  const background = await source("public/background.js");
+  assert.match(background, /title: `\\u751F\\u6210\\u7ED3\\u679C\$\{existingResults \+ 1\}`/);
+});
+
 test("image container toolbar uses the approved generated icon asset", async () => {
   const icons = await source("src/icons.tsx");
   const icon = await readFile(new URL("public/icons/image-container.png", root));
