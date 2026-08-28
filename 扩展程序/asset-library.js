@@ -51,7 +51,10 @@
       return emptyLibrary();
     }
   };
-  const saveLibrary = (library) => localStorage.setItem(STORAGE_KEY, JSON.stringify(library));
+  const saveLibrary = (library) => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(library));
+    window.dispatchEvent(new CustomEvent("pixel-flow:library-updated"));
+  };
   const escapeHtml = (value = "") => String(value).replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
   const libraryCardIcon = (name) => name === "delete"
     ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5"/></svg>'
@@ -391,70 +394,98 @@
     if (nativeCanvas) window.dispatchEvent(new CustomEvent("pixel-flow:native-management-active", { detail: { tab: null } }));
   }
 
-  async function exportAssetLibrary() {
-    const library = readLibrary();
+  const libraryBackupScopes = {
+    prompts: { kind: "pixel-flow-prompt-library", label: "提示词库", filename: "Pixel-Flow-提示词库" },
+    products: { kind: "pixel-flow-product-library", label: "产品素材库", filename: "Pixel-Flow-产品素材库" },
+    references: { kind: "pixel-flow-gallery-library", label: "图库", filename: "Pixel-Flow-图库" },
+    templates: { kind: "pixel-flow-template-library", label: "模版库", filename: "Pixel-Flow-模版库" },
+    all: { kind: "pixel-flow-asset-library", label: "旧版完整资产库", filename: "Pixel-Flow-资产库" }
+  };
+
+  function scopedLibrary(library, scope) {
+    if (scope === "prompts") return { ...emptyLibrary(), prompts: library.prompts };
+    if (scope === "products") return { ...emptyLibrary(), media: library.media.filter((item) => item.kind === "product") };
+    if (scope === "references") return { ...emptyLibrary(), media: library.media.filter((item) => item.kind === "reference") };
+    if (scope === "templates") return { ...emptyLibrary(), templates: library.templates };
+    return library;
+  }
+
+  async function exportAssetLibrary(scope = "all") {
+    const config = libraryBackupScopes[scope];
+    if (!config) return notify("未知的资产库类型", "error");
+    const library = scopedLibrary(readLibrary(), scope);
     const assetIds = [...new Set([...library.media.map((item) => item.assetId), ...library.prompts.map((item) => item.exampleAssetId)].filter(Boolean))];
     const assets = [];
     for (const assetId of assetIds) {
       const asset = await getAsset(assetId);
       if (asset?.blob) assets.push({ id: assetId, dataUrl: await blobToDataUrl(asset.blob) });
     }
-    await downloadJson({ version: 1, kind: "pixel-flow-asset-library", exportedAt: new Date().toISOString(), library, assets }, `Pixel-Flow-资产库-${new Date().toISOString().slice(0, 10)}.json`);
-    notify(`资产库已存储：${library.prompts.length} 条提示词，${library.media.length} 张图片，${library.templates.length} 个模板`);
+    await downloadJson({ version: 1, kind: config.kind, scope, exportedAt: new Date().toISOString(), library, assets }, `${config.filename}-${new Date().toISOString().slice(0, 10)}.json`);
+    notify(`${config.label}已存储：${library.prompts.length} 条提示词，${library.media.length} 张图片，${library.templates.length} 个模板`);
   }
 
-  async function importAssetLibrary(file) {
+  async function importAssetLibrary(file, scope = "all") {
+    const config = libraryBackupScopes[scope];
+    if (!config) return notify("未知的资产库类型", "error");
+    notify(`正在导入${config.label}…`);
     let backup;
     try { backup = JSON.parse(await file.text()); } catch { return notify("资产库文件不是有效 JSON", "error"); }
-    if (backup?.kind !== "pixel-flow-asset-library" || backup?.version !== 1 || !backup.library) return notify("请选择 Pixel Flow 资产库备份文件", "error");
-    const local = readLibrary();
-    const incoming = backup.library;
-    const replacePrompts = incoming.promptSyncMode === "replace";
-    const previousPromptAssetIds = [...new Set(local.prompts.map((item) => item.exampleAssetId).filter(Boolean))];
-    const assetById = new Map((backup.assets || []).map((item) => [item.id, item]));
-    const importedAssetIdMap = new Map();
-    const importAssetId = async (sourceAssetId) => {
-      if (!sourceAssetId) return "";
-      if (importedAssetIdMap.has(sourceAssetId)) return importedAssetIdMap.get(sourceAssetId);
-      const assetBackup = assetById.get(sourceAssetId);
-      if (!assetBackup?.dataUrl) return "";
-      const assetId = makeId("asset");
-      await putAsset({ id: assetId, blob: dataUrlToBlob(assetBackup.dataUrl), createdAt: now() });
-      importedAssetIdMap.set(sourceAssetId, assetId);
-      return assetId;
-    };
-    const promptIdMap = new Map();
-    for (const prompt of incoming.prompts || []) {
-      const existing = local.prompts.find((item) => item.name === prompt.name);
-      const importedExampleAssetId = await importAssetId(prompt.exampleAssetId);
-      const exampleAssetId = replacePrompts ? importedExampleAssetId : importedExampleAssetId || existing?.exampleAssetId || "";
-      if (existing) { Object.assign(existing, prompt, { id: existing.id, exampleAssetId, updatedAt: now() }); promptIdMap.set(prompt.id, existing.id); }
-      else { const record = { ...prompt, id: makeId("prompt"), exampleAssetId, updatedAt: now() }; local.prompts.push(record); promptIdMap.set(prompt.id, record.id); }
+    if (backup?.kind !== config.kind || backup?.version !== 1 || !backup.library) return notify(`文件类型不匹配：请选择${config.label}备份`, "error");
+    try {
+      const local = readLibrary();
+      const incoming = scopedLibrary({ ...emptyLibrary(), ...backup.library }, scope);
+      const replacePrompts = scope === "all" && incoming.promptSyncMode === "replace";
+      const previousPromptAssetIds = [...new Set(local.prompts.map((item) => item.exampleAssetId).filter(Boolean))];
+      const assetById = new Map((backup.assets || []).map((item) => [item.id, item]));
+      const importedAssetIdMap = new Map();
+      const importAssetId = async (sourceAssetId) => {
+        if (!sourceAssetId) return "";
+        if (importedAssetIdMap.has(sourceAssetId)) return importedAssetIdMap.get(sourceAssetId);
+        const assetBackup = assetById.get(sourceAssetId);
+        if (!assetBackup?.dataUrl) return "";
+        const assetId = makeId("asset");
+        await putAsset({ id: assetId, blob: dataUrlToBlob(assetBackup.dataUrl), createdAt: now() });
+        importedAssetIdMap.set(sourceAssetId, assetId);
+        if (importedAssetIdMap.size % 10 === 0) notify(`正在导入${config.label}：已写入 ${importedAssetIdMap.size} 张图片…`);
+        return assetId;
+      };
+      const promptIdMap = new Map();
+      for (const prompt of incoming.prompts || []) {
+        const existing = local.prompts.find((item) => item.name === prompt.name);
+        const importedExampleAssetId = await importAssetId(prompt.exampleAssetId);
+        const exampleAssetId = replacePrompts ? importedExampleAssetId : importedExampleAssetId || existing?.exampleAssetId || "";
+        if (existing) { Object.assign(existing, prompt, { id: existing.id, exampleAssetId, updatedAt: now() }); promptIdMap.set(prompt.id, existing.id); }
+        else { const record = { ...prompt, id: makeId("prompt"), exampleAssetId, updatedAt: now() }; local.prompts.push(record); promptIdMap.set(prompt.id, record.id); }
+      }
+      if (replacePrompts) {
+        const incomingNames = new Set((incoming.prompts || []).map((item) => item.name));
+        local.prompts = local.prompts.filter((item) => incomingNames.has(item.name));
+        const retainedPromptIds = new Set(local.prompts.map((item) => item.id));
+        for (const template of local.templates) if (template.promptId && !retainedPromptIds.has(template.promptId)) template.promptId = "";
+      }
+      if (scope === "all") for (const kind of ["copy", "background", "composition"]) local.presets[kind] = [...new Set([...(local.presets[kind] || []), ...(incoming.presets?.[kind] || [])])];
+      const mediaIdMap = new Map();
+      for (const media of incoming.media || []) {
+        if (!['product','reference'].includes(media.kind)) continue;
+        const existing = local.media.find((item) => item.kind === media.kind && item.name === media.name);
+        const assetId = await importAssetId(media.assetId) || existing?.assetId;
+        if (existing) { Object.assign(existing, media, { id: existing.id, assetId: assetId || existing.assetId, createdAt: existing.createdAt || now() }); mediaIdMap.set(media.id, existing.id); }
+        else if (assetId) { const record = { ...media, id: makeId("media"), assetId, createdAt: now() }; local.media.push(record); mediaIdMap.set(media.id, record.id); }
+      }
+      for (const template of incoming.templates || []) {
+        const mapped = { ...template, promptId: promptIdMap.get(template.promptId) || "", productIds: (template.productIds || []).map((id) => mediaIdMap.get(id)).filter(Boolean), referenceIds: (template.referenceIds || []).map((id) => mediaIdMap.get(id)).filter(Boolean), updatedAt: now() };
+        const existing = local.templates.find((item) => item.name === template.name);
+        if (existing) Object.assign(existing, mapped, { id: existing.id });
+        else local.templates.push({ ...mapped, id: makeId("template") });
+      }
+      saveLibrary(local);
+      for (const assetId of previousPromptAssetIds) await deletePromptAssetIfUnused(assetId, local);
+      renderPanel();
+      notify(`${config.label}导入完成：${(incoming.prompts || []).length} 条提示词，${(incoming.media || []).length} 张图片，${(incoming.templates || []).length} 个模板`);
+    } catch (error) {
+      console.error("Pixel Flow library import failed", error);
+      notify(`${config.label}导入失败：${error?.message || "无法读取或写入备份"}`, "error");
     }
-    if (replacePrompts) {
-      const incomingNames = new Set((incoming.prompts || []).map((item) => item.name));
-      local.prompts = local.prompts.filter((item) => incomingNames.has(item.name));
-      const retainedPromptIds = new Set(local.prompts.map((item) => item.id));
-      for (const template of local.templates) if (template.promptId && !retainedPromptIds.has(template.promptId)) template.promptId = "";
-    }
-    for (const kind of ["copy", "background", "composition"]) local.presets[kind] = [...new Set([...(local.presets[kind] || []), ...(incoming.presets?.[kind] || [])])];
-    const mediaIdMap = new Map();
-    for (const media of incoming.media || []) {
-      const existing = local.media.find((item) => item.kind === media.kind && item.name === media.name);
-      const assetId = await importAssetId(media.assetId) || existing?.assetId;
-      if (existing) { Object.assign(existing, media, { id: existing.id, assetId: assetId || existing.assetId, createdAt: existing.createdAt || now() }); mediaIdMap.set(media.id, existing.id); }
-      else if (assetId) { const record = { ...media, id: makeId("media"), assetId, createdAt: now() }; local.media.push(record); mediaIdMap.set(media.id, record.id); }
-    }
-    for (const template of incoming.templates || []) {
-      const mapped = { ...template, promptId: promptIdMap.get(template.promptId) || "", productIds: (template.productIds || []).map((id) => mediaIdMap.get(id)).filter(Boolean), referenceIds: (template.referenceIds || []).map((id) => mediaIdMap.get(id)).filter(Boolean), updatedAt: now() };
-      const existing = local.templates.find((item) => item.name === template.name);
-      if (existing) Object.assign(existing, mapped, { id: existing.id });
-      else local.templates.push({ ...mapped, id: makeId("template") });
-    }
-    saveLibrary(local);
-    for (const assetId of previousPromptAssetIds) await deletePromptAssetIfUnused(assetId, local);
-    renderPanel();
-    notify(`资产库导入完成：${(incoming.prompts || []).length} 条提示词，${(incoming.media || []).length} 张图片，${(incoming.templates || []).length} 个模板`);
   }
 
   function currentProjectId() {
@@ -845,7 +876,7 @@
     if (activeTab === "canvas") {
       const select = document.querySelector(".project-picker select,.project select");
       const options = [...(select?.options || [])].map((option) => `<option value="${escapeHtml(option.value)}" ${option.value === select.value ? "selected" : ""}>${escapeHtml(option.textContent)}</option>`).join("");
-      content = `<section class="pf-canvas-manager"><label>当前画布<select data-action="canvas-switch">${options}</select></label><div class="pf-canvas-primary-actions"><button data-action="canvas-create">新建画布</button><button data-action="canvas-rename">重命名</button></div><div class="pf-canvas-file-actions"><button data-action="canvas-import">导入画布</button><button class="primary" data-action="canvas-export">存储当前画布</button><input type="file" accept="application/json,.json,.gptcanvas.json" data-canvas-import-file hidden></div><button class="pf-canvas-delete" data-action="canvas-delete">删除当前画布</button><p>画布会持续保存在当前浏览器中。存储文件包含节点、连线和关联图片，可在另一台设备重新导入。</p></section>`;
+      content = `<section class="pf-canvas-manager"><label>当前画布<select data-action="canvas-switch">${options}</select></label><div class="pf-canvas-primary-actions"><button data-action="canvas-create">新建画布</button><button data-action="canvas-rename">重命名</button></div><div class="pf-canvas-file-actions"><button data-action="canvas-import">导入画布</button><button class="primary" data-action="canvas-export">存储当前画布</button><input type="file" accept="application/json,.json,.gptcanvas.json" data-canvas-import-file hidden></div><button class="pf-canvas-delete" data-action="canvas-delete">删除当前画布</button><p>画布会持续保存在当前浏览器中。存储文件包含节点、连线和关联图片，可在另一台设备重新导入。</p><div class="pf-canvas-file-actions"><button data-action="legacy-asset-import">导入旧版完整资产库</button><input type="file" accept="application/json,.json" data-legacy-asset-import-file hidden></div><p>仅用于迁移旧版 <code>pixel-flow-asset-library</code> 完整备份。新备份请到各自库中分别导入。</p></section>`;
     }
     if (activeTab === "prompts") {
       content = promptList(library, query);
@@ -856,7 +887,7 @@
     const titles = { canvas: ["画布管理", "创建、整理与迁移画布"], prompts: ["提示词库", "新增、整理与删除完整提示词"], products: ["产品素材库", "导入、整理与删除产品图片"], references: ["图库", "沉淀、整理与删除视觉参考"], templates: ["模版库", "创建、整理与删除生图模板"] };
     const backupLabels = { prompts: "提示词库", products: "产品素材库", references: "图库", templates: "模版库" };
     const backupLabel = backupLabels[activeTab] || "资产库";
-    const backupActions = activeTab === "canvas" ? "" : `<div class="pf-library-backup-actions"><button data-action="asset-export">存储${backupLabel}</button><button data-action="asset-import">导入${backupLabel}</button><input type="file" accept="application/json,.json" data-asset-import-file hidden></div>`;
+    const backupActions = activeTab === "canvas" ? "" : `<div class="pf-library-backup-actions"><button data-action="asset-export" data-library-scope="${activeTab}">存储${backupLabel}</button><button data-action="asset-import" data-library-scope="${activeTab}">导入${backupLabel}</button><input type="file" accept="application/json,.json" data-asset-import-file data-library-scope="${activeTab}" hidden></div>`;
     const compactManagementTabs = ["prompts", "products", "references"];
     const compactHeaderTabs = [...compactManagementTabs, "templates"];
     const search = "";
@@ -1103,8 +1134,9 @@
       return;
     }
     if (action === "canvas-card-delete") { await deleteCanvasById(target.dataset.projectId); return; }
-    if (action === "asset-export") { await exportAssetLibrary(); return; }
-    if (action === "asset-import") { panel?.querySelector("[data-asset-import-file]")?.click(); return; }
+    if (action === "asset-export") { await exportAssetLibrary(target.dataset.libraryScope); return; }
+    if (action === "asset-import") { panel?.querySelector(`[data-asset-import-file][data-library-scope="${target.dataset.libraryScope}"]`)?.click(); return; }
+    if (action === "legacy-asset-import") { panel?.querySelector("[data-legacy-asset-import-file]")?.click(); return; }
     if (action === "edge-disconnect") { event.stopPropagation(); await disconnectEdge(target.dataset.edgeId); return; }
     if (action === "prompt-create") { await editPrompt(); return; }
     if (action === "prompt-edit") { await editPrompt(target.dataset.id); return; }
@@ -1175,7 +1207,8 @@
       return;
     }
     if (input instanceof HTMLInputElement && input.matches("[data-canvas-import-file]") && input.files?.[0]) { void importCanvas(input.files[0]); input.value = ""; return; }
-    if (input instanceof HTMLInputElement && input.matches("[data-asset-import-file]") && input.files?.[0]) { void importAssetLibrary(input.files[0]); input.value = ""; return; }
+    if (input instanceof HTMLInputElement && input.matches("[data-asset-import-file]") && input.files?.[0]) { void importAssetLibrary(input.files[0], input.dataset.libraryScope); input.value = ""; return; }
+    if (input instanceof HTMLInputElement && input.matches("[data-legacy-asset-import-file]") && input.files?.[0]) { void importAssetLibrary(input.files[0], "all"); input.value = ""; return; }
     if (input instanceof HTMLInputElement && input.dataset.importKind && input.files?.length) void importMedia([...input.files], input.dataset.importKind);
     if (input?.matches?.('[data-action="choose-tagged-prompt"]')) {
       const prompt = readLibrary().prompts.find((item) => item.id === input.value);

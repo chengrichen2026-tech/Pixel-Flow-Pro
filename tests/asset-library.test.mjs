@@ -176,6 +176,26 @@ test("canvas and asset library storage controls use complete portable backups", 
   assert.match(app, /ProjectFit/);
 });
 
+test("each library exports and imports only its matching portable backup type", async () => {
+  const source = await readFile(new URL("production/asset-library.js", root), "utf8");
+  for (const kind of ["pixel-flow-prompt-library", "pixel-flow-product-library", "pixel-flow-gallery-library", "pixel-flow-template-library"]) assert.match(source, new RegExp(kind));
+  assert.match(source, /exportAssetLibrary\(target\.dataset\.libraryScope\)/);
+  assert.match(source, /importAssetLibrary\(input\.files\[0\], input\.dataset\.libraryScope\)/);
+  assert.match(source, /data-library-scope="\$\{activeTab\}"/);
+  assert.match(source, /data-action="legacy-asset-import"/);
+  assert.match(source, /pixel-flow-asset-library/);
+});
+
+test("library imports refresh native callers and report failures", async () => {
+  const source = await readFile(new URL("production/asset-library.js", root), "utf8");
+  const nativeLibrary = await readFile(new URL("src/AssetLibrary.tsx", root), "utf8");
+  assert.match(source, /pixel-flow:library-updated/);
+  assert.match(source, /导入失败/);
+  assert.match(source, /正在导入/);
+  assert.match(nativeLibrary, /addEventListener\('pixel-flow:library-updated'/);
+  assert.match(nativeLibrary, /setLibrary\(readLibrary\(\)\)/);
+});
+
 test("libraries separate outside management from inside usage", async () => {
   const source = await readFile(new URL("production/asset-library.js", root), "utf8");
   const styles = await readFile(new URL("production/pixel-flow-theme.css", root), "utf8");
