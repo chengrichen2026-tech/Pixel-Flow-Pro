@@ -76,6 +76,17 @@ test("native node chrome matches legacy measured dimensions", async () => {
   assert.match(styles, /\.media-resize-handle\.top,\.media-resize-handle\.bottom\.left\{display:none!important\}/);
 });
 
+test("connected task images render ordered thumbnails including container items", async () => {
+  const app = await readFile(new URL("src/App.tsx", root), "utf8");
+  const styles = await readFile(new URL("src/styles.css", root), "utf8");
+  assert.match(app, /function taskInputPreviews/);
+  assert.match(app, /task\.inputEdgeOrder\.map/);
+  assert.match(app, /source\?\.kind==='image_container'/);
+  assert.match(app, /className="task-input-thumbnails"/);
+  assert.match(app, /data-container-input/);
+  assert.match(styles, /\.task-input-thumbnails img\{/);
+});
+
 test("task result edges stay animated and dashed after completion", async () => {
   const app = await readFile(new URL("src/App.tsx", root), "utf8");
   const styles = await readFile(new URL("src/styles.css", root), "utf8");
