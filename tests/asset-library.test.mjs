@@ -340,7 +340,7 @@ test("product calling cards apply by clicking the image instead of a separate bu
   assert.match(productBranch, /data-action="media-apply"/);
   assert.match(productBranch, /aria-label="从产品素材库添加/);
   assert.doesNotMatch(productBranch, /应用到画布/);
-  assert.match(styles, /\.pf-product-thumb\{display:block;width:100%/);
+  assert.match(styles, /\.pf-product-thumb\{display:block;width:100%;height:auto!important/);
   assert.match(styles, /\.pf-product-thumb:hover,\.pf-product-thumb:focus-visible/);
 });
 
