@@ -16,12 +16,14 @@ test("rebuilt nodes rely on one measured size source", async () => {
 test("deleting nodes records a recoverable graph snapshot", async () => {
   const store = await readFile(new URL("src/store.ts", root), "utf8");
   assert.match(store, /type DeletedSnapshot/);
-  assert.match(store, /undoDelete\?: DeletedSnapshot/);
+  assert.match(store, /undoDeletes: DeletedSnapshot\[\]/);
   assert.match(store, /removedEdges=p\.graph\.edges\.filter/);
   assert.match(store, /inputEdgeOrder:node\.inputEdgeOrder\.filter/);
   assert.match(store, /restoreDeleted\(\): Promise<void>/);
   assert.match(store, /snapshot\.inputOrders\[node\.id\]/);
-  assert.match(store, /undoDelete:undefined/);
+  assert.match(store, /undoDeletes:\[\.\.\.state\.undoDeletes\.filter\(item=>item\.projectId!==p\.id\),\.\.\.state\.undoDeletes\.filter\(item=>item\.projectId===p\.id\)\.slice\(-2\),snapshot\]/);
+  assert.match(store, /for\(let index=history\.length-1;index>=0;index-=1\)if\(history\[index\]\.projectId===p\.id\)/);
+  assert.match(store, /undoDeletes:history\.filter\(\(_,index\)=>index!==snapshotIndex\)/);
 });
 
 test("canvas keyboard shortcuts protect editing and restore deletion", async () => {
