@@ -1,0 +1,38 @@
+name: Pixel Flow CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  cross-platform:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - name: Parse Windows PowerShell scripts
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $errors = $null
+          Get-ChildItem api-worker/*-windows.ps1 | ForEach-Object {
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$errors) | Out-Null
+            if ($errors.Count) { $errors | Format-List; exit 1 }
+          }
+      - name: Start and verify Windows API Worker
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          npm run api-worker:start:windows
+          $health = Invoke-RestMethod http://127.0.0.1:43129/health
+          if (-not $health.ok) { throw "API Worker health check failed" }
+          npm run api-worker:uninstall:windows

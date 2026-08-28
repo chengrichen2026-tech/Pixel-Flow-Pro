@@ -1,0 +1,34 @@
+{
+  "name": "pixel-flow",
+  "private": true,
+  "version": "0.2.6",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "npm run check && npm run build:rebuild-preview && node scripts/build-extension.mjs",
+    "build:rebuild-preview": "vite build",
+    "check": "tsc --noEmit",
+    "test": "node --test tests/all.test.mjs",
+    "api-worker:install": "zsh api-worker/install.sh",
+    "api-worker:uninstall": "zsh api-worker/uninstall.sh",
+    "api-worker:start:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File api-worker/start-windows.ps1",
+    "api-worker:install:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File api-worker/install-windows.ps1",
+    "api-worker:uninstall:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File api-worker/uninstall-windows.ps1"
+  },
+  "dependencies": {
+    "@phosphor-icons/react": "^2.1.10",
+    "@xyflow/react": "^12.10.0",
+    "dexie": "^4.2.1",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "zustand": "^5.0.8"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.1.31",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^6.0.0",
+    "typescript": "^5.9.0",
+    "vite": "^8.0.0"
+  }
+}

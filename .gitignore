@@ -1,0 +1,17 @@
+node_modules/
+runtime/
+release/
+rebuild-preview/
+.DS_Store
+
+# Private/local content must never be published.
+imports/
+artifacts/
+.pixel-qa/
+说明图片/
+*.gptcanvas
+*.gptcanvas.json
+
+# Local Feishu import builders contain private Base routing metadata.
+scripts/build-feishu-product-library-import.mjs
+scripts/build-feishu-prompt-library-import.mjs

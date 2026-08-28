@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Pixel Flow｜像素流",
+  "description": "AI 创意任务画布：支持浏览器与 API Key 两种生图模式。",
+  "version": "0.2.6",
+  "permissions": ["storage", "tabs", "tabGroups", "notifications", "downloads", "clipboardWrite", "scripting", "alarms"],
+  "host_permissions": ["https://chatgpt.com/*", "https://*.oaiusercontent.com/*", "https://aihub.rbmanon.cn/*", "http://127.0.0.1:43129/*"],
+  "action": {
+    "default_title": "打开 Pixel Flow",
+    "default_icon": "icon.svg"
+  },
+  "icons": { "128": "icon.svg" },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://chatgpt.com/*"],
+      "js": ["contentScript.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

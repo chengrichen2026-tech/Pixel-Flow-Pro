@@ -1,0 +1,12 @@
+import "./api-client.test.mjs";
+import "./generation-mode.test.mjs";
+import "./asset-library.test.mjs";
+import "./api-recovery.test.mjs";
+import "./src-generation-mode.test.mjs";
+import "./src-canvas-management.test.mjs";
+import "./src-history-clipboard.test.mjs";
+import "./src-asset-library.test.mjs";
+import "./native-entry.test.mjs";
+import "./native-ui-parity.test.mjs";
+import "./task-prompt-input.test.mjs";
+import "./image-container.test.mjs";

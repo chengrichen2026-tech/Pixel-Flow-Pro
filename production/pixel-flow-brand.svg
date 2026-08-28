@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="430" height="117" viewBox="0 0 430 117" role="img" aria-label="Pixel Flow AI 创意任务画布">
+  <rect x="4" y="4" width="109" height="109" rx="30" fill="#6F3CFF"/>
+  <path d="M30 28h31c18 0 31 12 31 29S79 86 61 86H48v18H30V28zm18 17v24h12c8 0 13-5 13-12s-5-12-13-12H48z" fill="#fff"/>
+  <circle cx="96" cy="38" r="8" fill="#BDAAFF"/>
+  <circle cx="96" cy="79" r="8" fill="#fff"/>
+  <text x="142" y="66" fill="#17191D" font-family="Inter, -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif" font-size="52" font-weight="800" letter-spacing="-2">Pixel Flow</text>
+  <text x="145" y="95" fill="#717680" font-family="Inter, -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif" font-size="20" font-weight="600" letter-spacing="3">AI 创意任务画布</text>
+</svg>
