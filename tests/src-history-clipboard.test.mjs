@@ -40,6 +40,10 @@ test("canvas accepts clipboard image files at the visible center", async () => {
   assert.match(app, /event\.clipboardData\?\.files/);
   assert.match(app, /event\.clipboardData\?\.items/);
   assert.match(app, /item\.type\.startsWith\('image\/'\)/);
+  assert.match(app, /function clipboardImages/);
+  assert.match(app, /s\.hasCopied\(\)/);
+  assert.match(app, /s\.prefersCopied\(\)/);
+  assert.match(app, /window\.addEventListener\('blur',blur\)/);
   assert.match(app, /screenToFlowPosition\(\{x:window\.innerWidth\/2,y:window\.innerHeight\/2\}\)/);
 });
 
@@ -51,11 +55,15 @@ test("command copy and paste duplicates selected images and image containers", a
   ]);
   assert.match(main, /<CanvasClipboardShortcuts\/><App \/>/);
   assert.match(app, /key==='c'&&s\.copySelected\(\)/);
-  assert.match(app, /key==='v'/);
+  assert.doesNotMatch(app, /key==='v'\)\{event\.preventDefault/);
+  assert.match(app, /if\(s\.hasCopied\(\)\)\{event\.preventDefault\(\);void s\.pasteCopied\(\)\}/);
   assert.match(app, /isEditableTarget\(event\.target\)/);
   assert.match(store, /node\.kind==="image"\|\|node\.kind==="result"\|\|node\.kind==="image_container"/);
   assert.match(store, /items:node\.items\.map\(item=>\(\{\.\.\.item,id:id\("container-item"\)\}\)\)/);
   assert.match(store, /const offset=36\*canvasClipboard\.pasteCount/);
+  assert.match(store, /hasCopied\(\): boolean/);
+  assert.match(store, /hasCopied\(\)\{return Boolean\(canvasClipboard\.nodes\.length\)\}/);
+  assert.match(store, /preferExternalPaste\(\)\{canvasClipboard\.preferInternal=false\}/);
   assert.match(store, /selected:nodes\.map\(node=>node\.id\)/);
 });
 
@@ -102,7 +110,7 @@ test("uploads, drops, and pastes add every image and connect to a selected task"
   assert.match(app, /s\.addImages\(files,position,target\)/);
   assert.match(app, /async function droppedImages/);
   assert.match(app, /const localFiles = \[\.\.\.event\.dataTransfer\.files\]\.filter/);
-  assert.match(app, /onPaste=\{event=>\{const files=\[\.\.\.event\.clipboardData\.files\]/);
+  assert.match(app, /const files=clipboardImages\(event\)/);
   assert.match(store, /addImages\(files: File\[\], position: Point, targetTaskId\?: string\)/);
   assert.match(store, /const records=images\.map/);
   assert.match(store, /inputEdgeOrder:\[\.\.\.item\.inputEdgeOrder,\.\.\.edges\.map\(edge=>edge\.id\)\]/);
