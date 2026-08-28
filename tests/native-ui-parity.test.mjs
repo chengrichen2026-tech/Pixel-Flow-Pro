@@ -34,6 +34,21 @@ test("native canvas toolbar returns to the centered bottom position", async () =
   assert.match(styles, /\.toolbar button\{flex-basis:44px;width:44px;height:44px\}/);
 });
 
+test("canvas exposes a centered quick switcher with search and management actions", async () => {
+  const app = await readFile(new URL("src/App.tsx", root), "utf8");
+  const styles = await readFile(new URL("src/styles.css", root), "utf8");
+  assert.match(app, /function CanvasSwitcher/);
+  assert.match(app, /aria-haspopup="listbox"/);
+  assert.match(app, /projects\.length>6&&<input autoFocus aria-label="搜索画布"/);
+  assert.match(app, /role="option" aria-selected=/);
+  assert.match(app, /＋ 新建画布/);
+  assert.match(app, /管理全部画布/);
+  assert.match(app, /onOpen=\{id=>void s\.openProject\(id\)\}/);
+  assert.match(app, /pixel-flow:open-canvas-management/);
+  assert.match(styles, /\.canvas-switcher\{position:fixed;top:14px;left:calc\(60px \+ \(100vw - 60px\)\/2\)/);
+  assert.match(styles, /body\.pf-library-expanded \.canvas-switcher\{left:calc\(296px \+ \(100vw - 296px\)\/2\)\}/);
+});
+
 test("management workspace does not stack over the calling sidebar", async () => {
   const panel = await readFile(new URL("src/AssetLibrary.tsx", root), "utf8");
   const source = await readFile(new URL("production/asset-library.js", root), "utf8");
