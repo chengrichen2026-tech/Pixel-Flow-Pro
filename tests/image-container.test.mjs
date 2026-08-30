@@ -15,11 +15,34 @@ test("image containers are native canvas nodes and fan out into hidden independe
   assert.match(app, /image-container-card/);
 });
 
-test("container children share the global five-slot scheduler and aggregate writeback on the parent", async () => {
+test("container children keep five slots and stagger up to five GPT-web launches", async () => {
   const background = await source("public/background.js");
   assert.match(background, /var MAX_CONCURRENCY = 5/);
+  assert.match(background, /var MAX_BROWSER_CONCURRENCY = 5/);
+  assert.match(background, /var BROWSER_LAUNCH_GAP_MS = 6e3/);
+  assert.match(background, /BROWSER_LAUNCH_GAP_MS - \(Date\.now\(\) - lastBrowserLaunchAt\)/);
+  assert.match(background, /async function advanceQueueByMode\(\)/);
+  assert.match(background, /mode === "browser" && browserRunning >= MAX_BROWSER_CONCURRENCY/);
   assert.match(background, /function updateBatchParent\(/);
   assert.match(background, /task\.batchParentTaskId \? findTask\(graph, task\.batchParentTaskId\)/);
+});
+
+test("failed batch items expose their details and can be retried without rerunning completed items", async () => {
+  const [store, app] = await Promise.all([source("src/store.ts"), source("src/App.tsx")]);
+  assert.match(store, /async retryFailedBatch\(taskId\)/);
+  assert.match(store, /item\.status==="failed"\|\|item\.status==="manual_action"/);
+  assert.match(app, /task-batch-errors/);
+  assert.match(app, /只重试失败项/);
+});
+
+test("duplicated tasks retain ordered image inputs and are placed without overlap", async () => {
+  const store = await source("src/store.ts");
+  assert.match(store, /const incoming=p\.graph\.edges\.filter\(edge=>edge\.target===source\.id&&edge\.kind!=="output"\)/);
+  assert.match(store, /copiedEdges=ordered\.map\(edge=>\(\{\.\.\.edge,id:id\("edge"\),target:copyId\}\)\)/);
+  assert.match(store, /inputEdgeOrder:copiedEdges\.map\(edge=>edge\.id\)/);
+  assert.match(store, /source\.position\.y\+360/);
+  assert.match(store, /while\(p\.graph\.nodes\.some\(node=>!\(\("hidden" in node\)&&node\.hidden\)/);
+  assert.doesNotMatch(store, /position:\{x:source\.position\.x\+36,y:source\.position\.y\+36\}/);
 });
 
 test("running a container batch keeps shared images outside the container visible", async () => {
@@ -36,15 +59,26 @@ test("every container child sends both its container image and outside shared in
   assert.doesNotMatch(store, /inputEdgeOrder:\[\.\.\.sharedEdges\.map\(edge=>edge\.id\),edge\.id\]/);
 });
 
-test("batch results are laid out side by side and expose a download control", async () => {
+test("standalone canvas images keep download controls while container items omit them", async () => {
   const [background, app, styles, icons] = await Promise.all([
     source("public/background.js"), source("src/App.tsx"), source("src/styles.css"), source("src/icons.tsx"),
   ]);
   assert.match(background, /x: owner\.position\.x \+ 560 \+ existingResults \* 360, y: owner\.position\.y/);
   assert.match(app, /className="result-download nodrag"/);
-  assert.match(app, /chrome\.downloads\.download\(\{url:data\.url,filename,saveAs:false\}\)/);
-  assert.match(styles, /\.result-download\{position:absolute;top:8px;right:8px/);
+  assert.doesNotMatch(app, /container-image-download/);
+  assert.doesNotMatch(app, /node\.kind==='result'&&data\.url&&<button className="result-download/);
+  assert.match(styles, /\.result-download\{position:absolute;top:8px;right:8px;[\s\S]*?opacity:\.8/);
   assert.match(icons, /download: DownloadSimple/);
+});
+
+test("container images can be selected and dragged out without moving the container", async () => {
+  const [app, styles] = await Promise.all([source("src/App.tsx"), source("src/styles.css")]);
+  assert.match(app, /className={`container-item nodrag nopan /);
+  assert.match(app, /setSelectedItemId\(item\.id\)/);
+  assert.match(app, /application\/x-pixel-flow-container-item/);
+  assert.match(app, /点击选中，拖到画布空白处移出容器/);
+  assert.match(styles, /\.container-item\.is-selected/);
+  assert.match(styles, /\.container-item-remove\{position:absolute;top:5px;right:5px;bottom:auto/);
 });
 
 test("generated image titles are numbered without a duplicated generic label", async () => {
@@ -71,4 +105,6 @@ test("selected image containers receive clicked product and gallery assets", asy
   assert.match(legacyLibrary, /function selectedImageContainerId\(\)/);
   assert.match(legacyLibrary, /已将素材放入选中的图片容器/);
   assert.match(app, /selectedNodeIds\?:string\[\]/);
+  assert.match(app, /pixel-flow:canvas-selection-changed/);
+  assert.match(app, /selectedNodeIds:\[\.\.\.s\.selected\]/);
 });

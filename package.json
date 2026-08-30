@@ -1,7 +1,7 @@
 {
   "name": "pixel-flow",
   "private": true,
-  "version": "0.2.6",
+  "version": "0.2.7",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,6 +11,11 @@
     "test": "node --test tests/all.test.mjs",
     "api-worker:install": "zsh api-worker/install.sh",
     "api-worker:uninstall": "zsh api-worker/uninstall.sh",
+    "bridge:start": "node tools/pixel-flow-bridge/daemon.mjs",
+    "bridge:install": "zsh scripts/pixel-flow-bridge-launchd.sh install",
+    "bridge:status": "zsh scripts/pixel-flow-bridge-launchd.sh status",
+    "bridge:uninstall": "zsh scripts/pixel-flow-bridge-launchd.sh uninstall",
+    "mcp:start": "node tools/pixel-flow-mcp/server.mjs",
     "api-worker:start:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File api-worker/start-windows.ps1",
     "api-worker:install:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File api-worker/install-windows.ps1",
     "api-worker:uninstall:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File api-worker/uninstall-windows.ps1"
@@ -21,6 +26,7 @@
     "dexie": "^4.2.1",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "ws": "^8.21.3",
     "zustand": "^5.0.8"
   },
   "devDependencies": {

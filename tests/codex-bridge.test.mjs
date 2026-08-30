@@ -1,0 +1,5 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+const root=new URL("../",import.meta.url);
+test("Pixel Flow exposes a local Bridge and structured Codex commands",async()=>{const[bridge,mcp,client,manifest,config]=await Promise.all([readFile(new URL("tools/pixel-flow-bridge/daemon.mjs",root),"utf8"),readFile(new URL("tools/pixel-flow-mcp/server.mjs",root),"utf8"),readFile(new URL("src/codex-bridge.tsx",root),"utf8"),readFile(new URL("public/manifest.json",root),"utf8"),readFile(new URL("package.json",root),"utf8")]);assert.match(bridge,/127\.0\.0\.1/);assert.match(bridge,/requestId and action are required/);assert.match(mcp,/pixel_flow_get_state/);assert.match(mcp,/pixel_flow_create_canvas/);assert.match(mcp,/pixel_flow_create_task/);assert.match(mcp,/pixel_flow_run_task/);assert.match(mcp,/pixel_flow_download_image/);assert.match(client,/canvas\.create/);assert.match(client,/task\.create/);assert.match(client,/task\.run/);assert.match(client,/history\.undo/);assert.match(client,/getImage/);assert.match(manifest,/43128/);assert.match(config,/bridge:install/)});

@@ -1,13 +1,13 @@
 import type { ComponentType, ImgHTMLAttributes } from "react";
 import {
-  ArrowSquareOut, Copy, DownloadSimple, FloppyDisk, PencilSimple, Play, Plus, Trash, type IconProps,
+  ArrowSquareOut, CaretDown, Copy, DownloadSimple, FloppyDisk, GearSix, PencilSimple, Play, Plus, Trash, type IconProps,
 } from "@phosphor-icons/react";
 
 export type PixelIconName =
   | "select" | "image" | "text" | "task" | "template"
   | "prompt" | "product" | "reference" | "api" | "memory"
   | "templateTask" | "imageContainer"
-  | "copy" | "open" | "trash" | "play" | "save" | "plus" | "edit" | "download";
+  | "copy" | "open" | "trash" | "play" | "save" | "plus" | "edit" | "download" | "settings" | "caretDown";
 
 const artwork: Partial<Record<PixelIconName, string>> = {
   select: "select.png", image: "image.png", text: "text.png", task: "task.png",
@@ -17,7 +17,7 @@ const artwork: Partial<Record<PixelIconName, string>> = {
 
 const utilities: Partial<Record<PixelIconName, ComponentType<IconProps>>> = {
   copy: Copy, open: ArrowSquareOut, trash: Trash, play: Play,
-  save: FloppyDisk, plus: Plus, edit: PencilSimple, download: DownloadSimple,
+  save: FloppyDisk, plus: Plus, edit: PencilSimple, download: DownloadSimple, settings: GearSix, caretDown: CaretDown,
 };
 
 export function PixelIcon({name, className = "", ...props}: {name: PixelIconName} & IconProps) {

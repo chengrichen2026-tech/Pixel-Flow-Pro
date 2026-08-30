@@ -140,13 +140,14 @@ test("browser results preserve the original latest-assistant-turn writeback path
   assert.doesNotMatch(source, /existingImageSources/);
   assert.doesNotMatch(source, /collectGeneratedImageSources/);
   assert.match(source, /isTransientResponseText\(responseText\) \? "" : responseText/);
+  assert.match(source, /\(\?:\\d\+\\s\*\(\?:s\|m\|h/);
 });
 
 test("reinjected ChatGPT adapter replaces a stale page listener after extension reload", async () => {
   const content = await readFile(new URL("public/contentScript.js", root), "utf8");
   const background = await readFile(new URL("public/background.js", root), "utf8");
-  assert.match(content, /CHATGPT_ADAPTER_VERSION = 23/);
-  assert.match(background, /CHATGPT_ADAPTER_VERSION = 23/);
+  assert.match(content, /CHATGPT_ADAPTER_VERSION = 24/);
+  assert.match(background, /CHATGPT_ADAPTER_VERSION = 24/);
   assert.match(content, /__gptNodeCanvasMessageListener/);
   assert.match(content, /removeListener\(previousMessageListener\)/);
   assert.match(content, /addListener\(currentMessageListener\)/);
@@ -162,9 +163,15 @@ test("browser results are recovered by a service-worker alarm without opening th
   assert.match(background, /async function reconcileBrowserTaskResults\(\)/);
   assert.match(background, /type: "RESUME_CHATGPT_RESULT"/);
   assert.match(background, /alarm\.name === BROWSER_RESULT_RECOVERY_ALARM/);
-  assert.match(background, /Date\.now\(\) - \(message\.startedAt \?\? 0\) > 6e4/);
+  assert.match(background, /message\.phase !== "submitted" \|\| adapterState\?\.submitActive/);
+  assert.match(background, /const concreteUrl = concreteChatGptConversationUrl\(mapped\.conversationUrl\)/);
+  assert.match(background, /Date\.now\(\) - \(message\.submittedAt \?\? message\.startedAt \?\? 0\) > 12e4/);
   assert.match(background, /await chrome\.tabs\.reload\(mapped\.tabId\)/);
   assert.match(content, /__gptNodeCanvasActiveResumeTasks/);
+  assert.match(content, /__gptNodeCanvasActiveSubmitTasks/);
+  assert.match(content, /activeSubmitTasks\.has\(resumeKey\)/);
+  assert.match(content, /taskPhases\.set\(taskKey, "preparing_tab"\)/);
+  assert.match(content, /await input\.onPhase\?\.\("submitted"\)/);
   assert.match(content, /signalBackgroundPageActivity\(\)/);
   assert.match(content, /activeResumeTasks\.has\(resumeKey\)/);
 });
@@ -212,7 +219,7 @@ test("ChatGPT upload selects the file input belonging to the active composer", a
 test("browser tasks keep reference upload and prompt submission in one adapter transaction", async () => {
   const background = await readFile(new URL("public/background.js", root), "utf8");
   const executeTask = background.slice(background.indexOf("async function executeTask"), background.indexOf("async function startWaitingTasks"));
-  assert.match(executeTask, /prompt: appendAspectRatioPrompt[\s\S]*?images,[\s\S]*?startedAt: Date\.now\(\)\s*\n\s*};/);
+  assert.match(executeTask, /prompt: appendAspectRatioPrompt[\s\S]*?images,[\s\S]*?startedAt: Date\.now\(\),[\s\S]*?phase: "preparing_tab"\s*\n\s*};/);
   assert.doesNotMatch(executeTask, /world: "MAIN"/);
   assert.doesNotMatch(executeTask, /images: \[\]/);
 });

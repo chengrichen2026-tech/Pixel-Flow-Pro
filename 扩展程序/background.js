@@ -6228,6 +6228,8 @@ var require_dexie = __commonJS({
 
 // src/domain/queue.ts
 var MAX_CONCURRENCY = 5;
+var MAX_BROWSER_CONCURRENCY = 5;
+var BROWSER_LAUNCH_GAP_MS = 6e3;
 function emptyQueue() {
   return { waiting: [], running: [], completed: [], failed: {} };
 }
@@ -6270,31 +6272,31 @@ function enqueue(queue2, taskIds) {
       delete failed[taskId];
     }
   }
-  return advance({ ...queue2, waiting, completed, failed });
+  return { ...queue2, waiting, completed, failed };
 }
 function complete(queue2, taskId) {
   if (!queue2.running.includes(taskId)) return queue2;
-  return advance({
+  return {
     ...queue2,
     running: queue2.running.filter((id) => id !== taskId),
     completed: [...queue2.completed, taskId]
-  });
+  };
 }
 function fail(queue2, taskId, reason) {
   if (!queue2.running.includes(taskId)) return queue2;
-  return advance({
+  return {
     ...queue2,
     running: queue2.running.filter((id) => id !== taskId),
     failed: { ...queue2.failed, [taskId]: reason }
-  });
+  };
 }
 function cancelTask(queue2, taskId) {
   if (!queue2.waiting.includes(taskId) && !queue2.running.includes(taskId)) return queue2;
-  return advance({
+  return {
     ...queue2,
     waiting: queue2.waiting.filter((id) => id !== taskId),
     running: queue2.running.filter((id) => id !== taskId)
-  });
+  };
 }
 
 // src/domain/graph.ts
@@ -6509,7 +6511,7 @@ async function applyTaskMessage(project, message, saveAsset) {
 }
 
 // src/shared/protocol.ts
-var CHATGPT_ADAPTER_VERSION = 23;
+var CHATGPT_ADAPTER_VERSION = 24;
 var taskTypes = /* @__PURE__ */ new Set([
   "RUN_TASK",
   "CANCEL_TASK",
@@ -6864,13 +6866,14 @@ function isCurrentAdapter(value) {
 }
 async function probeAdapter(tabs, tabId, message) {
   try {
-    return isCurrentAdapter(await tabs.sendMessage(tabId, {
+    const state = await tabs.sendMessage(tabId, {
       type: "CHECK_CHATGPT_ADAPTER",
       projectId: message.projectId,
       taskId: message.taskId
-    }));
+    });
+    return isCurrentAdapter(state) ? state : void 0;
   } catch {
-    return false;
+    return void 0;
   }
 }
 async function sendWithCurrentChatGptAdapter(tabs, scripting, tabId, message) {
@@ -6899,6 +6902,7 @@ var pendingScopes = /* @__PURE__ */ new Map();
 var browserTaskMessages = /* @__PURE__ */ new Map();
 var resumedBrowserUrls = /* @__PURE__ */ new Map();
 var browserRecoveryReloadedAt = /* @__PURE__ */ new Map();
+var lastBrowserLaunchAt = 0;
 var schedulerReady = chrome.storage.session.get(["schedulerState", "activeTaskTabs", "browserTaskMessages"]).then(async ({ schedulerState, activeTaskTabs, browserTaskMessages: storedBrowserTaskMessages }) => {
   const restored = restoreQueueSnapshot(schedulerState);
   queue = restored.queue;
@@ -7018,12 +7022,17 @@ async function reconcileBrowserTaskResults() {
     if (!queue.running.includes(key)) continue;
     try {
       const mapped = await tabRegistry.ensure(key, message.expectedConversationUrl);
-      if (!await probeAdapter(chrome.tabs, mapped.tabId, message)) {
+      let adapterState = await probeAdapter(chrome.tabs, mapped.tabId, message);
+      if (!adapterState) {
         await chrome.scripting.executeScript({ target: { tabId: mapped.tabId }, files: ["contentScript.js"] });
+        adapterState = await probeAdapter(chrome.tabs, mapped.tabId, message);
       }
+      if (message.phase !== "submitted" || adapterState?.submitActive) continue;
+      const concreteUrl = concreteChatGptConversationUrl(mapped.conversationUrl);
+      if (!concreteUrl) continue;
       await chrome.tabs.sendMessage(mapped.tabId, { ...message, type: "RESUME_CHATGPT_RESULT", images: [] });
       const lastReloadedAt = browserRecoveryReloadedAt.get(key) ?? 0;
-      if (Date.now() - (message.startedAt ?? 0) > 6e4 && Date.now() - lastReloadedAt > 9e4) {
+      if (Date.now() - (message.submittedAt ?? message.startedAt ?? 0) > 12e4 && Date.now() - lastReloadedAt > 9e4) {
         browserRecoveryReloadedAt.set(key, Date.now());
         await chrome.tabs.reload(mapped.tabId);
       }
@@ -7169,13 +7178,13 @@ async function executeTask(projectId, taskId) {
       expectedConversationUrl: task.conversationUrl,
       prompt: appendAspectRatioPrompt([...text, task.prompt].filter(Boolean).join("\n\n"), task.aspectRatio ?? "auto"),
       images,
-      startedAt: Date.now()
+      startedAt: Date.now(),
+      phase: "preparing_tab"
     };
     browserTaskMessages.set(key, recoveryMessage(message));
     await saveBrowserTaskMessages();
     scheduleBrowserResultRecoveryAlarm();
     await sendWithCurrentChatGptAdapter(chrome.tabs, chrome.scripting, mapped.tabId, message);
-    await persistAndBroadcast({ type: "TASK_STATUS", projectId, taskId, status: "generating" });
   } catch (error) {
     const reason = error instanceof ConversationUnavailableError ? "conversation_unavailable" : "selector_missing";
     const handled = await updateScheduler(async () => {
@@ -7205,15 +7214,53 @@ async function startWaitingTasks() {
     if (active.has(key)) continue;
     const scope = pendingScopes.get(key);
     if (!scope) continue;
+    if (await taskGenerationMode(key) === "browser") {
+      const waitMs = Math.max(0, BROWSER_LAUNCH_GAP_MS - (Date.now() - lastBrowserLaunchAt));
+      if (waitMs) await new Promise((resolve) => setTimeout(resolve, waitMs));
+      lastBrowserLaunchAt = Date.now();
+    }
     active.set(key, scope.projectId);
     void executeTask(scope.projectId, scope.taskId);
   }
   await chrome.storage.session.set({ activeTaskScopes: [...active] });
 }
+async function taskGenerationMode(key) {
+  const scope = pendingScopes.get(key) ?? parseTaskScopeKey(key);
+  if (!scope) return "browser";
+  const project = await projectRepository.loadProject(scope.projectId);
+  const task = project?.graph.nodes.find((node) => node.id === scope.taskId && node.kind === "task");
+  return task?.generationMode === "api" ? "api" : "browser";
+}
+async function advanceQueueByMode() {
+  let slots = Math.max(0, MAX_CONCURRENCY - queue.running.length);
+  if (!slots || !queue.waiting.length) return;
+  let browserRunning = 0;
+  for (const key of queue.running) {
+    if (await taskGenerationMode(key) === "browser") browserRunning += 1;
+  }
+  const promoted = [];
+  const waiting = [];
+  for (const key of queue.waiting) {
+    if (!slots) {
+      waiting.push(key);
+      continue;
+    }
+    const mode = await taskGenerationMode(key);
+    if (mode === "browser" && browserRunning >= MAX_BROWSER_CONCURRENCY) {
+      waiting.push(key);
+      continue;
+    }
+    promoted.push(key);
+    slots -= 1;
+    if (mode === "browser") browserRunning += 1;
+  }
+  queue = { ...queue, running: [...queue.running, ...promoted], waiting };
+}
 async function updateScheduler(work) {
   return schedulerWrites.run("scheduler", async () => {
     await schedulerReady;
     const result = await work();
+    await advanceQueueByMode();
     await saveScheduler();
     await startWaitingTasks();
     return result;
@@ -7334,6 +7381,18 @@ async function handlePageTaskMessage(message, senderTab) {
   }
   const handled = await updateScheduler(async () => {
     if (!queue.running.includes(key)) return false;
+    if (message.type === "TASK_STATUS") {
+      const pendingMessage = browserTaskMessages.get(key);
+      if (pendingMessage) {
+        const phase = message.status === "generating" ? "submitted" : message.status;
+        browserTaskMessages.set(key, {
+          ...pendingMessage,
+          phase,
+          submittedAt: phase === "submitted" ? pendingMessage.submittedAt ?? Date.now() : pendingMessage.submittedAt
+        });
+        await saveBrowserTaskMessages();
+      }
+    }
     await persistAndBroadcast({ ...message, conversationUrl });
     if (message.type === "TASK_RESULT") {
       queue = complete(queue, key);
@@ -7383,7 +7442,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
       });
       return;
     }
-    if (!/^https:\/\/chatgpt\.com\/c\/[^/]+\/?$/.test(observedUrl)) return;
+    if (!/^https:\/\/chatgpt\.com\/c\/[^/]+\/?$/.test(observedUrl) || message.phase !== "submitted") return;
     resumedBrowserUrls.set(key, observedUrl);
     if (!await probeAdapter(chrome.tabs, tabId, message)) {
       await chrome.scripting.executeScript({ target: { tabId }, files: ["contentScript.js"] });

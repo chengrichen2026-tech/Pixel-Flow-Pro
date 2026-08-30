@@ -7,7 +7,7 @@
 - `DELETE /jobs/:id`：清理已完成的本地任务结果。
 - `GET /health`：健康检查。
 
-API Key 只保留在运行中的 Node.js 进程内，不写入 `runtime/api-jobs`。任务状态和结果原子写入该目录，供扩展重载后继续读取。
+API Key 只保留在运行中的 Node.js 进程内，不写入 `runtime/api-jobs`。任务状态和结果原子写入该目录，供扩展重载后继续读取。Worker 会在每次原子写入前重建这个可丢弃目录，避免运行期清理导致 `ENOENT`。
 
 ## macOS
 

@@ -1,17 +1,15 @@
 # Pixel Flow
 
-> Public source release. Canvas data, gallery assets, prompt-library content,
-> API keys, runtime logs, import packages, and QA screenshots are intentionally
-> excluded. User content stays in the browser's local storage unless explicitly
-> exported by the user.
-
 Pixel Flow 是一个基于 Chrome Manifest V3 的 AI 创意任务画布，通过节点组织图片、文字、生成任务和结果。它兼容两种生图方式：浏览器模式复用已登录的 ChatGPT 网页账号；API Key 模式通过本机 Pixel Flow API Worker 调用已配置的图片接口。每张任务卡都可以独立选择模式。
 
-## 当前版本与关键交互（v0.2.6）
+## 当前版本与关键交互（v0.2.7）
 
 - 图片容器：选中一张或多张画布图片后新建“图片容器”，容器连接到任务后会逐张执行；容器外连接到同一任务的图片会作为每个子任务的共享参考图一并发送。
 - 批量结果：同一任务的结果图从任务右侧开始横向并排，间距 40px；每张生成图右上角有下载按钮，可直接保存到本机。
 - 图片复制：画布中选中普通图片、生成结果或图片容器后，可使用 `Command/Ctrl+C` 和 `Command/Ctrl+V` 复制／粘贴。多选会整体复制，连续粘贴每次向右下偏移 36px；生成结果的副本会成为普通图片，不继承旧任务连线。
+- 生图任务复制：选中任务后可用 `Command/Ctrl+C` 和 `Command/Ctrl+V`，也可点击卡片“复制任务”。副本保留提示词、比例、模式和输入连线，运行状态重置；复制后可用 `Command/Ctrl+Z` 撤销。
+- 统一撤销：`Command/Ctrl+Z` 已覆盖删除节点、节点移动、新增任务和复制任务，各画布历史相互隔离。
+- Codex 结构化命令：可通过只监听本机的 Bridge 和 `pixel-flow` MCP 读取画布、新建/执行任务、撤销及下载图片，详见 [COMMAND_API.md](COMMAND_API.md)。
 - 系统剪贴板：单选普通图片或生成结果后按 `Command/Ctrl+C`，会同时写入系统剪贴板，可直接粘贴到聊天工具。当前 macOS 系统剪贴板与部分聊天工具不能可靠接收容器的多张独立图片；容器内图片的画布内复制可用，但“容器 → 聊天工具多附件粘贴”仍是待解决限制。
 - 底部“生图模版”按钮：当前仅显示“功能还没想好，开发中！”，不会新增模板或任务节点。
 
@@ -27,6 +25,8 @@ Pixel Flow 是一个基于 Chrome Manifest V3 的 AI 创意任务画布，通过
 - MVP 的提示词、预设和模板元数据保存在扩展自己的本地存储；产品图和参考图复用现有 `assets` 表。当前不包含团队共享、云同步、标签或自动去重。
 
 ## 开发
+
+Codex 结构化命令见 [COMMAND_API.md](COMMAND_API.md)。安装本机 Bridge 后，Codex 可直接读取画布、新建/执行生图任务、撤销和下载图片。
 
 ```bash
 npm install
@@ -75,7 +75,7 @@ npm run build
 ## Windows 支持
 
 - 支持 Chrome 和 Edge 的未打包扩展加载。
-- `Ctrl+V` 粘贴图片或最近复制的画布图片／容器；`Ctrl+Z` 可连续撤销最近 3 次删除操作。
+- `Ctrl+C / Ctrl+V` 可复制粘贴画布图片、图片容器和生图任务；任务副本保留提示词、模式、比例和输入连线，但会重置运行状态。`Ctrl+Z` 撤销当前画布的最近动作。
 - 选中普通图片、生成结果或图片容器后按 `Ctrl+C`：复制画布节点；单选图片或结果还会复制真实图片到系统剪贴板。
 - `Backspace` 或 `Delete` 删除已选模块；输入框内的退格编辑不受影响。
 - 浏览器生图无需安装本地 Worker。

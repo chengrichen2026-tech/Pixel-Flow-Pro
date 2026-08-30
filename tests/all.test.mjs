@@ -10,3 +10,4 @@ import "./native-entry.test.mjs";
 import "./native-ui-parity.test.mjs";
 import "./task-prompt-input.test.mjs";
 import "./image-container.test.mjs";
+import "./codex-bridge.test.mjs";

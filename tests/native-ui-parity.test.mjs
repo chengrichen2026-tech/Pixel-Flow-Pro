@@ -37,15 +37,29 @@ test("native canvas toolbar returns to the centered bottom position", async () =
 test("canvas exposes a centered quick switcher with search and management actions", async () => {
   const app = await readFile(new URL("src/App.tsx", root), "utf8");
   const styles = await readFile(new URL("src/styles.css", root), "utf8");
+  const switcherStyles = await readFile(new URL("src/canvas-switcher.css", root), "utf8");
   assert.match(app, /function CanvasSwitcher/);
   assert.match(app, /aria-haspopup="listbox"/);
+  assert.match(app, /className="canvas-switcher__status"/);
+  assert.match(app, /name="caretDown" className="canvas-switcher__caret"/);
+  assert.match(app, /<header>切换画布<\/header>/);
   assert.match(app, /projects\.length>6&&<input autoFocus aria-label="搜索画布"/);
   assert.match(app, /role="option" aria-selected=/);
-  assert.match(app, /＋ 新建画布/);
-  assert.match(app, /管理全部画布/);
+  assert.match(app, /className="canvas-switcher__edit"/);
+  assert.match(app, /aria-label={`重命名画布 \$\{project\.name\}`}/);
+  assert.match(app, /onRename:\(id:string,name:string\)=>Promise<void>/);
+  assert.match(switcherStyles, /\.canvas-switcher__item:hover \.canvas-switcher__edit/);
+  assert.match(switcherStyles, /\.canvas-switcher__item\[aria-selected="true"\] \.canvas-switcher__edit/);
+  assert.match(app, /<PixelIcon name="plus"\/>新建/);
+  assert.match(app, /<PixelIcon name="settings"\/>管理/);
   assert.match(app, /onOpen=\{id=>void s\.openProject\(id\)\}/);
   assert.match(app, /pixel-flow:open-canvas-management/);
   assert.match(styles, /\.canvas-switcher\{position:fixed;top:14px;left:calc\(60px \+ \(100vw - 60px\)\/2\)/);
+  assert.match(switcherStyles, /\.canvas-switcher__trigger \{[\s\S]*?height: 40px;[\s\S]*?border-radius: 999px/);
+  assert.match(switcherStyles, /background: rgba\(252,253,255,\.98\)/);
+  assert.match(switcherStyles, /\.canvas-switcher__list:before/);
+  assert.match(switcherStyles, /\.canvas-switcher__menu footer button \{[\s\S]*?justify-content: center;[\s\S]*?gap: 8px;[\s\S]*?color: #202328/);
+  assert.match(switcherStyles, /footer button:first-child \{[\s\S]*?color: #202328/);
   assert.match(styles, /body\.pf-library-expanded \.canvas-switcher\{left:calc\(296px \+ \(100vw - 296px\)\/2\)\}/);
 });
 
@@ -119,6 +133,7 @@ test("task result edges stay animated and dashed after completion", async () => 
   assert.match(styles, /\.react-flow__edge\.task-result-edge \.react-flow__edge-path\{stroke-dasharray:7 5!important;animation:task-result-dash/);
   assert.match(styles, /\.react-flow__node \.node-handle,.react-flow__node \.react-flow__handle\{z-index:30!important;pointer-events:all!important\}/);
   assert.match(styles, /\.run-button \.pf-utility-icon\{color:#fff!important\}/);
+  assert.match(styles, /\.toolbar button:hover\{color:#fff;border-color:var\(--accent\);background:var\(--accent\)\}/);
   assert.match(styles, /\.toolbar button:hover \.pf-art-icon,.native-library-rail button:hover \.pf-art-icon\{filter:brightness\(0\) invert\(1\)\}/);
   assert.match(styles, /\.toolbar button:hover \.pf-utility-icon,.native-library-rail button:hover \.pf-utility-icon\{color:#fff!important\}/);
   assert.match(app, /<option value="browser">GPT-web<\/option>/);

@@ -1,0 +1,77 @@
+.memory-release-toast {
+  position: fixed;
+  left: 72px;
+  bottom: 18px;
+  z-index: 120;
+  min-width: 230px;
+  max-width: 340px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 12px 14px;
+  color: #34383f;
+  background: rgba(252,253,255,.98);
+  border: 1px solid #dfe2e7;
+  border-radius: 13px;
+  box-shadow: 0 16px 42px rgba(31,37,46,.18);
+  backdrop-filter: blur(12px);
+  animation: memory-toast-in .16s ease-out;
+}
+
+.memory-release-toast strong {
+  font-size: 12px;
+  font-weight: 720;
+}
+
+.memory-release-toast small {
+  grid-column: 2;
+  color: #7b818b;
+  font-size: 10px;
+}
+
+.memory-release-toast[data-kind="success"] {
+  border-color: #bee1cd;
+}
+
+.memory-release-toast[data-kind="error"] {
+  color: #9f3832;
+  border-color: #f3c9c3;
+  background: #fff7f5;
+}
+
+.memory-release-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #ddd5ff;
+  border-top-color: #6f3cff;
+  border-radius: 50%;
+  animation: memory-spin .75s linear infinite;
+}
+
+.native-library-rail button.is-memory-busy {
+  color: #fff;
+  background: #6f3cff;
+  cursor: wait;
+}
+
+.native-library-rail button.is-memory-busy .pf-art-icon {
+  filter: brightness(0) invert(1);
+}
+
+@keyframes memory-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes memory-toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media(max-width:760px) {
+  .memory-release-toast {
+    right: 16px;
+    left: 72px;
+    min-width: 0;
+  }
+}

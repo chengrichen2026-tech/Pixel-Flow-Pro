@@ -13,17 +13,23 @@ test("rebuilt nodes rely on one measured size source", async () => {
   assert.match(app, /previous\?\.measured/);
 });
 
-test("deleting nodes records a recoverable graph snapshot", async () => {
+test("canvas actions share one per-project graph history", async () => {
   const store = await readFile(new URL("src/store.ts", root), "utf8");
-  assert.match(store, /type DeletedSnapshot/);
-  assert.match(store, /undoDeletes: DeletedSnapshot\[\]/);
+  assert.match(store, /type HistorySnapshot/);
+  assert.match(store, /undoHistory: HistorySnapshot\[\]/);
+  assert.match(store, /graph:structuredClone\(project\.graph\)/);
+  assert.match(store, /slice\(-49\)/);
   assert.match(store, /removedEdges=p\.graph\.edges\.filter/);
   assert.match(store, /inputEdgeOrder:node\.inputEdgeOrder\.filter/);
   assert.match(store, /restoreDeleted\(\): Promise<void>/);
-  assert.match(store, /snapshot\.inputOrders\[node\.id\]/);
-  assert.match(store, /undoDeletes:\[\.\.\.state\.undoDeletes\.filter\(item=>item\.projectId!==p\.id\),\.\.\.state\.undoDeletes\.filter\(item=>item\.projectId===p\.id\)\.slice\(-2\),snapshot\]/);
+  assert.match(store, /graph:structuredClone\(snapshot\.graph\)/);
+  assert.match(store, /undoHistory:pushHistory\(state\.undoHistory,before\)/);
   assert.match(store, /for\(let index=history\.length-1;index>=0;index-=1\)if\(history\[index\]\.projectId===p\.id\)/);
-  assert.match(store, /undoDeletes:history\.filter\(\(_,index\)=>index!==snapshotIndex\)/);
+  assert.match(store, /undoHistory:history\.filter\(\(_,index\)=>index!==snapshotIndex\)/);
+  assert.match(store, /async addTask\(position,sourceNodeIds=\[\]\)\{const p=get\(\)\.project;if\(!p\)return;const before=historyEntry/);
+  assert.match(store, /async moveNode\(nodeId,position\).*const before=historyEntry/s);
+  assert.match(store, /async duplicateTask\(taskId\).*const before=historyEntry/s);
+  assert.match(store, /selected:\[copy\.id\],undoHistory:pushHistory\(state\.undoHistory,before\)/);
 });
 
 test("canvas keyboard shortcuts protect editing and restore deletion", async () => {
@@ -49,7 +55,7 @@ test("canvas accepts clipboard image files at the visible center", async () => {
   assert.match(app, /screenToFlowPosition\(\{x:window\.innerWidth\/2,y:window\.innerHeight\/2\}\)/);
 });
 
-test("command copy and paste duplicates selected images and image containers", async () => {
+test("command copy and paste duplicates selected images, containers, and generation tasks", async () => {
   const [app, main, store] = await Promise.all([
     readFile(new URL("src/App.tsx", root), "utf8"),
     readFile(new URL("src/main.tsx", root), "utf8"),
@@ -57,10 +63,16 @@ test("command copy and paste duplicates selected images and image containers", a
   ]);
   assert.match(main, /<CanvasClipboardShortcuts\/><App \/>/);
   assert.match(app, /key==='c'&&s\.copySelected\(\)/);
+  assert.match(app, /onPointerDownCapture=\{\(\)=>s\.setSelected\(\[n\.id\]\)\}/);
   assert.doesNotMatch(app, /key==='v'\)\{event\.preventDefault/);
   assert.match(app, /if\(s\.hasCopied\(\)\)\{event\.preventDefault\(\);void s\.pasteCopied\(\)\}/);
   assert.match(app, /isEditableTarget\(event\.target\)/);
-  assert.match(store, /node\.kind==="image"\|\|node\.kind==="result"\|\|node\.kind==="image_container"/);
+  assert.match(store, /node\.kind==="image"\|\|node\.kind==="result"\|\|node\.kind==="image_container"\|\|node\.kind==="task"/);
+  assert.match(store, /const taskIds=new Set/);
+  assert.match(store, /edge\.kind!=="output"/);
+  assert.match(store, /if\(node\.kind==="task"\)return/);
+  assert.match(store, /status:"idle",runCount:0/);
+  assert.match(store, /inputEdgeOrder:node\.inputEdgeOrder\.map\(edgeId=>edgeMap\.get\(edgeId\)\)/);
   assert.match(store, /items:node\.items\.map\(item=>\(\{\.\.\.item,id:id\("container-item"\)\}\)\)/);
   assert.match(store, /const offset=36\*canvasClipboard\.pasteCount/);
   assert.match(store, /hasCopied\(\): boolean/);
@@ -103,6 +115,21 @@ test("new tasks use the current viewport, connect every selected image, and avoi
   assert.match(store, /const edges=currentSources\.map/);
   assert.match(store, /inputEdgeOrder:edges\.map\(edge=>edge\.id\)/);
   assert.match(store, /offset\+=48/);
+});
+
+test("memory release exposes working, success, empty, and error feedback", async () => {
+  const [app,store,styles] = await Promise.all([
+    readFile(new URL("src/App.tsx",root),"utf8"),
+    readFile(new URL("src/store.ts",root),"utf8"),
+    readFile(new URL("src/memory-feedback.css",root),"utf8"),
+  ]);
+  assert.match(app,/function MemoryReleaseFeedback\(/);
+  assert.match(app,/正在释放后台标签/);
+  assert.match(app,/当前没有可释放的网页标签/);
+  assert.match(app,/运行中的任务不会被关闭/);
+  assert.match(store,/pixel-flow:memory-release-result/);
+  assert.match(styles,/\.memory-release-toast/);
+  assert.match(styles,/\.memory-release-spinner/);
 });
 
 test("uploads, drops, and pastes add every image and connect to a selected task", async () => {

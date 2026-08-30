@@ -19,9 +19,9 @@ test("native rail routes calling through the exact legacy panel", async () => {
   assert.match(app, /lazy\(\(\)=>import\("\.\/AssetLibrary"\)\)/);
   assert.match(app, /<Suspense/);
   assert.match(app, /pixel-flow:open-legacy-library/);
-  assert.match(app, /detail:\{tab:'prompts'\}/);
-  assert.match(app, /detail:\{tab:'products'\}/);
-  assert.match(app, /detail:\{tab:'references'\}/);
+  assert.match(app, /detail:\{tab:'prompts',selectedNodeIds:s\.selected\}/);
+  assert.match(app, /detail:\{tab:'products',selectedNodeIds:s\.selected\}/);
+  assert.match(app, /detail:\{tab:'references',selectedNodeIds:s\.selected\}/);
   assert.match(panel, /调用提示词/);
   assert.match(panel, /调用产品素材/);
   assert.match(panel, /调用图库/);

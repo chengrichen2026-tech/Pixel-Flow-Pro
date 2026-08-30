@@ -16,6 +16,7 @@
   let editingTemplateId = "";
   let editingTemplateNodeId = "";
   let searchQuery = "";
+  let selectedNodeIdsSnapshot = null;
   const managedObjectUrls = new Set();
 
   const managedObjectUrl = (blob) => {
@@ -501,6 +502,7 @@
   }
 
   function selectedCanvasNodeIds() {
+    if (Array.isArray(selectedNodeIdsSnapshot)) return [...selectedNodeIdsSnapshot];
     return [...document.querySelectorAll(".react-flow__node.selected[data-id]")].map((node) => node.getAttribute("data-id")).filter(Boolean);
   }
 
@@ -576,16 +578,14 @@
     const taskId = makeId("task");
     const task = { id: taskId, kind: "task", name: `生图任务 ${String(taskCount + 1).padStart(2, "0")}`, prompt: prompt.content, position, inputEdgeOrder: [], runCount: 0, status: "idle", aspectRatio: "auto", generationMode: "api" };
     const selectedIds = selectedCanvasNodeIds();
-    const selectedSource = selectedIds.length === 1 ? project.graph.nodes.find((node) => node.id === selectedIds[0] && (node.kind === "image" || node.kind === "result")) : void 0;
-    if (selectedSource) {
-      const edgeId = makeId("edge");
-      project.graph.edges.push({ id: edgeId, source: selectedSource.id, target: taskId, kind: "input" });
-      task.inputEdgeOrder.push(edgeId);
-    }
+    const selectedSources = selectedIds.map((selectedId) => project.graph.nodes.find((node) => node.id === selectedId && (node.kind === "image" || node.kind === "result" || node.kind === "image_container"))).filter(Boolean);
+    const inputEdges = selectedSources.map((source) => ({ id: makeId("edge"), source: source.id, target: taskId, kind: "input" }));
+    project.graph.edges.push(...inputEdges);
+    task.inputEdgeOrder.push(...inputEdges.map((edge) => edge.id));
     project.graph.nodes.push(task);
     await putProject(project);
     window.dispatchEvent(new CustomEvent("pixel-flow:project-refresh", { detail: { projectId: project.id } }));
-    notify(selectedSource ? "已创建生图任务并连接选中图片" : "已从提示词创建独立生图任务");
+    notify(selectedSources.length ? `已创建生图任务并连接 ${selectedSources.length} 个选中图片来源` : "已从提示词创建独立生图任务");
   }
 
   async function applyMedia(media) {
@@ -1292,8 +1292,12 @@
   });
   window.addEventListener("pixel-flow:open-legacy-library", (event) => {
     const tab = event instanceof CustomEvent && ["prompts", "products", "references"].includes(event.detail?.tab) ? event.detail.tab : "prompts";
+    selectedNodeIdsSnapshot = event instanceof CustomEvent && Array.isArray(event.detail?.selectedNodeIds) ? [...event.detail.selectedNodeIds] : selectedCanvasNodeIds();
     openPanel(tab);
     if (nativeCanvas) setTimeout(() => { panel?.classList.add("is-open"); document.body.classList.add("pf-library-expanded"); window.dispatchEvent(new CustomEvent("pixel-flow:native-management-active", { detail: { tab } })); }, 0);
+  });
+  window.addEventListener("pixel-flow:canvas-selection-changed", (event) => {
+    if (event instanceof CustomEvent && Array.isArray(event.detail?.selectedNodeIds)) selectedNodeIdsSnapshot = [...event.detail.selectedNodeIds];
   });
   window.addEventListener("pixel-flow:open-canvas-management", () => void openProjectGallery());
   window.addEventListener("pixel-flow:close-legacy-library", closeProjectGallery);

@@ -1,7 +1,7 @@
 "use strict";
 (() => {
   // src/shared/protocol.ts
-  var CHATGPT_ADAPTER_VERSION = 23;
+  var CHATGPT_ADAPTER_VERSION = 24;
   var taskTypes = /* @__PURE__ */ new Set([
     "RUN_TASK",
     "CANCEL_TASK",
@@ -383,7 +383,7 @@
     ].join(",")).forEach((element) => element.remove());
     textSource.querySelectorAll("br").forEach((element) => element.replaceWith("\n"));
     textSource.querySelectorAll("p, li, h1, h2, h3, h4, h5, h6, pre, blockquote, tr").forEach((element) => element.append("\n"));
-    const responseText = (textSource.textContent || "").split("\n").map((line) => line.trim().replace(/^ChatGPT\s*(?:说|said)\s*[:：]?\s*/i, "").replace(/^Worked for\s+\d+\s*(?:s|m|h|sec(?:ond)?s?|min(?:ute)?s?|hours?)\s*/i, "").replace(/^思考了\s*\d+\s*(?:秒|分钟|小时)\s*/i, "").trim()).filter((line) => !/^(?:编辑|复制|edit|copy)$/i.test(line)).filter(Boolean).join("\n").trim();
+    const responseText = (textSource.textContent || "").split("\n").map((line) => line.trim().replace(/^ChatGPT\s*(?:说|said)\s*[:：]?\s*/i, "").replace(/^Worked for\s+(?:\d+\s*(?:s|m|h|sec(?:ond)?s?|min(?:ute)?s?|hours?)\s*)+/i, "").replace(/^思考了\s*(?:\d+\s*(?:秒|分钟|小时)\s*)+/i, "").trim()).filter((line) => !/^(?:编辑|复制|edit|copy)$/i.test(line)).filter(Boolean).join("\n").trim();
     return {
       images: [...new Set(images)],
       responseText: isTransientResponseText(responseText) ? "" : responseText
@@ -516,9 +516,11 @@
     const previousUserTurnCount = document.querySelectorAll(userSelector).length;
     const previousTurnCount = assistantTurns().length;
     assertExpectedConversation(input.expectedConversationUrl);
+    await input.onPhase?.("uploading");
     await uploadImages(page.fileInput, input.images);
     assertExpectedConversation(input.expectedConversationUrl);
     setComposerText(page.composer, input.prompt);
+    await input.onPhase?.("sending");
     await waitUntil(
       () => {
         const sendButton2 = findSendButton();
@@ -557,6 +559,7 @@
         );
       }
     }
+    await input.onPhase?.("submitted");
     const assertCompletionConversation = createCompletionConversationCheck(
       input.expectedConversationUrl,
       previousUserTurnCount,
@@ -594,6 +597,10 @@
   var contentScriptScope = globalThis;
   var activeResumeTasks = contentScriptScope.__gptNodeCanvasActiveResumeTasks ?? /* @__PURE__ */ new Set();
   contentScriptScope.__gptNodeCanvasActiveResumeTasks = activeResumeTasks;
+  var activeSubmitTasks = contentScriptScope.__gptNodeCanvasActiveSubmitTasks ?? /* @__PURE__ */ new Set();
+  contentScriptScope.__gptNodeCanvasActiveSubmitTasks = activeSubmitTasks;
+  var taskPhases = contentScriptScope.__gptNodeCanvasTaskPhases ?? /* @__PURE__ */ new Map();
+  contentScriptScope.__gptNodeCanvasTaskPhases = taskPhases;
   var previousMessageListener = contentScriptScope.__gptNodeCanvasMessageListener;
   if (typeof previousMessageListener === "function") {
     try {
@@ -604,17 +611,23 @@
   var currentMessageListener = (raw, _sender, sendResponse) => {
       if (!isExtensionMessage(raw)) return false;
       if (raw.type === "CHECK_CHATGPT_ADAPTER") {
-        sendResponse({ adapterVersion: CHATGPT_ADAPTER_VERSION });
+        const checkKey = `${raw.projectId}:${raw.taskId}`;
+        sendResponse({ adapterVersion: CHATGPT_ADAPTER_VERSION, taskPhase: taskPhases.get(checkKey), submitActive: activeSubmitTasks.has(checkKey) });
         return false;
       }
       if (raw.type !== "EXECUTE_IN_CHATGPT_V3" && raw.type !== "RESUME_CHATGPT_RESULT") return false;
       const message = raw;
+      const taskKey = `${message.projectId}:${message.taskId}`;
       sendResponse({ accepted: true });
       if (raw.type === "RESUME_CHATGPT_RESULT") {
-        const resumeKey = `${message.projectId}:${message.taskId}`;
+        const resumeKey = taskKey;
         signalBackgroundPageActivity();
+        if (activeSubmitTasks.has(resumeKey)) return true;
+        const resumePhase = taskPhases.get(resumeKey);
+        if (resumePhase && !["submitted", "generating", "collecting_result"].includes(resumePhase)) return true;
         if (activeResumeTasks.has(resumeKey)) return true;
         activeResumeTasks.add(resumeKey);
+        taskPhases.set(resumeKey, "collecting_result");
         void resumeTask({ prompt: message.prompt }).then((result) => report({
           type: "TASK_RESULT",
           projectId: message.projectId,
@@ -642,17 +655,34 @@
         });
         return true;
       }
+      if (activeSubmitTasks.has(taskKey)) return true;
+      activeSubmitTasks.add(taskKey);
+      taskPhases.set(taskKey, "preparing_tab");
       void submitTask({
         prompt: message.prompt,
         images: message.images,
         expectedConversationUrl: message.expectedConversationUrl,
-        onManualAction: () => report({
-          type: "TASK_STATUS",
-          projectId: message.projectId,
-          taskId: message.taskId,
-          status: "manual_action",
-          detail: "ChatGPT 没有接受自动发送，请打开真实对话后手动点击发送；Pixel Flow 会继续等待并自动回写结果"
-        })
+        onPhase: async (phase) => {
+          taskPhases.set(taskKey, phase);
+          await report({
+            type: "TASK_STATUS",
+            projectId: message.projectId,
+            taskId: message.taskId,
+            status: phase === "submitted" ? "generating" : phase,
+            detail: void 0,
+            conversationUrl: location.href
+          });
+        },
+        onManualAction: () => {
+          taskPhases.set(taskKey, "manual_action");
+          return report({
+            type: "TASK_STATUS",
+            projectId: message.projectId,
+            taskId: message.taskId,
+            status: "manual_action",
+            detail: "ChatGPT 没有接受自动发送，请打开真实对话后手动点击发送；Pixel Flow 会继续等待并自动回写结果"
+          });
+        }
       }).then((result) => report({
         type: "TASK_RESULT",
         projectId: message.projectId,
@@ -670,7 +700,7 @@
           detail: error instanceof Error ? error.message : "ChatGPT \u9875\u9762\u6267\u884C\u5931\u8D25",
           conversationUrl: location.href
         });
-      });
+      }).finally(() => activeSubmitTasks.delete(taskKey));
     return true;
   };
   contentScriptScope.__gptNodeCanvasAdapterVersion = CHATGPT_ADAPTER_VERSION;

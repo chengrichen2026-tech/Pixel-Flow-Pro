@@ -1,0 +1,215 @@
+.canvas-switcher {
+  top: 14px;
+  width: 360px;
+}
+
+.canvas-switcher__trigger {
+  width: max-content;
+  min-width: 154px;
+  max-width: 280px;
+  height: 40px;
+  margin: 0 auto;
+  gap: 10px;
+  padding: 0 18px;
+  color: #34383f;
+  background: rgba(252,253,255,.98);
+  border: 1px solid #dfe2e7;
+  border-radius: 999px;
+  box-shadow: 0 8px 22px rgba(31,37,46,.13);
+  font-size: 14px;
+  font-weight: 760;
+}
+
+.canvas-switcher__trigger:hover {
+  color: #34383f;
+  background: #fff;
+  border-color: #cdbfff;
+}
+
+.canvas-switcher__status {
+  flex: 0 0 10px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #7448f3;
+  box-shadow: 0 0 0 3px rgba(116,72,243,.15);
+}
+
+.canvas-switcher__trigger span {
+  color: #34383f;
+}
+
+.canvas-switcher__caret {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  color: #717680;
+  transition: transform .14s ease;
+}
+
+.canvas-switcher__trigger[aria-expanded="true"] .canvas-switcher__caret {
+  transform: rotate(180deg);
+}
+
+.canvas-switcher__menu {
+  margin-top: 10px;
+  padding: 14px;
+  border: 1px solid #e0e2e7;
+  border-radius: 18px;
+  background: rgba(252,253,255,.99);
+  box-shadow: 0 22px 58px rgba(31,37,46,.2);
+}
+
+.canvas-switcher__menu header {
+  padding: 2px 6px 12px;
+  color: #454b54;
+  font-size: 15px;
+  font-weight: 760;
+}
+
+.canvas-switcher__menu > input {
+  height: 38px;
+  margin-bottom: 8px;
+}
+
+.canvas-switcher__list {
+  position: relative;
+  max-height: 330px;
+  padding-left: 0;
+}
+
+.canvas-switcher__list:before {
+  content: "";
+  position: absolute;
+  top: 22px;
+  bottom: 22px;
+  left: 12px;
+  width: 1px;
+  background: #e0e2e7;
+}
+
+.canvas-switcher__item {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  height: 48px;
+  border-radius: 10px;
+}
+
+.canvas-switcher__open {
+  min-width: 0;
+  flex: 1;
+  align-self: stretch;
+  gap: 14px;
+  padding: 0 12px 0 5px;
+  border-radius: 10px;
+  font-size: 14px;
+}
+
+.canvas-switcher__open i,
+.canvas-switcher__item > i {
+  flex: 0 0 15px;
+  width: 15px;
+  height: 15px;
+  border: 3px solid #f5f6f8;
+  border-radius: 50%;
+  background: #d9dde3;
+  box-shadow: 0 0 0 1px #d9dde3;
+}
+
+.canvas-switcher__item[aria-selected="true"] {
+  color: #6840dd;
+  background: #f1ebff;
+}
+
+.canvas-switcher__item[aria-selected="true"] .canvas-switcher__open i,
+.canvas-switcher__item[aria-selected="true"] > i {
+  border-color: #fff;
+  background: #7448f3;
+  box-shadow: 0 0 0 2px #7448f3;
+}
+
+.canvas-switcher__edit {
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  margin-right: 6px;
+  padding: 0;
+  color: #6f747d;
+  opacity: 0;
+  transform: translateX(4px);
+  transition: opacity .12s ease,transform .12s ease,background .12s ease;
+}
+
+.canvas-switcher__item:hover .canvas-switcher__edit,
+.canvas-switcher__item:focus-within .canvas-switcher__edit,
+.canvas-switcher__item[aria-selected="true"] .canvas-switcher__edit {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.canvas-switcher__edit:hover {
+  color: #6840dd;
+  background: rgba(116,72,243,.12);
+}
+
+.canvas-switcher__edit .pf-utility-icon {
+  width: 15px;
+  height: 15px;
+}
+
+.canvas-switcher__rename {
+  min-width: 0;
+  flex: 1;
+  height: 34px;
+  margin: 0 7px 0 14px;
+  padding: 0 10px;
+  border: 1px solid #7448f3;
+  border-radius: 8px;
+  outline: none;
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(116,72,243,.12);
+  color: #34383f;
+  font: inherit;
+}
+
+.canvas-switcher__menu footer {
+  margin-top: 10px;
+  padding-top: 10px;
+}
+
+.canvas-switcher__menu footer button {
+  height: 40px;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 12px;
+  color: #202328;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 680;
+}
+
+.canvas-switcher__menu footer .pf-utility-icon {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  color: currentColor;
+}
+
+.canvas-switcher__menu footer button:first-child {
+  color: #202328;
+  background: transparent;
+}
+
+.canvas-switcher__menu footer button:hover,
+.canvas-switcher__menu footer button:first-child:hover {
+  color: #202328;
+  background: #f1f2f5;
+}
+
+@media(max-width:760px) {
+  .canvas-switcher {
+    width: min(330px,calc(100vw - 84px));
+  }
+}

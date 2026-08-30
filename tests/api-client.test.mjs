@@ -1,8 +1,17 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { requestApiImages, sizeForRatio } from "../public/api-client.js";
 
 const onePixel = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+const worker = await readFile(new URL("../api-worker/server.mjs", import.meta.url), "utf8");
+
+test("API worker recreates its disposable jobs directory before atomic writes", () => {
+  assert.match(
+    worker,
+    /async function saveJob\(job\) \{[\s\S]*?await mkdir\(jobsDir, \{ recursive: true \}\);[\s\S]*?await writeFile\(temporary,[\s\S]*?await rename\(temporary, path\);/
+  );
+});
 
 test("maps canvas ratios to supported API sizes", () => {
   assert.equal(sizeForRatio("1:1"), "1024x1024");

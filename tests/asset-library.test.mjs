@@ -41,9 +41,14 @@ test("the MVP exposes prompt, product, reference, and template libraries", async
   assert.match(source, /prompt-create-task/);
   assert.match(source, /function createTaskFromPrompt\(prompt\)/);
   assert.match(source, /function selectedCanvasNodeIds\(\)/);
-  assert.match(source, /selectedIds\.length === 1/);
-  assert.match(source, /node\.kind === "image" \|\| node\.kind === "result"/);
-  assert.match(source, /source: selectedSource\.id, target: taskId, kind: "input"/);
+  assert.match(source, /Array\.isArray\(selectedNodeIdsSnapshot\)/);
+  assert.match(source, /Array\.isArray\(event\.detail\?\.selectedNodeIds\)/);
+  assert.match(source, /pixel-flow:canvas-selection-changed/);
+  assert.match(source, /selectedNodeIdsSnapshot = \[\.\.\.event\.detail\.selectedNodeIds\]/);
+  assert.match(source, /selectedIds\.map\(\(selectedId\) => project\.graph\.nodes\.find/);
+  assert.match(source, /node\.kind === "image" \|\| node\.kind === "result" \|\| node\.kind === "image_container"/);
+  assert.match(source, /const inputEdges = selectedSources\.map/);
+  assert.match(source, /task\.inputEdgeOrder\.push\(\.\.\.inputEdges\.map/);
   assert.match(source, /pixel-flow:project-refresh/);
   const createFromPrompt = source.slice(source.indexOf("async function createTaskFromPrompt"), source.indexOf("async function applyMedia"));
   assert.doesNotMatch(createFromPrompt, /collapsePanel\(\)|location\.reload\(\)/);

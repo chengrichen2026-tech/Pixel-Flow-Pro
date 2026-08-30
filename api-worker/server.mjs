@@ -17,6 +17,10 @@ function jobPath(id) {
 }
 
 async function saveJob(job) {
+  // The runtime directory is intentionally disposable. Recreate it before
+  // every atomic write so cleanup or a transient directory removal cannot
+  // turn a running generation into an ENOENT failure.
+  await mkdir(jobsDir, { recursive: true });
   const path = jobPath(job.id);
   const temporary = `${path}.${process.pid}.tmp`;
   await writeFile(temporary, JSON.stringify(job), { mode: 0o600 });
