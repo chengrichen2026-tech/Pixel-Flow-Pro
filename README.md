@@ -1,5 +1,7 @@
 # Pixel Flow
 
+> **新电脑安装：**如果你希望让 Codex 安装 Pixel Flow、API Worker、Bridge 和 MCP，请复制 [发送给 Codex 的 macOS / Windows 安装命令](CODEX_INSTALL_PROMPTS.md)。
+
 Pixel Flow 是一个基于 Chrome Manifest V3 的 AI 创意任务画布，通过节点组织图片、文字、生成任务和结果。它兼容两种生图方式：浏览器模式复用已登录的 ChatGPT 网页账号；API Key 模式通过本机 Pixel Flow API Worker 调用已配置的图片接口。每张任务卡都可以独立选择模式。
 
 ## 当前版本与关键交互（v0.2.7）
