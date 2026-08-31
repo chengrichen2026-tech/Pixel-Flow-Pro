@@ -597,7 +597,9 @@
       }
     }
     await putProject(project);
-    window.dispatchEvent(new CustomEvent("pixel-flow:project-refresh", { detail: { projectId: project.id } }));
+    window.dispatchEvent(new CustomEvent("pixel-flow:project-refresh", {
+      detail: { projectId: project.id, selectedNodeIds: targetTaskId ? [targetTaskId] : [nodeId] }
+    }));
     return nodeId;
   }
 

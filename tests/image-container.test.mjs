@@ -108,3 +108,23 @@ test("selected image containers receive clicked product and gallery assets", asy
   assert.match(app, /pixel-flow:canvas-selection-changed/);
   assert.match(app, /selectedNodeIds:\[\.\.\.s\.selected\]/);
 });
+
+test("repeated product clicks keep the connected task selected after each project refresh", async () => {
+  const [legacyLibrary, store] = await Promise.all([
+    source("production/asset-library.js"),
+    source("src/store.ts"),
+  ]);
+  assert.match(
+    legacyLibrary,
+    /selectedNodeIds: targetTaskId \? \[targetTaskId\] : \[nodeId\]/,
+    "a connected media insert must preserve the task selection so the next product also connects",
+  );
+  assert.match(
+    legacyLibrary,
+    /task\.inputEdgeOrder = \[\.\.\.\(task\.inputEdgeOrder \|\| \[\]\), edgeId\]/,
+    "each repeated media insert must append its input edge to the task order",
+  );
+  assert.match(store, /let projectReadQueue: Promise<void> = Promise\.resolve\(\)/);
+  assert.match(store, /async refresh\(projectId\) \{ return serializeProjectRead/);
+  assert.match(store, /async openProject\(projectId\)\{return serializeProjectRead/);
+});
