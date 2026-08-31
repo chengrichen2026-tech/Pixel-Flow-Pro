@@ -6,6 +6,8 @@ Pixel Flow 扩展通过 `ws://127.0.0.1:43128/canvas` 连接本机 Bridge，Code
 
 - `pixel_flow_status`：Bridge 和扩展连接状态。
 - `pixel_flow_get_state`：读取画布列表、当前项目、节点、连线、选中项与 `revision`。
+- `pixel_flow_get_products`：读取产品素材库的素材名称与当前标签。
+- `pixel_flow_auto_tag_products`：按素材名称推导产品系列与“包装盒/铝箔”标签；默认预览，`apply=true` 时写入。
 - `pixel_flow_create_canvas`：新建并打开画布。
 - `pixel_flow_create_task`：新建生图任务，可设提示词、API/GPT-web、比例、位置和输入节点。
 - `pixel_flow_run_task`：执行指定任务。
@@ -19,6 +21,7 @@ Pixel Flow 扩展通过 `ws://127.0.0.1:43128/canvas` 连接本机 Bridge，Code
 - `task.create` / `task.run` / `task.duplicate` / `task.delete`
 - `node.move` / `node.delete`
 - `history.undo`
+- `library.autoTagProducts`（`preview=true` 只返回拟变更，`preview=false` 写入并通知素材库刷新）
 
 所有写操作必须使用唯一 `requestId`，并传入最近 `pixel_flow_get_state` 返回的 `expectedRevision`。如果 revision 冲突，先重新读取状态，不要盲目重试写操作。
 

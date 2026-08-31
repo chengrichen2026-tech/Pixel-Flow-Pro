@@ -4,7 +4,6 @@
   const PENDING_RUN_KEY = "pixelFlowPendingTemplateRunV1";
   const DB_NAME = "gpt-node-canvas";
   const MARKER = "__PIXEL_FLOW_TEMPLATE__:";
-  const PROMPT_TAGS = ["模版", "构图", "背景", "功能"];
   const activeStatuses = new Set(["queued", "waiting_page", "uploading", "sending", "generating", "manual_action"]);
   let databasePromise;
   let panel;
@@ -12,7 +11,7 @@
   let gallery;
   let activeTab = "prompts";
   let panelMode = "usage";
-  let activePromptTag = "";
+  let activeLibraryTag = "";
   let editingTemplateId = "";
   let editingTemplateNodeId = "";
   let searchQuery = "";
@@ -34,8 +33,9 @@
   const makeId = (prefix) => `${prefix}-${crypto.randomUUID()}`;
   const now = () => Date.now();
   const emptyLibrary = () => ({ prompts: [], presets: { copy: [], background: [], composition: [] }, media: [], templates: [] });
+  const normalizeTags = (tags) => [...new Set((Array.isArray(tags) ? tags : []).map((tag) => String(tag || "").trim()).filter(Boolean))];
   const promptTags = (item) => {
-    if (Array.isArray(item.tags) && item.tags.length) return item.tags.filter((tag) => PROMPT_TAGS.includes(tag));
+    if (Array.isArray(item.tags)) return normalizeTags(item.tags);
     const text = `${item.name || ""} ${item.content || ""}`;
     const tags = [];
     if (/模版|模板/.test(text)) tags.push("模版");
@@ -47,7 +47,7 @@
   const readLibrary = () => {
     try {
       const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
-      return { ...emptyLibrary(), ...parsed, prompts: (parsed?.prompts || []).map((item) => ({ ...item, tags: promptTags(item) })), presets: { ...emptyLibrary().presets, ...(parsed?.presets || {}) } };
+      return { ...emptyLibrary(), ...parsed, prompts: (parsed?.prompts || []).map((item) => ({ ...item, tags: promptTags(item) })), media: (parsed?.media || []).map((item) => ({ ...item, tags: normalizeTags(item.tags) })), presets: { ...emptyLibrary().presets, ...(parsed?.presets || {}) } };
     } catch {
       return emptyLibrary();
     }
@@ -113,6 +113,28 @@
     });
   }
 
+  function tagEditorMarkup(tags = []) {
+    return `<fieldset class="pf-tag-editor" data-tag-editor><legend>标签 <small>可选，输入后按 Enter 或逗号新增</small></legend><div data-tag-chips>${normalizeTags(tags).map((tag) => `<button type="button" data-tag-remove="${escapeHtml(tag)}"><span>${escapeHtml(tag)}</span>×</button>`).join("")}</div><input data-tag-input placeholder="输入新标签"></fieldset>`;
+  }
+
+  function tagEditorValues(root) {
+    return normalizeTags([...root.querySelectorAll("[data-tag-remove]")].map((button) => button.dataset.tagRemove));
+  }
+
+  function bindTagEditor(root) {
+    const input = root.querySelector("[data-tag-input]");
+    const chips = root.querySelector("[data-tag-chips]");
+    const add = () => {
+      const tag = input?.value.trim().replace(/^[,，]+|[,，]+$/g, "");
+      if (!tag || !chips) return;
+      if (!tagEditorValues(root).includes(tag)) chips.insertAdjacentHTML("beforeend", `<button type="button" data-tag-remove="${escapeHtml(tag)}"><span>${escapeHtml(tag)}</span>×</button>`);
+      input.value = "";
+    };
+    input?.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === "," || event.key === "，") { event.preventDefault(); add(); } });
+    input?.addEventListener("blur", add);
+    root.addEventListener("click", (event) => event.target instanceof Element && event.target.closest("[data-tag-remove]")?.remove());
+  }
+
   async function openPromptDialog(prompt = null) {
     const existingAsset = prompt?.exampleAssetId ? await getAsset(prompt.exampleAssetId) : null;
     const existingUrl = existingAsset?.blob ? URL.createObjectURL(existingAsset.blob) : "";
@@ -120,7 +142,8 @@
       document.querySelector(".pf-prompt-dialog-backdrop")?.remove();
       const backdrop = document.createElement("div");
       backdrop.className = "pf-prompt-dialog-backdrop";
-      backdrop.innerHTML = `<section class="pf-prompt-dialog" role="dialog" aria-modal="true" aria-labelledby="pf-prompt-dialog-title"><header><div><strong id="pf-prompt-dialog-title">${prompt ? "编辑提示词" : "新增提示词"}</strong><small>${prompt ? "修改名称、标签、提示词内容或示例图" : "保存一条可重复调用的完整提示词"}</small></div><button type="button" data-prompt-dialog="cancel" aria-label="关闭">×</button></header><div class="pf-prompt-dialog-form"><label>提示词名称<input data-prompt-name value="${escapeHtml(prompt?.name || "")}" placeholder="例如：产品商业海报"></label><fieldset class="pf-prompt-tag-picker"><legend>标签（可多选）</legend>${PROMPT_TAGS.map((tag) => `<label><input type="checkbox" data-prompt-tag value="${tag}" ${(prompt?.tags || []).includes(tag) ? "checked" : ""}><span>${tag}</span></label>`).join("")}</fieldset><label>完整提示词<textarea data-prompt-content placeholder="输入可直接使用的完整提示词">${escapeHtml(prompt?.content || "")}</textarea></label><section class="pf-prompt-example"><div><strong>示例图</strong><small>可选，用于帮助识别提示词，不会自动加入画布</small></div><button type="button" class="pf-prompt-example-preview ${existingUrl ? "has-image" : ""}" data-prompt-dialog="choose-image">${existingUrl ? `<img src="${existingUrl}" alt="当前示例图">` : "<span>上传示例图</span>"}</button><div class="pf-prompt-example-actions"><button type="button" data-prompt-dialog="choose-image">选择图片</button><button type="button" data-prompt-dialog="remove-image" ${existingUrl ? "" : "disabled"}>移除图片</button></div><input type="file" accept="image/*" data-prompt-image hidden></section><p class="pf-prompt-dialog-error" role="alert"></p></div><footer><button type="button" data-prompt-dialog="cancel">取消</button><button type="button" class="primary" data-prompt-dialog="save">${prompt ? "保存修改" : "保存为新提示词"}</button></footer></section>`;
+      backdrop.innerHTML = `<section class="pf-prompt-dialog" role="dialog" aria-modal="true" aria-labelledby="pf-prompt-dialog-title"><header><div><strong id="pf-prompt-dialog-title">${prompt ? "编辑提示词" : "新增提示词"}</strong><small>${prompt ? "修改名称、标签、提示词内容或示例图" : "保存一条可重复调用的完整提示词"}</small></div><button type="button" data-prompt-dialog="cancel" aria-label="关闭">×</button></header><div class="pf-prompt-dialog-form"><label>提示词名称<input data-prompt-name value="${escapeHtml(prompt?.name || "")}" placeholder="例如：产品商业海报"></label>${tagEditorMarkup(prompt?.tags)}<label>完整提示词<textarea data-prompt-content placeholder="输入可直接使用的完整提示词">${escapeHtml(prompt?.content || "")}</textarea></label><section class="pf-prompt-example"><div><strong>示例图</strong><small>可选，用于帮助识别提示词，不会自动加入画布</small></div><button type="button" class="pf-prompt-example-preview ${existingUrl ? "has-image" : ""}" data-prompt-dialog="choose-image">${existingUrl ? `<img src="${existingUrl}" alt="当前示例图">` : "<span>上传示例图</span>"}</button><div class="pf-prompt-example-actions"><button type="button" data-prompt-dialog="choose-image">选择图片</button><button type="button" data-prompt-dialog="remove-image" ${existingUrl ? "" : "disabled"}>移除图片</button></div><input type="file" accept="image/*" data-prompt-image hidden></section><p class="pf-prompt-dialog-error" role="alert"></p></div><footer><button type="button" data-prompt-dialog="cancel">取消</button><button type="button" class="primary" data-prompt-dialog="save">${prompt ? "保存修改" : "保存为新提示词"}</button></footer></section>`;
+      bindTagEditor(backdrop);
       let selectedFile = null;
       let selectedPreviewUrl = "";
       let removeExample = false;
@@ -146,10 +169,9 @@
         if (action === "save") {
           const name = backdrop.querySelector("[data-prompt-name]")?.value.trim();
           const content = backdrop.querySelector("[data-prompt-content]")?.value.trim();
-          const tags = [...backdrop.querySelectorAll("[data-prompt-tag]:checked")].map((input) => input.value);
+          const tags = tagEditorValues(backdrop);
           const error = backdrop.querySelector(".pf-prompt-dialog-error");
           if (!name || !content) { error.textContent = "请填写提示词名称和完整提示词内容"; return; }
-          if (!tags.length) { error.textContent = "请至少选择一个提示词标签"; return; }
           finish({ name, content, tags, selectedFile, removeExample });
         }
       });
@@ -176,6 +198,28 @@
     if (previousAssetId && previousAssetId !== exampleAssetId) await deletePromptAssetIfUnused(previousAssetId, library);
     renderPanel();
     notify(existing ? "提示词已更新" : "提示词已新增");
+  }
+
+  function openMediaDialog(media) {
+    return new Promise((resolve) => {
+      document.querySelector(".pf-media-dialog-backdrop")?.remove();
+      const backdrop = document.createElement("div");
+      backdrop.className = "pf-media-dialog-backdrop pf-prompt-dialog-backdrop";
+      backdrop.innerHTML = `<section class="pf-media-dialog pf-prompt-dialog" role="dialog" aria-modal="true"><header><div><strong>编辑${media.kind === "product" ? "产品素材" : "图库图片"}</strong><small>修改名称，或新增、删除自定义标签</small></div><button type="button" data-media-dialog="cancel" aria-label="关闭">×</button></header><div class="pf-prompt-dialog-form"><label>素材名称<input data-media-name value="${escapeHtml(media.name || "")}"></label>${tagEditorMarkup(media.tags)}</div><footer><button type="button" data-media-dialog="cancel">取消</button><button type="button" class="primary" data-media-dialog="save">保存修改</button></footer></section>`;
+      bindTagEditor(backdrop);
+      const finish = (value) => { backdrop.remove(); resolve(value); };
+      backdrop.addEventListener("click", (event) => {
+        const action = event.target instanceof Element ? event.target.closest("[data-media-dialog]")?.dataset.mediaDialog : null;
+        if (action === "cancel" || event.target === backdrop) finish(false);
+        if (action === "save") {
+          const name = backdrop.querySelector("[data-media-name]")?.value.trim();
+          if (name) finish({ name, tags: tagEditorValues(backdrop) });
+        }
+      });
+      backdrop.addEventListener("keydown", (event) => { if (event.key === "Escape") finish(false); });
+      document.body.append(backdrop);
+      requestAnimationFrame(() => backdrop.querySelector("[data-media-name]")?.focus());
+    });
   }
 
   function openDatabase() {
@@ -282,8 +326,7 @@
     await putProject(project);
     window.dispatchEvent(new CustomEvent("pixel-flow:projects-refresh"));
     setTimeout(() => {
-      const select = document.querySelector(".project-picker select,.project select");
-      if (select) { select.value = projectId; select.dispatchEvent(new Event("change", { bubbles: true })); }
+      window.dispatchEvent(new CustomEvent("pixel-flow:project-refresh", { detail: { projectId } }));
       void openProjectGallery();
     }, 80);
     notify(`画布“${project.name}”已导入`);
@@ -653,7 +696,7 @@
       if (!file.type.startsWith("image/")) continue;
       const assetId = makeId("asset");
       await putAsset({ id: assetId, blob: file, createdAt: now() });
-      library.media.unshift({ id: makeId("media"), assetId, kind, name: file.name, createdAt: now() });
+      library.media.unshift({ id: makeId("media"), assetId, kind, name: file.name, tags: [], createdAt: now() });
     }
     saveLibrary(library);
     renderPanel();
@@ -770,11 +813,18 @@
 
   function promptMatches(item, query) {
     const matchesSearch = `${item.name} ${item.content} ${(item.tags || []).join(" ")}`.toLowerCase().includes(query);
-    return matchesSearch && (!activePromptTag || (item.tags || []).includes(activePromptTag));
+    return matchesSearch && (!activeLibraryTag || (item.tags || []).includes(activeLibraryTag));
   }
 
-  function promptTagFilters() {
-    return `<nav class="pf-prompt-filters" aria-label="提示词标签筛选"><button data-action="prompt-filter" data-tag="" class="${activePromptTag ? "" : "is-active"}">全部</button>${PROMPT_TAGS.map((tag) => `<button data-action="prompt-filter" data-tag="${tag}" class="${activePromptTag === tag ? "is-active" : ""}">${tag}</button>`).join("")}</nav>`;
+  function libraryTags(library, tab = activeTab) {
+    const items = tab === "prompts" ? library.prompts : library.media.filter((item) => item.kind === (tab === "products" ? "product" : "reference"));
+    return [...new Set(items.flatMap((item) => normalizeTags(item.tags)))].sort((a, b) => a.localeCompare(b, "zh-CN"));
+  }
+
+  function libraryTagFilters(library, tab = activeTab) {
+    const tags = libraryTags(library, tab);
+    if (!tags.length) return "";
+    return `<nav class="pf-prompt-filters" aria-label="标签筛选"><button data-action="library-tag-filter" data-tag="" class="${activeLibraryTag ? "" : "is-active"}">全部</button>${tags.map((tag) => `<button data-action="library-tag-filter" data-tag="${escapeHtml(tag)}" class="${activeLibraryTag === tag ? "is-active" : ""}">${escapeHtml(tag)}</button>`).join("")}</nav>`;
   }
 
   function promptTagBadges(item) {
@@ -783,12 +833,12 @@
 
   function promptList(library, query) {
     const items = library.prompts.filter((item) => promptMatches(item, query));
-    return `<section class="pf-library-list">${items.map((item) => `<article class="pf-prompt-item"><div class="pf-prompt-example-thumb" ${item.exampleAssetId ? `data-thumb="${item.exampleAssetId}"` : ""}>${item.exampleAssetId ? "载入中" : "暂无示例图"}</div><header class="pf-management-card-meta"><strong title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</strong><span><button data-action="prompt-edit" data-id="${item.id}" aria-label="编辑提示词 ${escapeHtml(item.name)}" title="编辑">${libraryCardIcon("edit")}</button><button class="danger" data-action="prompt-delete" data-id="${item.id}" aria-label="删除提示词 ${escapeHtml(item.name)}" title="删除">${libraryCardIcon("delete")}</button></span></header>${promptTagBadges(item)}</article>`).join("") || "<p class=\"pf-empty\">没有符合当前筛选的提示词</p>"}</section>`;
+    return `<section class="pf-library-list">${items.map((item) => `<article class="pf-prompt-item pf-tagged-library-card"><div class="pf-prompt-example-thumb" ${item.exampleAssetId ? `data-thumb="${item.exampleAssetId}"` : ""}>${item.exampleAssetId ? "载入中" : "暂无示例图"}</div><header class="pf-management-card-meta"><strong title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</strong><span><button data-action="prompt-edit" data-id="${item.id}" aria-label="编辑提示词 ${escapeHtml(item.name)}" title="编辑">${libraryCardIcon("edit")}</button><button class="danger" data-action="prompt-delete" data-id="${item.id}" aria-label="删除提示词 ${escapeHtml(item.name)}" title="删除">${libraryCardIcon("delete")}</button></span></header>${promptTagBadges(item)}</article>`).join("") || "<p class=\"pf-empty\">没有符合当前筛选的提示词</p>"}</section>`;
   }
 
   function mediaList(library, kind, query) {
-    const items = library.media.filter((item) => item.kind === kind && item.name.toLowerCase().includes(query));
-    return `<section class="pf-media-grid pf-media-grid--${kind}">${items.map((item) => `<article class="pf-media-item" data-id="${item.id}"><div data-thumb="${item.assetId}">载入中</div><footer class="pf-management-card-meta"><strong title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</strong><span><button data-action="media-rename" data-id="${item.id}" aria-label="重命名素材 ${escapeHtml(item.name)}" title="重命名">${libraryCardIcon("rename")}</button><button class="danger" data-action="media-delete" data-id="${item.id}" aria-label="删除素材 ${escapeHtml(item.name)}" title="删除">${libraryCardIcon("delete")}</button></span></footer></article>`).join("") || "<p class=\"pf-empty\">还没有图片素材</p>"}</section>`;
+    const items = library.media.filter((item) => item.kind === kind && `${item.name} ${(item.tags || []).join(" ")}`.toLowerCase().includes(query) && (!activeLibraryTag || (item.tags || []).includes(activeLibraryTag)));
+    return `<section class="pf-media-grid pf-media-grid--${kind}">${items.map((item) => `<article class="pf-media-item pf-tagged-library-card" data-id="${item.id}"><div data-thumb="${item.assetId}">载入中</div><header class="pf-management-card-meta"><strong title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</strong><span><button data-action="media-edit" data-id="${item.id}" aria-label="编辑素材 ${escapeHtml(item.name)}" title="编辑">${libraryCardIcon("rename")}</button><button class="danger" data-action="media-delete" data-id="${item.id}" aria-label="删除素材 ${escapeHtml(item.name)}" title="删除">${libraryCardIcon("delete")}</button></span></header>${promptTagBadges(item)}</article>`).join("") || "<p class=\"pf-empty\">还没有图片素材</p>"}</section>`;
   }
 
   function promptUsageList(library, query) {
@@ -797,7 +847,7 @@
   }
 
   function mediaUsageList(library, kind, query) {
-    const items = library.media.filter((item) => item.kind === kind && item.name.toLowerCase().includes(query));
+    const items = library.media.filter((item) => item.kind === kind && `${item.name} ${(item.tags || []).join(" ")}`.toLowerCase().includes(query) && (!activeLibraryTag || (item.tags || []).includes(activeLibraryTag)));
     return `<section class="pf-media-grid pf-media-grid--${kind} pf-usage-media-grid">${items.map((item) => kind === "reference"
       ? `<article class="pf-media-item pf-reference-card" draggable="true" data-drag-kind="media" data-id="${item.id}"><button class="pf-reference-thumb" data-action="media-apply" data-id="${item.id}" aria-label="从图库添加 ${escapeHtml(item.name)}"><div data-thumb="${item.assetId}">载入中</div></button><footer class="pf-reference-meta"><strong title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</strong><button class="danger" data-action="media-delete" data-id="${item.id}" aria-label="删除素材 ${escapeHtml(item.name)}" title="删除">${libraryCardIcon("delete")}</button></footer></article>`
       : `<article class="pf-media-item pf-product-card" draggable="true" data-drag-kind="media" data-id="${item.id}"><button class="pf-product-thumb" data-action="media-apply" data-id="${item.id}" aria-label="从产品素材库添加 ${escapeHtml(item.name)}"><div data-thumb="${item.assetId}">载入中</div></button><strong title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</strong></article>`).join("") || "<p class=\"pf-empty\">还没有可调用的图片素材</p>"}</section>`;
@@ -866,7 +916,7 @@
       if (activeTab === "references") content = mediaUsageList(library, "reference", query);
       if (activeTab === "templates") content = templateUsageList(library, query);
       const titles = { prompts: ["调用提示词", "选择提示词直接创建生图任务"], products: ["调用产品素材", "选择并放入当前画布"], references: ["调用图库", "点击调用，双击画布图片可收藏"], templates: ["模版库", "选择已保存模板创建画布执行任务"] };
-      const filterBar = activeTab === "prompts" ? promptTagFilters() : "";
+      const filterBar = ["prompts", "products", "references"].includes(activeTab) ? libraryTagFilters(library) : "";
       const usageSearch = activeTab === "templates" ? `<input class="pf-library-search" data-library-search value="${escapeHtml(searchQuery)}" placeholder="搜索可调用内容">` : "";
       panel.innerHTML = `<header><div><strong>${titles[activeTab][0]}</strong><small>${titles[activeTab][1]}</small></div><button class="pf-panel-collapse" data-action="panel-collapse" aria-label="收起调用侧栏" title="收起调用侧栏"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5"/></svg></button></header>${usageSearch}${filterBar}<div class="pf-library-content">${content}</div><footer class="pf-usage-footer"><button data-action="open-library-management" data-library="${activeTab}">前往库管理</button></footer>`;
       rail?.querySelectorAll("[data-library-rail-tab]").forEach((button) => button.classList.toggle("is-active", button.dataset.libraryRailTab === activeTab));
@@ -891,12 +941,21 @@
     const compactManagementTabs = ["prompts", "products", "references"];
     const compactHeaderTabs = [...compactManagementTabs, "templates"];
     const search = "";
-    const filterBar = activeTab === "prompts" ? promptTagFilters() : "";
+    const filterBar = ["prompts", "products", "references"].includes(activeTab) ? libraryTagFilters(library) : "";
     const headerActions = compactHeaderTabs.includes(activeTab) ? backupActions : `<button class="pf-panel-collapse" data-action="panel-collapse" aria-label="返回画布列表" title="返回画布列表"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5"/></svg></button>`;
     const managementToolbar = activeTab === "prompts" ? `<div class="pf-prompt-management-toolbar">${filterBar}<button class="primary" data-action="prompt-create">新增提示词</button></div>` : activeTab === "templates" ? `<div class="pf-prompt-management-toolbar pf-template-management-toolbar"><span></span><button class="primary" data-action="template-new">新增模板</button></div>` : filterBar;
     panel.innerHTML = `<header><div><strong>${titles[activeTab][0]}</strong><small>${titles[activeTab][1]}</small></div>${headerActions}</header>${compactHeaderTabs.includes(activeTab) ? "" : backupActions}${search}${managementToolbar}<div class="pf-library-content">${content}</div>`;
     rail?.querySelectorAll("[data-library-rail-tab]").forEach((button) => button.classList.toggle("is-active", button.dataset.libraryRailTab === activeTab));
     void hydrateThumbs(panel);
+  }
+
+  function removeMediaCard(target) {
+    const card = target.closest(".pf-media-item");
+    const grid = card?.closest(".pf-media-grid");
+    if (!card || !grid) return;
+    releaseObjectUrls(card);
+    card.remove();
+    if (!grid.querySelector(".pf-media-item")) grid.innerHTML = '<p class="pf-empty">还没有图片素材</p>';
   }
 
   const thumbObserver = new IntersectionObserver((entries, observer) => {
@@ -991,6 +1050,7 @@
 
   function openLibraryManagement(tab) {
     activeTab = tab;
+    activeLibraryTag = "";
     panelMode = "management";
     searchQuery = "";
     if (!panel) { panel = document.createElement("aside"); panel.className = "pf-library-panel"; document.body.append(panel); }
@@ -1085,8 +1145,8 @@
       }
       return;
     }
-    if (target.hasAttribute("data-library-rail-tab")) { searchQuery = ""; openPanel(target.dataset.libraryRailTab); return; }
-    if (target.hasAttribute("data-tab")) { activeTab = target.getAttribute("data-tab"); searchQuery = ""; renderPanel(); return; }
+    if (target.hasAttribute("data-library-rail-tab")) { searchQuery = ""; activeLibraryTag = ""; openPanel(target.dataset.libraryRailTab); return; }
+    if (target.hasAttribute("data-tab")) { activeTab = target.getAttribute("data-tab"); searchQuery = ""; activeLibraryTag = ""; renderPanel(); return; }
     if (target.hasAttribute("data-template-open")) return openPanel("templates", target.getAttribute("data-template-open"), target.dataset.templateNodeId || "");
     if (target.hasAttribute("data-template-run")) {
       const template = readLibrary().templates.find((item) => item.id === target.getAttribute("data-template-run"));
@@ -1116,8 +1176,7 @@
       return;
     }
     if (action === "canvas-open") {
-      const select = document.querySelector(".project-picker select,.project select");
-      if (select) { select.value = target.dataset.projectId; select.dispatchEvent(new Event("change", { bubbles: true })); }
+      window.dispatchEvent(new CustomEvent("pixel-flow:project-refresh", { detail: { projectId: target.dataset.projectId } }));
       closeProjectGallery();
       return;
     }
@@ -1140,7 +1199,7 @@
     if (action === "edge-disconnect") { event.stopPropagation(); await disconnectEdge(target.dataset.edgeId); return; }
     if (action === "prompt-create") { await editPrompt(); return; }
     if (action === "prompt-edit") { await editPrompt(target.dataset.id); return; }
-    if (action === "prompt-filter") { activePromptTag = target.dataset.tag || ""; renderPanel(); return; }
+    if (action === "library-tag-filter") { activeLibraryTag = target.dataset.tag || ""; renderPanel(); return; }
     if (action === "prompt-create-task") {
       const prompt = readLibrary().prompts.find((item) => item.id === target.dataset.id);
       if (prompt) await createTaskFromPrompt(prompt);
@@ -1153,13 +1212,13 @@
     }
     if (["media-apply", "media-delete"].includes(action)) {
       const library = readLibrary(); const media = library.media.find((item) => item.id === target.dataset.id);
-      if (action === "media-delete") { library.media = library.media.filter((item) => item.id !== target.dataset.id); saveLibrary(library); renderPanel(); }
+      if (action === "media-delete") { library.media = library.media.filter((item) => item.id !== target.dataset.id); saveLibrary(library); removeMediaCard(target); }
       else if (media) await applyMedia(media);
     }
-    if (action === "media-rename") {
+    if (action === "media-edit") {
       const library = readLibrary(); const media = library.media.find((item) => item.id === target.dataset.id);
-      const name = media ? await openCanvasDialog({ title: "重命名素材", message: "输入一个容易识别的素材名称。", confirmLabel: "保存名称", inputValue: media.name || "" }) : false;
-      if (media && name) { media.name = name; saveLibrary(library); renderPanel(); notify(`素材已重命名为“${name}”`); }
+      const result = media ? await openMediaDialog(media) : false;
+      if (media && result) { Object.assign(media, { name: result.name, tags: result.tags, updatedAt: now() }); saveLibrary(library); renderPanel(); notify("素材已更新"); }
       return;
     }
     const templateFormRoot = target.closest?.(".pf-template-form") || panel;
@@ -1230,7 +1289,7 @@
     const library = readLibrary();
     const existing = library.media.find((item) => item.kind === "reference" && item.assetId === canvasImage.assetId);
     if (existing) { notify("这张图片已在图库中"); return false; }
-    library.media.unshift({ id: makeId("media"), kind: "reference", assetId: canvasImage.assetId, name: canvasImage.name || "画布图片", createdAt: now() });
+    library.media.unshift({ id: makeId("media"), kind: "reference", assetId: canvasImage.assetId, name: canvasImage.name || "画布图片", tags: [], createdAt: now() });
     saveLibrary(library); renderPanel(); notify("已加入图库");
     return true;
   }

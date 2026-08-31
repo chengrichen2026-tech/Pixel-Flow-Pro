@@ -36,3 +36,9 @@ test("deleting a canvas cancels tasks, removes runs, and keeps a fallback canvas
   assert.match(store, /name:"我的第一个画布",graph:\{nodes:\[\],edges:\[\]\}/);
   assert.match(store, /assets:await urlsFor\(project\)/);
 });
+
+test("opening an imported canvas refreshes the project list from IndexedDB", async () => {
+  const store = await readFile(new URL("src/store.ts", root), "utf8");
+  const openProject = store.slice(store.indexOf("async openProject"), store.indexOf("async renameProject"));
+  assert.match(openProject, /projects:await db\.projects\.orderBy\("updatedAt"\)\.reverse\(\)\.toArray\(\)/);
+});

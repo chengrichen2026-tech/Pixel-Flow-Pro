@@ -30,7 +30,7 @@
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
-    const mode = project?.graph?.nodes?.find((node) => node.id === taskId && node.kind === "task")?.generationMode === "api" ? "api" : "browser";
+    const mode = project?.graph?.nodes?.find((node) => node.id === taskId && node.kind === "task")?.generationMode === "browser" ? "browser" : "api";
     modeCache.set(key, mode);
     return mode;
   }
@@ -141,6 +141,13 @@
       const currentTaskId = taskId(card);
       if (!header || !currentProjectId || !currentTaskId) return;
       const mode = await readTaskMode(currentProjectId, currentTaskId);
+      const key = `${currentProjectId}:${currentTaskId}`;
+      if (mode === "api") {
+        const saving = saveTaskMode(currentProjectId, currentTaskId, "api");
+        modeSavePromises.set(key, saving);
+        await saving;
+        if (modeSavePromises.get(key) === saving) modeSavePromises.delete(key);
+      }
       if (card.querySelector(".generation-mode")) return;
       const label = document.createElement("label");
       label.className = "generation-mode nodrag nowheel";
@@ -155,7 +162,6 @@
           select.value = await readTaskMode(currentProjectId, currentTaskId);
           return;
         }
-        const key = `${currentProjectId}:${currentTaskId}`;
         const saving = saveTaskMode(currentProjectId, currentTaskId, select.value);
         modeSavePromises.set(key, saving);
         await saving;

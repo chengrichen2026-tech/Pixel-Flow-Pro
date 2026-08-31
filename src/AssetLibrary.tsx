@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { db } from "./db";
-import { LIBRARY_DRAG_TYPE, PROMPT_TAGS, readLibrary, type MediaItem, type PromptItem } from "./library";
+import { LIBRARY_DRAG_TYPE, readLibrary, type MediaItem, type PromptItem } from "./library";
 import { useStore } from "./store";
 import type { TaskNode } from "./types";
 import "./asset-library.css";
@@ -51,13 +51,15 @@ export default function AssetLibrary({tab,onClose}:{tab:LibraryTab,onClose:()=>v
   const [query,setQuery] = useState("");
   const [tag,setTag] = useState("");
   const [library,setLibrary] = useState(()=>readLibrary());
+  useEffect(()=>setTag(""),[tab]);
   useEffect(()=>{const refresh=()=>setLibrary(readLibrary());window.addEventListener('pixel-flow:library-updated',refresh);window.addEventListener('storage',refresh);return()=>{window.removeEventListener('pixel-flow:library-updated',refresh);window.removeEventListener('storage',refresh)}},[]);
   const selectedTaskId = s.selected.length===1&&s.project?.graph.nodes.some(node=>node.id===s.selected[0]&&node.kind==="task")?s.selected[0]:undefined;
   const selectedContainerId = s.selected.length===1&&s.project?.graph.nodes.some(node=>node.id===s.selected[0]&&node.kind==="image_container")?s.selected[0]:undefined;
   const mediaKind = tab==="products"?"product":"reference";
-  const media = library.media.filter(item=>item.kind===mediaKind&&item.name.toLowerCase().includes(query.toLowerCase()));
+  const media = library.media.filter(item=>item.kind===mediaKind&&`${item.name} ${(item.tags||[]).join(" ")}`.toLowerCase().includes(query.toLowerCase())&&(!tag||(item.tags||[]).includes(tag)));
   const prompts = library.prompts.filter(item=>`${item.name} ${item.content} ${(item.tags||[]).join(" ")}`.toLowerCase().includes(query.toLowerCase())&&(!tag||(item.tags||[]).includes(tag)));
+  const tagValues = useMemo(()=>[...new Set((tab==="prompts"?library.prompts:library.media.filter(item=>item.kind===mediaKind)).flatMap(item=>item.tags||[]))].sort((a,b)=>a.localeCompare(b,"zh-CN")),[library,tab,mediaKind]);
   const urls = useAssetUrls([...media.map(item=>item.assetId),...prompts.map(item=>item.exampleAssetId||"")]);
   const title = tab==="prompts"?"调用提示词":tab==="products"?"调用产品素材":"调用图库";
-  return <aside className="native-library-panel"><header><div><strong>{title}</strong><small>{selectedContainerId?"已选中图片容器，点击素材直接放入":selectedTaskId?"已选中生图任务":"未选中任务，素材将独立放入画布"}</small></div><button onClick={onClose} aria-label="收起资产库">×</button></header><input value={query} onChange={event=>setQuery(event.target.value)} placeholder="搜索可调用内容"/>{tab==="prompts"&&<nav className="native-library-filters"><button className={!tag?"active":""} onClick={()=>setTag("")}>全部</button>{PROMPT_TAGS.map(value=><button key={value} className={tag===value?"active":""} onClick={()=>setTag(value)}>{value}</button>)}</nav>}<section className={`native-library-content ${tab==="references"?"native-reference-masonry":""}`}>{tab==="prompts"?prompts.map(item=><PromptCard key={item.id} item={item} selectedTaskId={selectedTaskId}/>):media.map(item=><MediaCard key={item.id} item={item} url={urls[item.assetId]} selectedTaskId={selectedTaskId} selectedContainerId={selectedContainerId}/>) }{(tab==="prompts"?!prompts.length:!media.length)&&<p className="native-library-empty">没有符合条件的内容</p>}</section><footer className="native-library-footer"><button onClick={()=>{onClose();setTimeout(()=>window.dispatchEvent(new CustomEvent('pixel-flow:open-library-management',{detail:{tab}})),0)}}>前往库管理</button></footer></aside>;
+  return <aside className="native-library-panel"><header><div><strong>{title}</strong><small>{selectedContainerId?"已选中图片容器，点击素材直接放入":selectedTaskId?"已选中生图任务":"未选中任务，素材将独立放入画布"}</small></div><button onClick={onClose} aria-label="收起资产库">×</button></header><input value={query} onChange={event=>setQuery(event.target.value)} placeholder="搜索可调用内容"/>{tagValues.length>0&&<nav className="native-library-filters"><button className={!tag?"active":""} onClick={()=>setTag("")}>全部</button>{tagValues.map(value=><button key={value} className={tag===value?"active":""} onClick={()=>setTag(value)}>{value}</button>)}</nav>}<section className={`native-library-content ${tab==="references"?"native-reference-masonry":""}`}>{tab==="prompts"?prompts.map(item=><PromptCard key={item.id} item={item} selectedTaskId={selectedTaskId}/>):media.map(item=><MediaCard key={item.id} item={item} url={urls[item.assetId]} selectedTaskId={selectedTaskId} selectedContainerId={selectedContainerId}/>) }{(tab==="prompts"?!prompts.length:!media.length)&&<p className="native-library-empty">没有符合条件的内容</p>}</section><footer className="native-library-footer"><button onClick={()=>{onClose();setTimeout(()=>window.dispatchEvent(new CustomEvent('pixel-flow:open-library-management',{detail:{tab}})),0)}}>前往库管理</button></footer></aside>;
 }

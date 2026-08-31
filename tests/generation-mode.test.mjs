@@ -146,8 +146,8 @@ test("browser results preserve the original latest-assistant-turn writeback path
 test("reinjected ChatGPT adapter replaces a stale page listener after extension reload", async () => {
   const content = await readFile(new URL("public/contentScript.js", root), "utf8");
   const background = await readFile(new URL("public/background.js", root), "utf8");
-  assert.match(content, /CHATGPT_ADAPTER_VERSION = 24/);
-  assert.match(background, /CHATGPT_ADAPTER_VERSION = 24/);
+  assert.match(content, /CHATGPT_ADAPTER_VERSION = 25/);
+  assert.match(background, /CHATGPT_ADAPTER_VERSION = 25/);
   assert.match(content, /__gptNodeCanvasMessageListener/);
   assert.match(content, /removeListener\(previousMessageListener\)/);
   assert.match(content, /addListener\(currentMessageListener\)/);
@@ -163,17 +163,32 @@ test("browser results are recovered by a service-worker alarm without opening th
   assert.match(background, /async function reconcileBrowserTaskResults\(\)/);
   assert.match(background, /type: "RESUME_CHATGPT_RESULT"/);
   assert.match(background, /alarm\.name === BROWSER_RESULT_RECOVERY_ALARM/);
-  assert.match(background, /message\.phase !== "submitted" \|\| adapterState\?\.submitActive/);
+  assert.match(background, /if \(message\.phase !== "submitted"\) continue/);
   assert.match(background, /const concreteUrl = concreteChatGptConversationUrl\(mapped\.conversationUrl\)/);
   assert.match(background, /Date\.now\(\) - \(message\.submittedAt \?\? message\.startedAt \?\? 0\) > 12e4/);
   assert.match(background, /await chrome\.tabs\.reload\(mapped\.tabId\)/);
   assert.match(content, /__gptNodeCanvasActiveResumeTasks/);
   assert.match(content, /__gptNodeCanvasActiveSubmitTasks/);
-  assert.match(content, /activeSubmitTasks\.has\(resumeKey\)/);
+  assert.doesNotMatch(content, /activeSubmitTasks\.has\(resumeKey\)/);
   assert.match(content, /taskPhases\.set\(taskKey, "preparing_tab"\)/);
   assert.match(content, /await input\.onPhase\?\.\("submitted"\)/);
   assert.match(content, /signalBackgroundPageActivity\(\)/);
   assert.match(content, /activeResumeTasks\.has\(resumeKey\)/);
+  assert.match(content, /type: "TASK_ERROR",\s*recovery: true/);
+  assert.match(background, /message\.type === "TASK_ERROR" && recoveryMessageState\?\.phase === "submitted" && !message\.recovery/);
+});
+
+test("extension reload reconstructs recovery state for persisted generating browser tasks", async () => {
+  const background = await readFile(new URL("public/background.js", root), "utf8");
+  assert.match(background, /for \(const project of await projectRepository\.listProjects\(\)\)/);
+  assert.match(background, /task\.generationMode !== "browser" \|\| !\["sending", "generating"\]\.includes\(task\.status\)/);
+  assert.match(background, /const conversationUrl = concreteChatGptConversationUrl\(task\.conversationUrl\)/);
+  assert.match(background, /const storedMessage = browserTaskMessages\.get\(key\)/);
+  assert.match(background, /\.\.\.storedMessage/);
+  assert.match(background, /phase: "submitted"/);
+  assert.match(background, /if \(!queue\.running\.includes\(key\)\) queue\.running\.push\(key\)/);
+  assert.match(background, /tabRegistry\.map\(key, void 0, conversationUrl\)/);
+  assert.match(background, /pendingMessage\?\.phase === "submitted" && \["preparing_tab", "uploading", "sending"\]\.includes\(message\.status\)/);
 });
 
 test("hidden ChatGPT tabs receive page activity signals while reference images upload", async () => {

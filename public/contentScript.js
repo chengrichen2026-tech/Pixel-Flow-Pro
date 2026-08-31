@@ -1,7 +1,7 @@
 "use strict";
 (() => {
   // src/shared/protocol.ts
-  var CHATGPT_ADAPTER_VERSION = 24;
+  var CHATGPT_ADAPTER_VERSION = 25;
   var taskTypes = /* @__PURE__ */ new Set([
     "RUN_TASK",
     "CANCEL_TASK",
@@ -622,7 +622,6 @@
       if (raw.type === "RESUME_CHATGPT_RESULT") {
         const resumeKey = taskKey;
         signalBackgroundPageActivity();
-        if (activeSubmitTasks.has(resumeKey)) return true;
         const resumePhase = taskPhases.get(resumeKey);
         if (resumePhase && !["submitted", "generating", "collecting_result"].includes(resumePhase)) return true;
         if (activeResumeTasks.has(resumeKey)) return true;
@@ -637,6 +636,7 @@
           conversationUrl: location.href
         })).catch((error) => report({
           type: "TASK_ERROR",
+          recovery: true,
           projectId: message.projectId,
           taskId: message.taskId,
           reason: error instanceof AdapterError ? error.reason : "network_error",
@@ -684,8 +684,9 @@
           });
         }
       }).then((result) => report({
-        type: "TASK_RESULT",
-        projectId: message.projectId,
+          type: "TASK_RESULT",
+          recovery: true,
+          projectId: message.projectId,
         taskId: message.taskId,
         images: result.images,
         responseText: result.responseText,

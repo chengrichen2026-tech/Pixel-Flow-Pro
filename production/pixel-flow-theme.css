@@ -188,13 +188,13 @@ body.pf-gallery-open .pf-library-rail button[data-action="save-memory"]{display:
 .pf-prompt-example-thumb img{width:100%;height:100%;object-fit:cover}
 .pf-usage-list .pf-prompt-example-thumb{height:auto;aspect-ratio:3/2}
 .pf-prompt-dialog-backdrop{position:fixed;inset:0;z-index:1700;display:grid;place-items:center;padding:20px;background:rgba(35,38,44,.36);backdrop-filter:blur(7px)}
-.pf-prompt-dialog{width:min(640px,100%);max-height:calc(100dvh - 40px);overflow:auto;padding:20px;color:#25282e;background:#fff;border:1px solid #dfe2e7;border-radius:18px;box-shadow:0 28px 80px rgba(31,37,46,.25)}
-.pf-prompt-dialog>header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
+.pf-prompt-dialog{width:min(640px,100%);max-height:calc(100dvh - 40px);overflow:hidden;display:flex;flex-direction:column;color:#25282e;background:#fff;border:1px solid #dfe2e7;border-radius:18px;box-shadow:0 28px 80px rgba(31,37,46,.25)}
+.pf-prompt-dialog>header{flex:0 0 auto;display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:20px 20px 0}
 .pf-prompt-dialog>header>div{display:grid;gap:4px}
 .pf-prompt-dialog>header strong{font-size:18px}
 .pf-prompt-dialog>header small{color:#858b95;font-size:10px}
 .pf-prompt-dialog>header>button{width:32px;height:32px;color:#747a84;background:#f1f2f4;border:0;border-radius:9px;font-size:19px;cursor:pointer}
-.pf-prompt-dialog-form{display:grid;gap:14px;margin-top:18px}
+.pf-prompt-dialog-form{min-height:0;flex:1 1 auto;overflow:auto;display:grid;gap:14px;margin-top:18px;padding:0 20px 16px;overscroll-behavior:contain}
 .pf-prompt-dialog-form>label{display:grid;gap:6px;color:#555b65;font-size:10px;font-weight:700}
 .pf-prompt-dialog-form input,.pf-prompt-dialog-form textarea{width:100%;padding:10px 11px;color:#25282e;background:#f8f9fa;border:1px solid #dfe2e7;border-radius:10px;outline:0;font-size:11px;font-weight:400}
 .pf-prompt-dialog-form input{height:40px}
@@ -211,7 +211,7 @@ body.pf-gallery-open .pf-library-rail button[data-action="save-memory"]{display:
 .pf-prompt-example-actions button{height:32px;padding:0 10px;color:#656b75;background:#fff;border:1px solid #dfe2e7;border-radius:8px;font-size:9px;cursor:pointer}
 .pf-prompt-example-actions button:disabled{opacity:.4;cursor:default}
 .pf-prompt-dialog-error{min-height:16px;margin:0;color:#bd4038;font-size:10px}
-.pf-prompt-dialog>footer{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
+.pf-prompt-dialog>footer{position:relative;z-index:2;flex:0 0 auto;display:flex;justify-content:flex-end;gap:8px;margin:0;padding:12px 20px 20px;background:#fff;border-top:1px solid #eceef1;box-shadow:0 -8px 20px rgba(31,37,46,.04)}
 .pf-prompt-dialog>footer button{height:38px;padding:0 15px;color:#5f6570;background:#fff;border:1px solid #dfe2e7;border-radius:9px;font-size:10px;font-weight:700;cursor:pointer}
 .pf-prompt-dialog>footer button.primary{color:#fff;border-color:#6f3cff;background:#6f3cff}
 .pf-library-panel>.pf-prompt-filters{display:flex;grid-template-columns:none;flex-wrap:wrap;gap:7px;padding:4px 12px 8px}
@@ -235,6 +235,7 @@ body.pf-gallery-open .pf-library-rail button[data-action="save-memory"]{display:
 .pf-prompt-tag-picker span{display:grid;place-items:center;height:32px;padding:0 13px;color:#666c76;background:#fff;border:1px solid #dfe2e7;border-radius:999px;font-size:9px;font-weight:700}
 .pf-prompt-tag-picker input:checked+span{color:#fff;border-color:#6f3cff;background:#6f3cff}
 .pf-prompt-tag-picker input:focus-visible+span{outline:2px solid #9470ff;outline-offset:2px}
+.pf-tag-editor{margin:0;padding:10px 12px 12px;border:1px solid #e1e4e9;border-radius:11px}.pf-tag-editor legend{padding:0 5px;color:#555b65;font-size:10px;font-weight:700}.pf-tag-editor legend small{color:#8c929c;font-weight:400}.pf-tag-editor>[data-tag-chips]{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}.pf-tag-editor>[data-tag-chips]:empty{margin:0}.pf-tag-editor [data-tag-remove]{display:flex;align-items:center;gap:6px;height:30px;padding:0 9px;color:#6748d8;background:#f1edff;border:0;border-radius:999px;font-size:9px;font-weight:700;cursor:pointer}.pf-tag-editor [data-tag-remove]:hover{color:#fff;background:#6f3cff}.pf-tag-editor [data-tag-input]{height:36px}.pf-media-dialog{width:min(520px,100%)}
 @media(max-width:680px){.pf-prompt-example{grid-template-columns:1fr}.pf-prompt-example-preview{grid-column:1;grid-row:auto;width:100%}}
 @media(max-width:760px){.pf-template-grid{grid-template-columns:1fr}.pf-template-dialog-backdrop{padding:8px}.pf-template-dialog{max-height:calc(100dvh - 16px)}}
 .pf-library-card-actions{display:flex!important;align-items:center;justify-content:flex-end;gap:4px!important;padding:5px 4px 3px!important}
@@ -307,6 +308,11 @@ body.pf-gallery-open .pf-library-rail button[data-action="save-memory"]{display:
 .pf-library-panel.is-management .pf-media-grid--reference{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));grid-auto-rows:8px;column-width:auto;column-gap:0;row-gap:6px;column-gap:6px;align-items:start}
 @media(max-width:1180px){.pf-library-panel.is-management .pf-media-grid--reference{grid-template-columns:repeat(3,minmax(0,1fr))}}
 .pf-library-panel.is-management .pf-media-grid--reference .pf-media-item{display:block;width:auto;margin:0;break-inside:auto;vertical-align:initial}
+.pf-library-panel.is-management .pf-tagged-library-card{position:relative!important;overflow:hidden!important;padding:10px!important;border:1px solid #e1e4e9!important;border-radius:12px!important;background:#fff!important}
+.pf-library-panel.is-management .pf-tagged-library-card>.pf-management-card-meta{position:static!important;min-height:0!important;align-items:center!important;padding:7px 0 0!important;color:inherit!important;background:transparent!important;opacity:1!important;transform:none!important;pointer-events:auto!important}
+.pf-library-panel.is-management .pf-tagged-library-card>.pf-management-card-meta>strong{color:#34383f!important;text-shadow:none!important}
+.pf-library-panel.is-management .pf-tagged-library-card>.pf-management-card-meta>span{display:flex!important;gap:4px;pointer-events:auto}
+.pf-library-panel.is-management .pf-tagged-library-card>.pf-prompt-tags{position:static!important;display:flex!important;width:auto!important;height:auto!important;min-height:22px!important;aspect-ratio:auto!important;margin:7px 0 0!important;padding:0!important;background:transparent!important}
 .react-flow__node .node-handle,.react-flow__node .react-flow__handle{z-index:30!important;pointer-events:all!important}
 .run-button .pf-utility-icon{color:#fff!important}
 .toolbar button:hover .pf-art-icon,.native-library-rail button:hover .pf-art-icon{filter:brightness(0) invert(1)}

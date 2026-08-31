@@ -6511,7 +6511,7 @@ async function applyTaskMessage(project, message, saveAsset) {
 }
 
 // src/shared/protocol.ts
-var CHATGPT_ADAPTER_VERSION = 24;
+var CHATGPT_ADAPTER_VERSION = 25;
 var taskTypes = /* @__PURE__ */ new Set([
   "RUN_TASK",
   "CANCEL_TASK",
@@ -6921,6 +6921,32 @@ var schedulerReady = chrome.storage.session.get(["schedulerState", "activeTaskTa
     for (const entry of storedBrowserTaskMessages) if (Array.isArray(entry) && typeof entry[0] === "string") browserTaskMessages.set(entry[0], recoveryMessage(entry[1]));
     await saveBrowserTaskMessages();
   }
+  for (const project of await projectRepository.listProjects()) {
+    for (const task of project.graph.nodes) {
+      if (task.kind !== "task" || task.generationMode !== "browser" || !["sending", "generating"].includes(task.status)) continue;
+      const conversationUrl = concreteChatGptConversationUrl(task.conversationUrl);
+      if (!conversationUrl) continue;
+      const key = createTaskScopeKey(project.id, task.id);
+      const storedMessage = browserTaskMessages.get(key);
+      browserTaskMessages.set(key, recoveryMessage({
+          ...storedMessage,
+          type: "EXECUTE_IN_CHATGPT_V3",
+          projectId: project.id,
+          taskId: task.id,
+          prompt: appendAspectRatioPrompt(task.prompt, task.aspectRatio ?? "auto"),
+          images: [],
+          expectedConversationUrl: conversationUrl,
+          startedAt: Date.now(),
+          submittedAt: Date.now(),
+          phase: "submitted"
+        }));
+      if (!queue.running.includes(key)) queue.running.push(key);
+      pendingScopes.set(key, { projectId: project.id, taskId: task.id });
+      tabRegistry.map(key, void 0, conversationUrl);
+    }
+  }
+  await saveBrowserTaskMessages();
+  await saveScheduler();
 });
 void schedulerReady.then(() => {
   if (browserTaskMessages.size > 0) scheduleBrowserResultRecoveryAlarm();
@@ -7027,7 +7053,7 @@ async function reconcileBrowserTaskResults() {
         await chrome.scripting.executeScript({ target: { tabId: mapped.tabId }, files: ["contentScript.js"] });
         adapterState = await probeAdapter(chrome.tabs, mapped.tabId, message);
       }
-      if (message.phase !== "submitted" || adapterState?.submitActive) continue;
+      if (message.phase !== "submitted") continue;
       const concreteUrl = concreteChatGptConversationUrl(mapped.conversationUrl);
       if (!concreteUrl) continue;
       await chrome.tabs.sendMessage(mapped.tabId, { ...message, type: "RESUME_CHATGPT_RESULT", images: [] });
@@ -7381,8 +7407,15 @@ async function handlePageTaskMessage(message, senderTab) {
   }
   const handled = await updateScheduler(async () => {
     if (!queue.running.includes(key)) return false;
+    const recoveryMessageState = browserTaskMessages.get(key);
+    if (message.type === "TASK_ERROR" && recoveryMessageState?.phase === "submitted" && !message.recovery) {
+      return true;
+    }
     if (message.type === "TASK_STATUS") {
       const pendingMessage = browserTaskMessages.get(key);
+      if (pendingMessage?.phase === "submitted" && ["preparing_tab", "uploading", "sending"].includes(message.status)) {
+        return true;
+      }
       if (pendingMessage) {
         const phase = message.status === "generating" ? "submitted" : message.status;
         browserTaskMessages.set(key, {

@@ -9,7 +9,8 @@ test("rebuilt asset library reuses the existing local schema", async () => {
   assert.match(library, /LIBRARY_STORAGE_KEY = "pixelFlowMvpLibraryV1"/);
   assert.match(library, /prompts: \(parsed\?\.prompts \|\| \[\]\)/);
   assert.match(library, /media: \(parsed\?\.media \|\| \[\]\)/);
-  assert.match(library, /PROMPT_TAGS/);
+  assert.match(library, /tags\?: string\[\]/);
+  assert.match(library, /new Set\(item\.tags\.map/);
   assert.match(library, /application\/x-pixel-flow-library/);
 });
 
