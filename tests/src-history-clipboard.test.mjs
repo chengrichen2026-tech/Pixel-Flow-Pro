@@ -61,7 +61,7 @@ test("command copy and paste duplicates selected images, containers, and generat
     readFile(new URL("src/main.tsx", root), "utf8"),
     readFile(new URL("src/store.ts", root), "utf8"),
   ]);
-  assert.match(main, /<CanvasClipboardShortcuts\/><App \/>/);
+  assert.match(main, /<CanvasClipboardShortcuts\/><ReactFlowProvider><App \/><\/ReactFlowProvider>/);
   assert.match(app, /key==='c'&&s\.copySelected\(\)/);
   assert.match(app, /onPointerDownCapture=\{\(\)=>s\.setSelected\(\[n\.id\]\)\}/);
   assert.doesNotMatch(app, /key==='v'\)\{event\.preventDefault/);

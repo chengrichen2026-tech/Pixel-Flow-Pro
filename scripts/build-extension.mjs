@@ -6,7 +6,7 @@ const output = resolve(root, "扩展程序");
 await mkdir(output, { recursive: true });
 await mkdir(resolve(output, "assets"), { recursive: true });
 await cp(resolve(root, "public", "icons"), resolve(output, "icons"), { recursive: true });
-for (const file of ["manifest.json", "background.js", "contentScript.js", "api-client.js", "icon.svg"]) {
+for (const file of ["manifest.json", "background.js", "contentScript.js", "api-client.js", "icon.svg", "icon-16.png", "icon-32.png", "icon-48.png", "icon-128.png"]) {
   await copyFile(resolve(root, "public", file), resolve(output, file));
 }
 await copyFile(resolve(root, "production", "index.html"), resolve(output, "index.html"));

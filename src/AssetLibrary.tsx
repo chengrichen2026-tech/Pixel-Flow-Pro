@@ -51,7 +51,7 @@ export default function AssetLibrary({tab,onClose}:{tab:LibraryTab,onClose:()=>v
   const [query,setQuery] = useState("");
   const [tag,setTag] = useState("");
   const [library,setLibrary] = useState(()=>readLibrary());
-  useEffect(()=>setTag(""),[tab]);
+  useEffect(()=>{setTag("");setQuery("")},[tab]);
   useEffect(()=>{const refresh=()=>setLibrary(readLibrary());window.addEventListener('pixel-flow:library-updated',refresh);window.addEventListener('storage',refresh);return()=>{window.removeEventListener('pixel-flow:library-updated',refresh);window.removeEventListener('storage',refresh)}},[]);
   const selectedTaskId = s.selected.length===1&&s.project?.graph.nodes.some(node=>node.id===s.selected[0]&&node.kind==="task")?s.selected[0]:undefined;
   const selectedContainerId = s.selected.length===1&&s.project?.graph.nodes.some(node=>node.id===s.selected[0]&&node.kind==="image_container")?s.selected[0]:undefined;

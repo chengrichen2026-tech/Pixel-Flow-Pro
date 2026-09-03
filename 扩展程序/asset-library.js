@@ -991,6 +991,8 @@
   function layoutMediaMasonry(root) {
     for (const grid of root.querySelectorAll(".pf-media-grid--reference")) {
       const layout = () => requestAnimationFrame(() => {
+        const scrollContainer = grid.closest(".pf-library-content");
+        const preservedScrollTop = scrollContainer?.scrollTop;
         const items = [...grid.querySelectorAll(".pf-media-item")];
         if (grid.closest(".pf-library-panel.is-management")) {
           const styles = getComputedStyle(grid);
@@ -1012,6 +1014,9 @@
             item.style.gridRowEnd = "auto";
             item.style.gridRowEnd = `span ${Math.ceil((item.getBoundingClientRect().height + 14) / 22)}`;
           }
+        }
+        if (scrollContainer && preservedScrollTop !== undefined && scrollContainer.scrollTop !== preservedScrollTop) {
+          scrollContainer.scrollTop = preservedScrollTop;
         }
       });
       layout();
@@ -1035,6 +1040,8 @@
     closeProjectGallery();
     panelMode = templateId ? "template-editor" : "usage";
     activeTab = tab;
+    activeLibraryTag = "";
+    searchQuery = "";
     if (templateId) editingTemplateId = templateId;
     editingTemplateNodeId = templateNodeId || "";
     if (!panel) {

@@ -7,9 +7,9 @@
   "host_permissions": ["https://chatgpt.com/*", "https://*.oaiusercontent.com/*", "https://aihub.rbmanon.cn/*", "http://127.0.0.1:43129/*", "http://127.0.0.1:43128/*", "ws://127.0.0.1:43128/*"],
   "action": {
     "default_title": "打开 Pixel Flow",
-    "default_icon": "icon.svg"
+    "default_icon": { "16": "icon-16.png", "32": "icon-32.png", "48": "icon-48.png", "128": "icon-128.png" }
   },
-  "icons": { "128": "icon.svg" },
+  "icons": { "16": "icon-16.png", "32": "icon-32.png", "48": "icon-48.png", "128": "icon-128.png" },
   "background": {
     "service_worker": "background.js",
     "type": "module"

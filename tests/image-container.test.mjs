@@ -128,3 +128,13 @@ test("repeated product clicks keep the connected task selected after each projec
   assert.match(store, /async refresh\(projectId\) \{ return serializeProjectRead/);
   assert.match(store, /async openProject\(projectId\)\{return serializeProjectRead/);
 });
+
+test("canvas retries edge rendering after newly inserted nodes are measured", async () => {
+  const [app, main] = await Promise.all([
+    source("src/App.tsx"),
+    source("src/main.tsx"),
+  ]);
+  assert.match(main, /<ReactFlowProvider><App \/><\/ReactFlowProvider>/);
+  assert.match(app, /const nodesInitialized=useNodesInitialized\(\)/);
+  assert.match(app, /\[s\.project,edgeMenu\?\.id,nodesInitialized\]/);
+});

@@ -307,6 +307,7 @@ body.pf-gallery-open .pf-library-rail button[data-action="save-memory"]{display:
 .pf-library-panel.is-management .pf-prompt-item .pf-management-card-meta>span,.pf-library-panel.is-management .pf-media-grid--product .pf-management-card-meta>span,.pf-library-panel.is-management .pf-template-item .pf-management-card-meta>span{display:flex;gap:4px;pointer-events:auto}
 .pf-library-panel.is-management .pf-media-grid--reference{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));grid-auto-rows:8px;column-width:auto;column-gap:0;row-gap:6px;column-gap:6px;align-items:start}
 @media(max-width:1180px){.pf-library-panel.is-management .pf-media-grid--reference{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.pf-library-content{overflow-anchor:none}
 .pf-library-panel.is-management .pf-media-grid--reference .pf-media-item{display:block;width:auto;margin:0;break-inside:auto;vertical-align:initial}
 .pf-library-panel.is-management .pf-tagged-library-card{position:relative!important;overflow:hidden!important;padding:10px!important;border:1px solid #e1e4e9!important;border-radius:12px!important;background:#fff!important}
 .pf-library-panel.is-management .pf-tagged-library-card>.pf-management-card-meta{position:static!important;min-height:0!important;align-items:center!important;padding:7px 0 0!important;color:inherit!important;background:transparent!important;opacity:1!important;transform:none!important;pointer-events:auto!important}
