@@ -19,10 +19,14 @@ test("Miaoda worker keeps OAuth local and uses lease, chunks, and cleanup", asyn
   const worker = await readFile(new URL("../miaoda-worker/worker.mjs", import.meta.url), "utf8");
   const install = await readFile(new URL("../miaoda-worker/install.sh", import.meta.url), "utf8");
   const acceptance = await readFile(new URL("../miaoda-worker/acceptance.mjs", import.meta.url), "utf8");
+  const backfill = await readFile(new URL("../miaoda-worker/backfill-preview.mjs", import.meta.url), "utf8");
   assert.match(worker, /PIXEL_FLOW_CODEX_IMAGE_SCRIPT/);
   assert.match(worker, /\/worker\/claim/);
   assert.match(worker, /\/heartbeat/);
-  assert.match(worker, /\/result-chunks/);
+  assert.match(worker, /"result-chunks"/);
+  assert.match(worker, /"preview-chunks"/);
+  assert.match(worker, /PIXEL_FLOW_MIAODA_SIPS \|\| "\/usr\/bin\/sips"/);
+  assert.match(worker, /"-Z",[\s\S]*"480"/);
   assert.match(worker, /PIXEL_FLOW_MIAODA_POLL_MS \|\| 15e3/);
   assert.match(worker, /PIXEL_FLOW_MIAODA_CHUNK_PACE_MS \|\| 250/);
   assert.match(worker, /response\.status === 429 && attempt < 6/);
@@ -32,7 +36,11 @@ test("Miaoda worker keeps OAuth local and uses lease, chunks, and cleanup", asyn
   assert.match(install, /RunAtLoad/);
   assert.match(install, /KeepAlive/);
   assert.match(install, /Pixel Flow Miaoda Worker/);
+  assert.match(install, /Library\/LaunchAgents/);
   assert.match(install, /if ! launchctl bootstrap/);
   assert.match(acceptance, /\/result-chunks\//);
-  assert.match(acceptance, /method: "DELETE"/);
+  assert.match(acceptance, /\/acknowledge/);
+  assert.match(backfill, /\/preview-chunks/);
+  assert.match(backfill, /\/acknowledge/);
+  assert.match(backfill, /await rm\(temporary, \{ recursive: true, force: true \}\)/);
 });

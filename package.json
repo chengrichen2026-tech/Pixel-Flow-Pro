@@ -1,7 +1,7 @@
 {
   "name": "pixel-flow",
   "private": true,
-  "version": "0.3.4",
+  "version": "0.3.5",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -21,6 +21,7 @@
     "miaoda-worker:install": "zsh miaoda-worker/install.sh",
     "miaoda-worker:uninstall": "zsh miaoda-worker/uninstall.sh",
     "miaoda-worker:acceptance": "node miaoda-worker/acceptance.mjs",
+    "miaoda-worker:backfill-preview": "node miaoda-worker/backfill-preview.mjs",
     "bridge:start": "node tools/pixel-flow-bridge/daemon.mjs",
     "bridge:install": "zsh scripts/pixel-flow-bridge-launchd.sh install",
     "bridge:status": "zsh scripts/pixel-flow-bridge-launchd.sh status",

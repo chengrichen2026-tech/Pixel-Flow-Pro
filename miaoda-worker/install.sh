@@ -6,7 +6,8 @@ project_dir="$(cd "$script_dir/.." && pwd)"
 source_config="$project_dir/runtime/miaoda-worker/config.json"
 install_dir="$HOME/Library/Application Support/Pixel Flow Miaoda Worker"
 runtime_dir="$install_dir/runtime"
-service_plist="$install_dir/$service_label.plist"
+launch_agents_dir="$HOME/Library/LaunchAgents"
+service_plist="$launch_agents_dir/$service_label.plist"
 node_bin="$(command -v node)"
 python_bin="$(command -v python3)"
 image_script="$HOME/.codex/skills/codex-gpt-image/scripts/codex_gpt_image.py"
@@ -15,7 +16,7 @@ if [[ ! -f "$source_config" ]]; then
   echo "缺少 $source_config；请先创建 Mac Worker 凭证"
   exit 1
 fi
-mkdir -p "$install_dir" "$runtime_dir"
+mkdir -p "$install_dir" "$runtime_dir" "$launch_agents_dir"
 cp "$script_dir/worker.mjs" "$install_dir/worker.mjs"
 cp "$script_dir/core.mjs" "$install_dir/core.mjs"
 cp "$source_config" "$install_dir/config.json"

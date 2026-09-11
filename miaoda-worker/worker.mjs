@@ -11,6 +11,7 @@ const runtimeDir = process.env.PIXEL_FLOW_MIAODA_RUNTIME_DIR || resolve(root, "r
 const configPath = process.env.PIXEL_FLOW_MIAODA_CONFIG || resolve(runtimeDir, "config.json");
 const statusPath = resolve(runtimeDir, "status.json");
 const python = process.env.PIXEL_FLOW_MIAODA_PYTHON || "python3";
+const sips = process.env.PIXEL_FLOW_MIAODA_SIPS || "/usr/bin/sips";
 const imageScript = process.env.PIXEL_FLOW_CODEX_IMAGE_SCRIPT || resolve(homedir(), ".codex", "skills", "codex-gpt-image", "scripts", "codex_gpt_image.py");
 const pollMs = Number(process.env.PIXEL_FLOW_MIAODA_POLL_MS || 15e3);
 const chunkPaceMs = Number(process.env.PIXEL_FLOW_MIAODA_CHUNK_PACE_MS || 250);
@@ -84,19 +85,19 @@ async function downloadInput(config, job, descriptor, temporary) {
   return path;
 }
 
-async function uploadResult(config, job, workerId, outputPath) {
-  const base64 = (await readFile(outputPath)).toString("base64");
+async function uploadImage(config, job, workerId, inputPath, endpoint, name, mimeType) {
+  const base64 = (await readFile(inputPath)).toString("base64");
   const chunks = splitBase64(base64);
   for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
-    await request(config, `/worker/jobs/${job.id}/result-chunks`, {
+    await request(config, `/worker/jobs/${job.id}/${endpoint}`, {
       method: "POST",
       body: JSON.stringify({
         workerId,
         imageIndex: 0,
         chunkIndex,
         totalChunks: chunks.length,
-        name: "result-1.png",
-        mimeType: "image/png",
+        name,
+        mimeType,
         base64: chunks[chunkIndex]
       })
     });
@@ -116,13 +117,48 @@ async function processJob(config, job) {
     await saveStatus("generating", job.id);
     const promptPath = resolve(temporary, "prompt.txt");
     const outputPath = resolve(temporary, "output.png");
+    const previewPath = resolve(temporary, "preview.jpg");
     await writeFile(promptPath, job.prompt, { mode: 0o600 });
     const args = [imageScript, "generate", "--prompt-file", promptPath, "--out", outputPath, "--size", sizeForRatio(job.ratio), "--timeout", "420"];
     for (const descriptor of job.inputImages || []) {
       args.push("--image", await downloadInput(config, job, descriptor, temporary));
     }
     await runProcess(python, args, 8 * 60 * 1000);
-    await uploadResult(config, job, config.workerId, outputPath);
+    await runProcess(
+      sips,
+      [
+        "-Z",
+        "480",
+        "-s",
+        "format",
+        "jpeg",
+        "-s",
+        "formatOptions",
+        "70",
+        outputPath,
+        "--out",
+        previewPath,
+      ],
+      60e3,
+    );
+    await uploadImage(
+      config,
+      job,
+      config.workerId,
+      outputPath,
+      "result-chunks",
+      "result-1.png",
+      "image/png",
+    );
+    await uploadImage(
+      config,
+      job,
+      config.workerId,
+      previewPath,
+      "preview-chunks",
+      "preview-1.jpg",
+      "image/jpeg",
+    );
     await request(config, `/worker/jobs/${job.id}/complete`, {
       method: "POST",
       body: JSON.stringify({ workerId: config.workerId, resultCount: 1 })

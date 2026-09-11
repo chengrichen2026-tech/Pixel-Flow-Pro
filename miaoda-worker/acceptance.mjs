@@ -57,5 +57,5 @@ for (let chunkIndex = 0; chunkIndex < descriptor.totalChunks; chunkIndex += 1) {
 const output = Buffer.from(chunks.join(""), "base64");
 await mkdir(dirname(outputPath), { recursive: true });
 await writeFile(outputPath, output);
-await request(`/jobs/${created.id}`, { method: "DELETE" });
+await request(`/jobs/${created.id}/acknowledge`, { method: "POST" });
 process.stdout.write(`completed ${output.length} bytes ${outputPath}\n`);

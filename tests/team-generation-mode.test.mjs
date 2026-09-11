@@ -19,6 +19,7 @@ test("team mode sends authenticated jobs without exposing Codex OAuth to the ext
   assert.match(background, /\/input-chunks/);
   assert.match(background, /async function downloadTeamGatewayImages\(job\)/);
   assert.match(background, /\/result-chunks\//);
+  assert.match(background, /\/acknowledge`, \{ method: "POST" \}/);
   assert.match(background, /TEAM_GATEWAY_CHUNK_CHARACTERS = 6e4/);
   assert.match(background, /TEAM_GATEWAY_CHUNK_PACE_MS = 250/);
   assert.match(background, /response\.status === 429 && attempt < 6/);
@@ -33,6 +34,7 @@ test("team jobs recover through the persistent worker path", () => {
   assert.match(background, /\["api", "team"\]\.includes\(task\.generationMode\)/);
   assert.match(background, /task\.generationMode === "team" \? teamGatewayRequest : apiWorkerRequest/);
   assert.match(background, /title: task\.generationMode === "team" \? "团队生图完成" : "API 生图完成"/);
+  assert.match(background, /task\.generationMode === "team"[\s\S]*teamGatewayRequest\(`\/jobs\/\$\{task\.apiJobId\}\/acknowledge`/);
 });
 
 test("structured commands can create team generation tasks", () => {

@@ -7309,7 +7309,7 @@ async function executeTeamTask(projectId, taskId, project, task) {
       return true;
     });
     if (!handled) return;
-    void teamGatewayRequest(`/jobs/${jobId}`, { method: "DELETE" }).catch(() => {});
+    void teamGatewayRequest(`/jobs/${jobId}/acknowledge`, { method: "POST" }).catch(() => {});
     await chrome.notifications.create(createTaskNotificationId(projectId, taskId), {
       type: "basic",
       iconUrl: chrome.runtime.getURL("icon.svg"),
@@ -7562,7 +7562,11 @@ async function reconcileCompletedApiTasks() {
       });
       if (!handled) continue;
       activeApiJobs -= 1;
-      void (task.generationMode === "team" ? teamGatewayRequest : apiWorkerRequest)(`/jobs/${task.apiJobId}`, { method: "DELETE" }).catch(() => {});
+      if (task.generationMode === "team") {
+        void teamGatewayRequest(`/jobs/${task.apiJobId}/acknowledge`, { method: "POST" }).catch(() => {});
+      } else {
+        void apiWorkerRequest(`/jobs/${task.apiJobId}`, { method: "DELETE" }).catch(() => {});
+      }
       if (job.status === "completed") {
         await chrome.notifications.create(createTaskNotificationId(project.id, task.id), {
           type: "basic",
