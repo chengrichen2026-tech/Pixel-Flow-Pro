@@ -1,7 +1,7 @@
 {
   "name": "pixel-flow",
   "private": true,
-  "version": "0.2.7",
+  "version": "0.3.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,6 +11,12 @@
     "test": "node --test tests/all.test.mjs",
     "api-worker:install": "zsh api-worker/install.sh",
     "api-worker:uninstall": "zsh api-worker/uninstall.sh",
+    "team-gateway:init": "zsh team-gateway/manage.sh init",
+    "team-gateway:start": "node team-gateway/server.mjs",
+    "team-gateway:install": "zsh team-gateway/install.sh",
+    "team-gateway:uninstall": "zsh team-gateway/uninstall.sh",
+    "team-gateway:token": "zsh team-gateway/manage.sh token",
+    "team-gateway:members": "zsh team-gateway/manage.sh members",
     "bridge:start": "node tools/pixel-flow-bridge/daemon.mjs",
     "bridge:install": "zsh scripts/pixel-flow-bridge-launchd.sh install",
     "bridge:status": "zsh scripts/pixel-flow-bridge-launchd.sh status",

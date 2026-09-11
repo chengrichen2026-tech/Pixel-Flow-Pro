@@ -22,7 +22,8 @@ test("new prompt tasks and templates default to API generation", async () => {
   const source = await readFile(new URL("production/asset-library.js", root), "utf8");
   assert.match(source, /prompt\.content[^}]+generationMode: "api"/s);
   assert.match(source, /name: "未命名生图模板"[^}]+generationMode: "api"/s);
-  assert.match(source, /data\.get\("generationMode"\) \|\| "api"/);
+  assert.match(source, /\["browser", "team"\]\.includes\(String\(data\.get\("generationMode"\)\)\)[^\n]+: "api"/);
+  assert.match(source, /<option value="team"[^>]*>团队生图<\/option>/);
 });
 
 test("the asset enhancer waits for the original canvas database to be ready", async () => {

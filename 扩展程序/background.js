@@ -7077,11 +7077,41 @@ async function apiWorkerRequest(path, options = {}) {
   if (!response.ok) throw new Error(payload.error || `本机 API 任务服务返回 HTTP ${response.status}`);
   return payload;
 }
+async function teamGatewaySettings() {
+  const { pixelFlowTeamGatewayUrl, pixelFlowTeamToken } = await chrome.storage.local.get(["pixelFlowTeamGatewayUrl", "pixelFlowTeamToken"]);
+  const baseUrl = typeof pixelFlowTeamGatewayUrl === "string" ? pixelFlowTeamGatewayUrl.trim().replace(/\/$/, "") : "";
+  const token = typeof pixelFlowTeamToken === "string" ? pixelFlowTeamToken.trim() : "";
+  if (!/^https?:\/\//.test(baseUrl) || !token) throw new Error("请先在“生图设置”中保存团队网关地址和成员令牌");
+  return { baseUrl, token };
+}
+async function teamGatewayRequest(path, options = {}) {
+  const { baseUrl, token } = await teamGatewaySettings();
+  let response;
+  try {
+    response = await fetch(`${baseUrl}${path}`, {
+      ...options,
+      headers: { Authorization: `Bearer ${token}`, ...(options.headers || {}) }
+    });
+  } catch {
+    throw new Error("无法连接团队生图网关，请检查 Tailscale、网关地址和主机状态");
+  }
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || `团队生图网关返回 HTTP ${response.status}`);
+  return payload;
+}
 async function waitForApiWorkerJob(jobId) {
   while (true) {
     const job = await apiWorkerRequest(`/jobs/${jobId}`);
     if (job.status === "completed") return job.images || [];
     if (job.status === "failed") throw new Error(job.error || "API 生图失败");
+    await new Promise((resolve) => setTimeout(resolve, 2e3));
+  }
+}
+async function waitForTeamGatewayJob(jobId) {
+  while (true) {
+    const job = await teamGatewayRequest(`/jobs/${jobId}`);
+    if (job.status === "completed") return job.images || [];
+    if (job.status === "failed") throw new Error(job.error || "团队生图失败");
     await new Promise((resolve) => setTimeout(resolve, 2e3));
   }
 }
@@ -7161,6 +7191,79 @@ async function executeApiTask(projectId, taskId, project, task) {
     });
   }
 }
+async function executeTeamTask(projectId, taskId, project, task) {
+  const key = createTaskScopeKey(projectId, taskId);
+  try {
+    await teamGatewaySettings();
+    await persistAndBroadcast({ type: "TASK_STATUS", projectId, taskId, status: "sending", detail: void 0 });
+    const inputs = getTaskInputs(project.graph, taskId);
+    const text = inputs.filter((input) => input.node.kind === "text").map((input) => input.node.kind === "text" ? input.node.text : "").filter(Boolean);
+    const imageBlobs = await Promise.all(
+      inputs.flatMap((input) => {
+        if (input.node.kind !== "image" && input.node.kind !== "result") return [];
+        const assetNode = input.node;
+        return [projectRepository.loadAsset(assetNode.assetId).then((blob) => {
+          if (!blob) throw new Error(`找不到参考图片：${assetNode.assetId}`);
+          return { blob, name: `${input.label}.${blob.type.split("/")[1] || "png"}` };
+        })];
+      })
+    );
+    const prompt = appendAspectRatioPrompt([...text, task.prompt].filter(Boolean).join("\n\n"), task.aspectRatio ?? "auto");
+    let jobId = task.apiJobId;
+    if (!jobId) {
+      const submitted = await teamGatewayRequest("/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          requestId: `${projectId}:${taskId}:${Date.now()}`,
+          prompt,
+          ratio: task.aspectRatio ?? "auto",
+          images: await Promise.all(imageBlobs.map(async (item) => ({
+            name: item.name,
+            mimeType: item.blob.type || "image/png",
+            base64: bytesToBase64(await item.blob.arrayBuffer())
+          })))
+        })
+      });
+      jobId = submitted.id;
+    }
+    await persistAndBroadcast({ type: "TASK_STATUS", projectId, taskId, status: "generating", detail: void 0, apiJobId: jobId });
+    scheduleApiRecoveryAlarm();
+    const images = await waitForTeamGatewayJob(jobId);
+    const handled = await updateScheduler(async () => {
+      if (!queue.running.includes(key)) return false;
+      await persistAndBroadcast({ type: "TASK_RESULT", projectId, taskId, images, responseText: "" });
+      queue = complete(queue, key);
+      pendingScopes.delete(key);
+      await removeActiveScope(key);
+      return true;
+    });
+    if (!handled) return;
+    void teamGatewayRequest(`/jobs/${jobId}`, { method: "DELETE" }).catch(() => {});
+    await chrome.notifications.create(createTaskNotificationId(projectId, taskId), {
+      type: "basic",
+      iconUrl: chrome.runtime.getURL("icon.svg"),
+      title: "团队生图完成",
+      message: `已生成 ${images.length} 张图片`
+    });
+  } catch (error) {
+    const handled = await updateScheduler(async () => {
+      if (!queue.running.includes(key)) return false;
+      queue = fail(queue, key, "team_error");
+      pendingScopes.delete(key);
+      await removeActiveScope(key);
+      return true;
+    });
+    if (!handled) return;
+    await persistAndBroadcast({
+      type: "TASK_ERROR",
+      projectId,
+      taskId,
+      reason: "team_error",
+      detail: error instanceof Error ? error.message : "团队生图失败"
+    });
+  }
+}
 async function executeTask(projectId, taskId) {
   const key = createTaskScopeKey(projectId, taskId);
   try {
@@ -7171,6 +7274,10 @@ async function executeTask(projectId, taskId) {
     if (!project || !task) throw new Error("\u627E\u4E0D\u5230\u672C\u5730\u4EFB\u52A1");
     if (task.generationMode === "api") {
       await executeApiTask(projectId, taskId, project, task);
+      return;
+    }
+    if (task.generationMode === "team") {
+      await executeTeamTask(projectId, taskId, project, task);
       return;
     }
     if (task.apiJobId) {
@@ -7255,7 +7362,7 @@ async function taskGenerationMode(key) {
   if (!scope) return "browser";
   const project = await projectRepository.loadProject(scope.projectId);
   const task = project?.graph.nodes.find((node) => node.id === scope.taskId && node.kind === "task");
-  return task?.generationMode === "api" ? "api" : "browser";
+  return task?.generationMode === "api" ? "api" : task?.generationMode === "team" ? "team" : "browser";
 }
 async function advanceQueueByMode() {
   let slots = Math.max(0, MAX_CONCURRENCY - queue.running.length);
@@ -7300,12 +7407,12 @@ async function recoverInterruptedApiTasks() {
     if (!scope) continue;
     const project = await projectRepository.loadProject(scope.projectId);
     const task = project?.graph.nodes.find((node) => node.id === scope.taskId && node.kind === "task");
-    if (task?.generationMode === "api") interruptedByKey.set(key, { key, ...scope });
+    if (task?.generationMode === "api" || task?.generationMode === "team") interruptedByKey.set(key, { key, ...scope });
   }
   const activeStatuses = new Set(["sending", "generating", "uploading", "waiting_page"]);
   for (const project of await projectRepository.listProjects()) {
     for (const task of project.graph.nodes) {
-      if (task.kind !== "task" || task.generationMode !== "api" || !activeStatuses.has(task.status)) continue;
+      if (task.kind !== "task" || !["api", "team"].includes(task.generationMode) || !activeStatuses.has(task.status)) continue;
       const key = createTaskScopeKey(project.id, task.id);
       interruptedByKey.set(key, { key, projectId: project.id, taskId: task.id });
     }
@@ -7325,7 +7432,7 @@ async function recoverInterruptedApiTasks() {
           projectId: item.projectId,
           taskId: item.taskId,
           status: "generating",
-          detail: "已重连本机 API 任务，正在继续等待结果",
+          detail: task.generationMode === "team" ? "已重连团队生图任务，正在继续等待结果" : "已重连本机 API 任务，正在继续等待结果",
           apiJobId: task.apiJobId
         });
         continue;
@@ -7336,8 +7443,8 @@ async function recoverInterruptedApiTasks() {
         type: "TASK_ERROR",
         projectId: item.projectId,
         taskId: item.taskId,
-        reason: "api_interrupted",
-        detail: "API 任务因扩展重载或后台中断而停止；为避免重复计费，未自动重试。请先检查平台调用记录。"
+        reason: task?.generationMode === "team" ? "team_interrupted" : "api_interrupted",
+        detail: task?.generationMode === "team" ? "团队任务在提交前被扩展重载中断，请重新运行" : "API 任务因扩展重载或后台中断而停止；为避免重复计费，未自动重试。请先检查平台调用记录。"
       });
     }
   });
@@ -7347,11 +7454,11 @@ async function reconcileCompletedApiTasks() {
   let activeApiJobs = 0;
   for (const project of await projectRepository.listProjects()) {
     for (const task of project.graph.nodes) {
-      if (task.kind !== "task" || task.generationMode !== "api" || !task.apiJobId) continue;
+      if (task.kind !== "task" || !["api", "team"].includes(task.generationMode) || !task.apiJobId) continue;
       activeApiJobs += 1;
       let job;
       try {
-        job = await apiWorkerRequest(`/jobs/${task.apiJobId}`);
+        job = await (task.generationMode === "team" ? teamGatewayRequest : apiWorkerRequest)(`/jobs/${task.apiJobId}`);
       } catch {
         continue;
       }
@@ -7373,10 +7480,10 @@ async function reconcileCompletedApiTasks() {
             type: "TASK_ERROR",
             projectId: project.id,
             taskId: task.id,
-            reason: "api_error",
-            detail: job.error || "API 生图失败"
+            reason: task.generationMode === "team" ? "team_error" : "api_error",
+            detail: job.error || (task.generationMode === "team" ? "团队生图失败" : "API 生图失败")
           });
-          queue = fail(queue, key, "api_error");
+          queue = fail(queue, key, task.generationMode === "team" ? "team_error" : "api_error");
         }
         pendingScopes.delete(key);
         await removeActiveScope(key);
@@ -7384,12 +7491,12 @@ async function reconcileCompletedApiTasks() {
       });
       if (!handled) continue;
       activeApiJobs -= 1;
-      void apiWorkerRequest(`/jobs/${task.apiJobId}`, { method: "DELETE" }).catch(() => {});
+      void (task.generationMode === "team" ? teamGatewayRequest : apiWorkerRequest)(`/jobs/${task.apiJobId}`, { method: "DELETE" }).catch(() => {});
       if (job.status === "completed") {
         await chrome.notifications.create(createTaskNotificationId(project.id, task.id), {
           type: "basic",
           iconUrl: chrome.runtime.getURL("icon.svg"),
-          title: "API 生图完成",
+          title: task.generationMode === "team" ? "团队生图完成" : "API 生图完成",
           message: `已生成 ${(job.images || []).length} 张图片`
         });
       }

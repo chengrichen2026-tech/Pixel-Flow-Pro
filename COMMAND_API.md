@@ -11,7 +11,7 @@ Pixel Flow 扩展通过 `ws://127.0.0.1:43128/canvas` 连接本机 Bridge，Code
 - `pixel_flow_import_library`：接收 Agent 已整理和打标的数据；默认只预览，`apply=true` 时写入。支持 `merge / replace`。
 - `pixel_flow_auto_tag_products`：按素材名称推导产品系列与“包装盒/铝箔”标签；默认预览，`apply=true` 时写入。
 - `pixel_flow_create_canvas`：新建并打开画布。
-- `pixel_flow_create_task`：新建生图任务，可设提示词、API/GPT-web、比例、位置和输入节点。
+- `pixel_flow_create_task`：新建生图任务，可设提示词、`api / browser / team` 模式、比例、位置和输入节点。
 - `pixel_flow_run_task`：执行指定任务。
 - `pixel_flow_download_image`：将图片或生成结果写到指定的绝对路径。
 - `pixel_flow_execute`：执行一条或多条底层命令。
