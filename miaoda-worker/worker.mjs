@@ -12,7 +12,8 @@ const configPath = process.env.PIXEL_FLOW_MIAODA_CONFIG || resolve(runtimeDir, "
 const statusPath = resolve(runtimeDir, "status.json");
 const python = process.env.PIXEL_FLOW_MIAODA_PYTHON || "python3";
 const imageScript = process.env.PIXEL_FLOW_CODEX_IMAGE_SCRIPT || resolve(homedir(), ".codex", "skills", "codex-gpt-image", "scripts", "codex_gpt_image.py");
-const pollMs = Number(process.env.PIXEL_FLOW_MIAODA_POLL_MS || 3e3);
+const pollMs = Number(process.env.PIXEL_FLOW_MIAODA_POLL_MS || 15e3);
+const chunkPaceMs = Number(process.env.PIXEL_FLOW_MIAODA_CHUNK_PACE_MS || 250);
 let stopping = false;
 
 async function readConfig() {
@@ -33,17 +34,26 @@ async function saveStatus(state, detail = "") {
 }
 
 async function request(config, path, options = {}) {
-  const response = await fetch(`${config.gatewayUrl}${path}`, {
-    ...options,
-    headers: {
-      Authorization: `Bearer ${config.token}`,
-      ...(options.body ? { "Content-Type": "application/json" } : {}),
-      ...(options.headers || {})
+  for (let attempt = 0; attempt < 7; attempt += 1) {
+    const response = await fetch(`${config.gatewayUrl}${path}`, {
+      ...options,
+      headers: {
+        Authorization: `Bearer ${config.token}`,
+        ...(options.body ? { "Content-Type": "application/json" } : {}),
+        ...(options.headers || {})
+      }
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (response.ok) return payload;
+    if (response.status === 429 && attempt < 6) {
+      const retryAfterSeconds = Number(response.headers.get("Retry-After"));
+      const retryDelay = Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0 ? retryAfterSeconds * 1e3 : Math.min(3e4, 2e3 * 2 ** attempt);
+      await new Promise((resolveWait) => setTimeout(resolveWait, retryDelay));
+      continue;
     }
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.error || payload.message || `妙搭任务箱返回 HTTP ${response.status}`);
-  return payload;
+    throw new Error(payload.error || payload.message || (response.status === 429 ? "妙搭任务箱持续限流" : `妙搭任务箱返回 HTTP ${response.status}`));
+  }
+  throw new Error("妙搭任务箱请求失败");
 }
 
 function runProcess(command, args, timeoutMs) {
@@ -66,6 +76,7 @@ async function downloadInput(config, job, descriptor, temporary) {
   for (let chunkIndex = 0; chunkIndex < descriptor.totalChunks; chunkIndex += 1) {
     const chunk = await request(config, `/worker/jobs/${job.id}/input-chunks/${descriptor.imageIndex}/${chunkIndex}`);
     chunks.push(chunk.base64);
+    if (chunkIndex + 1 < descriptor.totalChunks) await new Promise((resolveWait) => setTimeout(resolveWait, chunkPaceMs));
   }
   const extension = descriptor.mimeType === "image/jpeg" ? "jpg" : descriptor.mimeType.split("/")[1] || "png";
   const path = resolve(temporary, `reference-${descriptor.imageIndex + 1}.${extension}`);
@@ -89,6 +100,7 @@ async function uploadResult(config, job, workerId, outputPath) {
         base64: chunks[chunkIndex]
       })
     });
+    if (chunkIndex + 1 < chunks.length) await new Promise((resolveWait) => setTimeout(resolveWait, chunkPaceMs));
   }
 }
 
@@ -148,7 +160,7 @@ async function main() {
       else await new Promise((resolveWait) => setTimeout(resolveWait, pollMs));
     } catch (error) {
       await saveStatus("connection-error", error instanceof Error ? error.message : "连接失败");
-      await new Promise((resolveWait) => setTimeout(resolveWait, Math.max(pollMs, 5e3)));
+      await new Promise((resolveWait) => setTimeout(resolveWait, Math.max(pollMs, 3e4)));
     }
   }
   await saveStatus("stopped");

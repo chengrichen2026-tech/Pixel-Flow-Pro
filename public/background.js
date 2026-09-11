@@ -7086,20 +7086,30 @@ async function teamGatewaySettings() {
 }
 async function teamGatewayRequest(path, options = {}) {
   const { baseUrl, token } = await teamGatewaySettings();
-  let response;
-  try {
-    response = await fetch(`${baseUrl}${path}`, {
-      ...options,
-      headers: { Authorization: `Bearer ${token}`, ...(options.headers || {}) }
-    });
-  } catch {
-    throw new Error("无法连接团队生图服务，请检查网关地址、网络和服务状态");
+  for (let attempt = 0; attempt < 7; attempt += 1) {
+    let response;
+    try {
+      response = await fetch(`${baseUrl}${path}`, {
+        ...options,
+        headers: { Authorization: `Bearer ${token}`, ...(options.headers || {}) }
+      });
+    } catch {
+      throw new Error("无法连接团队生图服务，请检查网关地址、网络和服务状态");
+    }
+    const payload = await response.json().catch(() => ({}));
+    if (response.ok) return payload;
+    if (response.status === 429 && attempt < 6) {
+      const retryAfterSeconds = Number(response.headers.get("Retry-After"));
+      const retryDelay = Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0 ? retryAfterSeconds * 1e3 : Math.min(3e4, 2e3 * 2 ** attempt);
+      await new Promise((resolveWait) => setTimeout(resolveWait, retryDelay));
+      continue;
+    }
+    throw new Error(payload.error || (response.status === 429 ? "团队生图服务请求过于频繁，自动重试后仍被限流，请稍后再试" : `团队生图网关返回 HTTP ${response.status}`));
   }
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.error || `团队生图网关返回 HTTP ${response.status}`);
-  return payload;
+  throw new Error("团队生图服务请求失败");
 }
 const TEAM_GATEWAY_CHUNK_CHARACTERS = 6e4;
+const TEAM_GATEWAY_CHUNK_PACE_MS = 250;
 async function submitTeamGatewayJob(input) {
   const health = await teamGatewayRequest("/health");
   if (Number(health.protocolVersion || 1) < 2) {
@@ -7137,6 +7147,7 @@ async function submitTeamGatewayJob(input) {
             base64: image.base64.slice(chunkIndex * TEAM_GATEWAY_CHUNK_CHARACTERS, (chunkIndex + 1) * TEAM_GATEWAY_CHUNK_CHARACTERS)
           })
         });
+        if (chunkIndex + 1 < totalChunks) await new Promise((resolveWait) => setTimeout(resolveWait, TEAM_GATEWAY_CHUNK_PACE_MS));
       }
     }
     return await teamGatewayRequest(`/jobs/${submitted.id}/submit`, { method: "POST" });
@@ -7154,6 +7165,7 @@ async function downloadTeamGatewayImages(job) {
     for (let chunkIndex = 0; chunkIndex < image.totalChunks; chunkIndex += 1) {
       const chunk = await teamGatewayRequest(`/jobs/${job.id}/result-chunks/${imageIndex}/${chunkIndex}`);
       chunks.push(chunk.base64);
+      if (chunkIndex + 1 < image.totalChunks) await new Promise((resolveWait) => setTimeout(resolveWait, TEAM_GATEWAY_CHUNK_PACE_MS));
     }
     return {
       base64: chunks.join(""),

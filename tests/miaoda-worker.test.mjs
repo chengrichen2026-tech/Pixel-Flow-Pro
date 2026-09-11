@@ -23,6 +23,10 @@ test("Miaoda worker keeps OAuth local and uses lease, chunks, and cleanup", asyn
   assert.match(worker, /\/worker\/claim/);
   assert.match(worker, /\/heartbeat/);
   assert.match(worker, /\/result-chunks/);
+  assert.match(worker, /PIXEL_FLOW_MIAODA_POLL_MS \|\| 15e3/);
+  assert.match(worker, /PIXEL_FLOW_MIAODA_CHUNK_PACE_MS \|\| 250/);
+  assert.match(worker, /response\.status === 429 && attempt < 6/);
+  assert.match(worker, /response\.headers\.get\("Retry-After"\)/);
   assert.match(worker, /await rm\(temporary, \{ recursive: true, force: true \}\)/);
   assert.doesNotMatch(worker, /\.codex\/auth\.json/);
   assert.match(install, /RunAtLoad/);
