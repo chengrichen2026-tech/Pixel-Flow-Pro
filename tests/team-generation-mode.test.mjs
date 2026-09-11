@@ -14,6 +14,12 @@ test("team mode sends authenticated jobs without exposing Codex OAuth to the ext
   assert.match(background, /headers: \{ Authorization: `Bearer \$\{token\}`/);
   assert.match(background, /async function executeTeamTask\(projectId, taskId, project, task\)/);
   assert.match(background, /requestId: `\$\{projectId\}:\$\{taskId\}:\$\{Date\.now\(\)\}`/);
+  assert.match(background, /async function submitTeamGatewayJob\(input\)/);
+  assert.match(background, /protocolVersion/);
+  assert.match(background, /\/input-chunks/);
+  assert.match(background, /async function downloadTeamGatewayImages\(job\)/);
+  assert.match(background, /\/result-chunks\//);
+  assert.match(background, /TEAM_GATEWAY_CHUNK_CHARACTERS = 6e4/);
   assert.doesNotMatch(background, /codex\/images\/generations/);
   assert.doesNotMatch(background, /\.codex\/auth\.json/);
 });

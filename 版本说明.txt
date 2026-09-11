@@ -1,6 +1,12 @@
 Pixel Flow｜像素流
-版本：0.3.1
+版本：0.3.2
 适用浏览器：Chrome / Edge（macOS 与 Windows）
+
+2026-09-11 v0.3.2 更新：
+- 团队生图新增妙搭云端任务箱协议 v2，提供固定地址，不再依赖 Quick Tunnel 的临时域名。
+- 新增 Mac Worker 登录自启服务，主动领取任务并使用本机 Codex OAuth 生图；OAuth 不上传云端。
+- 参考图和结果图采用 60,000 字符分块上传/下载，完成回写后自动删除云端任务。
+- 保留旧版本机 Team Gateway / Quick Tunnel 协议 v1 兼容。
 
 2026-09-11 v0.3.1 更新：
 - 修复 Quick Tunnel 地址已在 manifest 授权时仍重复调用动态权限申请，导致部分 Chrome 报 `Only permissions specified in the manifest may be requested.`。

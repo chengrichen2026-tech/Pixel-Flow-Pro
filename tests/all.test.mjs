@@ -13,3 +13,4 @@ import "./image-container.test.mjs";
 import "./codex-bridge.test.mjs";
 import "./team-gateway.test.mjs";
 import "./team-generation-mode.test.mjs";
+import "./miaoda-worker.test.mjs";

@@ -7093,11 +7093,73 @@ async function teamGatewayRequest(path, options = {}) {
       headers: { Authorization: `Bearer ${token}`, ...(options.headers || {}) }
     });
   } catch {
-    throw new Error("无法连接团队生图网关，请检查 Tailscale、网关地址和主机状态");
+    throw new Error("无法连接团队生图服务，请检查网关地址、网络和服务状态");
   }
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.error || `团队生图网关返回 HTTP ${response.status}`);
   return payload;
+}
+const TEAM_GATEWAY_CHUNK_CHARACTERS = 6e4;
+async function submitTeamGatewayJob(input) {
+  const health = await teamGatewayRequest("/health");
+  if (Number(health.protocolVersion || 1) < 2) {
+    return teamGatewayRequest("/jobs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input)
+    });
+  }
+  const images = Array.isArray(input.images) ? input.images : [];
+  const submitted = await teamGatewayRequest("/jobs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      requestId: input.requestId,
+      prompt: input.prompt,
+      ratio: input.ratio,
+      imageCount: images.length
+    })
+  });
+  try {
+    for (let imageIndex = 0; imageIndex < images.length; imageIndex += 1) {
+      const image = images[imageIndex];
+      const totalChunks = Math.max(1, Math.ceil(image.base64.length / TEAM_GATEWAY_CHUNK_CHARACTERS));
+      for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex += 1) {
+        await teamGatewayRequest(`/jobs/${submitted.id}/input-chunks`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            imageIndex,
+            chunkIndex,
+            totalChunks,
+            name: image.name,
+            mimeType: image.mimeType,
+            base64: image.base64.slice(chunkIndex * TEAM_GATEWAY_CHUNK_CHARACTERS, (chunkIndex + 1) * TEAM_GATEWAY_CHUNK_CHARACTERS)
+          })
+        });
+      }
+    }
+    return await teamGatewayRequest(`/jobs/${submitted.id}/submit`, { method: "POST" });
+  } catch (error) {
+    void teamGatewayRequest(`/jobs/${submitted.id}`, { method: "DELETE" }).catch(() => {});
+    throw error;
+  }
+}
+async function downloadTeamGatewayImages(job) {
+  const images = Array.isArray(job.images) ? job.images : [];
+  if (images.every((image) => typeof image.base64 === "string")) return images;
+  return Promise.all(images.map(async (image, fallbackIndex) => {
+    const imageIndex = Number.isInteger(image.imageIndex) ? image.imageIndex : fallbackIndex;
+    const chunks = [];
+    for (let chunkIndex = 0; chunkIndex < image.totalChunks; chunkIndex += 1) {
+      const chunk = await teamGatewayRequest(`/jobs/${job.id}/result-chunks/${imageIndex}/${chunkIndex}`);
+      chunks.push(chunk.base64);
+    }
+    return {
+      base64: chunks.join(""),
+      mimeType: image.mimeType || "image/png"
+    };
+  }));
 }
 async function waitForApiWorkerJob(jobId) {
   while (true) {
@@ -7110,7 +7172,7 @@ async function waitForApiWorkerJob(jobId) {
 async function waitForTeamGatewayJob(jobId) {
   while (true) {
     const job = await teamGatewayRequest(`/jobs/${jobId}`);
-    if (job.status === "completed") return job.images || [];
+    if (job.status === "completed") return downloadTeamGatewayImages(job);
     if (job.status === "failed") throw new Error(job.error || "团队生图失败");
     await new Promise((resolve) => setTimeout(resolve, 2e3));
   }
@@ -7211,19 +7273,15 @@ async function executeTeamTask(projectId, taskId, project, task) {
     const prompt = appendAspectRatioPrompt([...text, task.prompt].filter(Boolean).join("\n\n"), task.aspectRatio ?? "auto");
     let jobId = task.apiJobId;
     if (!jobId) {
-      const submitted = await teamGatewayRequest("/jobs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          requestId: `${projectId}:${taskId}:${Date.now()}`,
-          prompt,
-          ratio: task.aspectRatio ?? "auto",
-          images: await Promise.all(imageBlobs.map(async (item) => ({
-            name: item.name,
-            mimeType: item.blob.type || "image/png",
-            base64: bytesToBase64(await item.blob.arrayBuffer())
-          })))
-        })
+      const submitted = await submitTeamGatewayJob({
+        requestId: `${projectId}:${taskId}:${Date.now()}`,
+        prompt,
+        ratio: task.aspectRatio ?? "auto",
+        images: await Promise.all(imageBlobs.map(async (item) => ({
+          name: item.name,
+          mimeType: item.blob.type || "image/png",
+          base64: bytesToBase64(await item.blob.arrayBuffer())
+        })))
       });
       jobId = submitted.id;
     }
@@ -7463,6 +7521,7 @@ async function reconcileCompletedApiTasks() {
         continue;
       }
       if (job.status !== "completed" && job.status !== "failed") continue;
+      const completedImages = job.status === "completed" && task.generationMode === "team" ? await downloadTeamGatewayImages(job) : job.images || [];
       const key = createTaskScopeKey(project.id, task.id);
       const handled = await updateScheduler(async () => {
         if (!queue.running.includes(key)) return false;
@@ -7471,7 +7530,7 @@ async function reconcileCompletedApiTasks() {
             type: "TASK_RESULT",
             projectId: project.id,
             taskId: task.id,
-            images: job.images || [],
+            images: completedImages,
             responseText: ""
           });
           queue = complete(queue, key);
@@ -7497,7 +7556,7 @@ async function reconcileCompletedApiTasks() {
           type: "basic",
           iconUrl: chrome.runtime.getURL("icon.svg"),
           title: task.generationMode === "team" ? "团队生图完成" : "API 生图完成",
-          message: `已生成 ${(job.images || []).length} 张图片`
+          message: `已生成 ${completedImages.length} 张图片`
         });
       }
     }

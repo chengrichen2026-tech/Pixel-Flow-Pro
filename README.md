@@ -4,9 +4,12 @@
 
 > **团队伙伴安装：**只使用团队生图、不登录 ChatGPT 的伙伴请阅读 [团队生图伙伴安装指南](TEAM_GATEWAY_PARTNER_GUIDE.md)。
 
-Pixel Flow 是一个基于 Chrome Manifest V3 的 AI 创意任务画布，通过节点组织图片、文字、生成任务和结果。它兼容三种生图方式：浏览器模式复用已登录的 ChatGPT 网页账号；API Key 模式通过本机 Pixel Flow API Worker 调用已配置的图片接口；团队模式通过私有网关使用网关主机上的 Codex OAuth 生图能力。每张任务卡都可以独立选择模式。
+Pixel Flow 是一个基于 Chrome Manifest V3 的 AI 创意任务画布，通过节点组织图片、文字、生成任务和结果。它兼容三种生图方式：浏览器模式复用已登录的 ChatGPT 网页账号；API Key 模式通过本机 Pixel Flow API Worker 调用已配置的图片接口；团队模式通过本机网关或妙搭云端任务箱使用主机 Mac 上的 Codex OAuth 生图能力。每张任务卡都可以独立选择模式。
 
-## 当前版本与关键交互（v0.3.1）
+## 当前版本与关键交互（v0.3.2）
+
+- 妙搭云端任务箱：团队模式支持协议 v2，把提示词、参考图分块和结果状态暂存在固定妙搭地址；Mac Worker 主动领取任务，因此不再需要 Quick Tunnel，也不把 Codex OAuth 上传到云端。
+- 协议兼容：旧版本机 Team Gateway / Quick Tunnel 继续按协议 v1 工作，妙搭任务箱自动使用 60,000 字符分块，降低大图触发请求体限制的风险。
 
 - 图片容器：选中一张或多张画布图片后新建“图片容器”，容器连接到任务后会逐张执行；容器外连接到同一任务的图片会作为每个子任务的共享参考图一并发送。
 - 批量结果：同一任务的结果图从任务右侧开始横向并排，间距 40px；每张生成图右上角有下载按钮，可直接保存到本机。
@@ -100,8 +103,10 @@ npm run build
 
 ## 团队生图网关
 
+- 推荐方案：使用妙搭云端任务箱提供固定地址，由 `miaoda-worker/` 主动领取任务；Mac 需要在线，但不需要公网入口或 Quick Tunnel。
 - 网关默认只监听 `127.0.0.1:43130`，通过 Tailscale Serve 在私有 tailnet 内提供 HTTPS 地址，不直接开放公网端口。
 - 网关读取主机上的 Codex OAuth，由 `codex-gpt-image` 脚本完成文字生图和参考图编辑；OAuth 文件和访问令牌不会发送到扩展。
 - 每位同伴使用独立的可撤销令牌；网关只保存令牌 SHA-256 摘要，支持每日额度、请求去重、单并发排队和重启防重复消费。
 - 同伴在“生图设置”中保存网关地址与成员令牌。扩展只请求该网关 origin 的动态访问权限。
 - 初始化、安装、成员管理和接口说明见 [team-gateway/README.md](team-gateway/README.md)。
+- 妙搭 Mac Worker 的配置和自启说明见 [miaoda-worker/README.md](miaoda-worker/README.md)。

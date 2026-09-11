@@ -1,7 +1,7 @@
 {
   "name": "pixel-flow",
   "private": true,
-  "version": "0.3.1",
+  "version": "0.3.2",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -17,6 +17,10 @@
     "team-gateway:uninstall": "zsh team-gateway/uninstall.sh",
     "team-gateway:token": "zsh team-gateway/manage.sh token",
     "team-gateway:members": "zsh team-gateway/manage.sh members",
+    "miaoda-worker:start": "node miaoda-worker/worker.mjs",
+    "miaoda-worker:install": "zsh miaoda-worker/install.sh",
+    "miaoda-worker:uninstall": "zsh miaoda-worker/uninstall.sh",
+    "miaoda-worker:acceptance": "node miaoda-worker/acceptance.mjs",
     "bridge:start": "node tools/pixel-flow-bridge/daemon.mjs",
     "bridge:install": "zsh scripts/pixel-flow-bridge-launchd.sh install",
     "bridge:status": "zsh scripts/pixel-flow-bridge-launchd.sh status",
