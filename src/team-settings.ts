@@ -34,7 +34,8 @@ export async function saveTeamGateway(urlValue: string, tokenValue: string) {
   const token = tokenValue.trim();
   if (!token) throw new Error("请输入团队令牌");
   if (globalThis.chrome?.runtime?.id) {
-    const granted = await chrome.permissions.request({ origins: [teamGatewayOriginPattern(url)] });
+    const permission = { origins: [teamGatewayOriginPattern(url)] };
+    const granted = await chrome.permissions.contains(permission) || await chrome.permissions.request(permission);
     if (!granted) throw new Error("未授权 Pixel Flow 访问该团队网关");
   }
   if (globalThis.chrome?.storage?.local) {

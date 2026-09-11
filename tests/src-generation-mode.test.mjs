@@ -44,7 +44,7 @@ test("team settings keep member credentials local and request only the configure
   const manifest = await readFile(new URL("public/manifest.json", root), "utf8");
   assert.match(settings, /pixelFlowTeamGatewayUrl/);
   assert.match(settings, /pixelFlowTeamToken/);
-  assert.match(settings, /chrome\.permissions\.request\(\{ origins:/);
+  assert.match(settings, /chrome\.permissions\.contains\(permission\) \|\| await chrome\.permissions\.request\(permission\)/);
   assert.match(settings, /chrome\.storage\.local\.set/);
   assert.match(manifest, /"optional_host_permissions"/);
 });

@@ -1,6 +1,10 @@
 Pixel Flow｜像素流
-版本：0.3.0
+版本：0.3.1
 适用浏览器：Chrome / Edge（macOS 与 Windows）
+
+2026-09-11 v0.3.1 更新：
+- 修复 Quick Tunnel 地址已在 manifest 授权时仍重复调用动态权限申请，导致部分 Chrome 报 `Only permissions specified in the manifest may be requested.`。
+- 保存团队网关前先使用 `chrome.permissions.contains()` 回读权限；只有未授权的自定义域名才发起动态申请。
 
 2026-09-10 v0.3.0 更新：
 - 新增“团队生图”模式：同伴通过私有 Team Gateway 使用网关主机的 Codex OAuth 生图能力，无需获得主账号登录状态。
