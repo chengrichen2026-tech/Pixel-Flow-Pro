@@ -9,6 +9,8 @@ test("browser runs wait for an in-flight mode save", async () => {
   assert.match(source, /const pendingModeSave = modeSavePromises\.get\(key\)/);
   assert.match(source, /if \(selectedMode !== "api" && !pendingModeSave\) return/);
   assert.match(source, /await pendingModeSave/);
+  assert.match(source, /savedMode === "api" \? "api" : savedMode === "team" \? "team" : "browser"/);
+  assert.match(source, /<option value="team">团队生图<\/option>/);
 });
 
 test("running ChatGPT task groups stay expanded so background tabs are not frozen", async () => {
@@ -129,7 +131,8 @@ test("normal API generation does not show a status detail as an alert", async ()
 test("switching to browser mode clears inherited API job state", async () => {
   const modeUi = await readFile(new URL("production/generation-mode.js", root), "utf8");
   const background = await readFile(new URL("public/background.js", root), "utf8");
-  assert.match(modeUi, /mode === "browser" \? \{ apiJobId: void 0, statusDetail: void 0 \}/);
+  assert.match(modeUi, /apiJobId: void 0,[\s\S]*statusDetail: void 0/);
+  assert.match(modeUi, /mode !== "browser" \? \{ conversationUrl: void 0 \}/);
   assert.match(modeUi, /\["queued", "waiting_page", "uploading", "sending", "generating", "manual_action"\]\.includes\(activeStatus\)/);
   assert.match(background, /message\.clearApiJobId \? void 0/);
 });

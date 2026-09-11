@@ -22,9 +22,14 @@ test("rebuilt mode switching preserves production safety rules", async () => {
   const app = await readFile(new URL("src/App.tsx", root), "utf8");
   assert.match(app, /\['queued','waiting_page','uploading','sending','generating','manual_action'\]\.includes\(status\)/);
   assert.match(app, /generationMode:next,apiJobId:undefined,statusDetail:undefined/);
-  assert.match(app, /mode==='api'&&!await readApiKey\(\)/);
-  assert.match(app, /mode==='team'&&!await hasTeamGateway\(\)/);
+  assert.match(app, /currentMode==='api'&&!await readApiKey\(\)/);
+  assert.match(app, /currentMode==='team'&&!await hasTeamGateway\(\)/);
   assert.match(app, /pixel-flow:open-api-settings/);
+  assert.match(app, /const pendingModeSave=useRef<Promise<void>>\(Promise\.resolve\(\)\)/);
+  assert.match(app, /pendingModeSave\.current=saving;await saving/);
+  assert.match(app, /const run=async\(\)=>\{await pendingModeSave\.current/);
+  assert.match(app, /const currentTask=useStore\.getState\(\)\.project/);
+  assert.match(app, /currentTask\?\.generationMode==='team'\?'team':'browser'/);
 });
 
 test("rebuilt API settings use the same local storage contract", async () => {

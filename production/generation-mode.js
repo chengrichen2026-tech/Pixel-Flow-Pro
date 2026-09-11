@@ -30,7 +30,8 @@
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
-    const mode = project?.graph?.nodes?.find((node) => node.id === taskId && node.kind === "task")?.generationMode === "browser" ? "browser" : "api";
+    const savedMode = project?.graph?.nodes?.find((node) => node.id === taskId && node.kind === "task")?.generationMode;
+    const mode = savedMode === "api" ? "api" : savedMode === "team" ? "team" : "browser";
     modeCache.set(key, mode);
     return mode;
   }
@@ -48,7 +49,9 @@
     project.graph.nodes = project.graph.nodes.map((node) => node.id === taskId && node.kind === "task" ? {
       ...node,
       generationMode: mode,
-      ...(mode === "browser" ? { apiJobId: void 0, statusDetail: void 0 } : {})
+      apiJobId: void 0,
+      statusDetail: void 0,
+      ...(mode !== "browser" ? { conversationUrl: void 0 } : {})
     } : node);
     project.updatedAt = Date.now();
     await new Promise((resolve, reject) => {
@@ -154,7 +157,7 @@
       label.title = "生图模式";
       const select = document.createElement("select");
       select.setAttribute("aria-label", "生图模式");
-      select.innerHTML = '<option value="browser">GPT-web</option><option value="api">API</option>';
+      select.innerHTML = '<option value="browser">GPT-web</option><option value="api">API</option><option value="team">团队生图</option>';
       select.value = mode;
       select.addEventListener("change", async () => {
         const activeStatus = card.querySelector(".task-status")?.getAttribute("data-status");
