@@ -35,6 +35,9 @@ test("team jobs recover through the persistent worker path", () => {
   assert.match(background, /task\.generationMode === "team" \? teamGatewayRequest : apiWorkerRequest/);
   assert.match(background, /title: task\.generationMode === "team" \? "团队生图完成" : "API 生图完成"/);
   assert.match(background, /task\.generationMode === "team"[\s\S]*teamGatewayRequest\(`\/jobs\/\$\{task\.apiJobId\}\/acknowledge`/);
+  assert.match(background, /async function recoverTeamTaskResult/);
+  assert.match(background, /RECOVER_TEAM_RESULT/);
+  assert.match(background, /await downloadTeamGatewayImages\(job\)/);
 });
 
 test("structured commands can create team generation tasks", () => {

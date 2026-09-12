@@ -6514,6 +6514,7 @@ async function applyTaskMessage(project, message, saveAsset) {
 var CHATGPT_ADAPTER_VERSION = 25;
 var taskTypes = /* @__PURE__ */ new Set([
   "RUN_TASK",
+  "RECOVER_TEAM_RESULT",
   "CANCEL_TASK",
   "OPEN_TASK_TAB",
   "CLOSE_TASK_TAB",
@@ -7189,6 +7190,24 @@ async function waitForTeamGatewayJob(jobId) {
     await new Promise((resolve) => setTimeout(resolve, 2e3));
   }
 }
+async function recoverTeamTaskResult(projectId, taskId, jobId) {
+  const project = await projectRepository.loadProject(projectId);
+  const task = project?.graph.nodes.find((node) => node.id === taskId && node.kind === "task");
+  if (!project || !task || task.generationMode !== "team") throw new Error("找不到团队生图任务");
+  const existingResults = project.graph.edges.filter(
+    (edge) => edge.source === taskId && edge.kind === "output"
+  );
+  if (existingResults.length > 0 && task.status === "completed") {
+    return { recovered: false, existingResults: existingResults.length };
+  }
+  const job = await teamGatewayRequest(`/jobs/${jobId}`);
+  if (job.status !== "completed") throw new Error(job.error || `云端任务尚未完成：${job.status}`);
+  const images = await downloadTeamGatewayImages(job);
+  if (!images.length) throw new Error("云端任务没有可恢复的图片");
+  await persistAndBroadcast({ type: "TASK_RESULT", projectId, taskId, images, responseText: "" });
+  void teamGatewayRequest(`/jobs/${jobId}/acknowledge`, { method: "POST" }).catch(() => {});
+  return { recovered: true, resultCount: images.length, jobId };
+}
 async function executeApiTask(projectId, taskId, project, task) {
   const key = createTaskScopeKey(projectId, taskId);
   try {
@@ -7668,6 +7687,13 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 chrome.runtime.onMessage.addListener((raw, sender, sendResponse) => {
   if (!isExtensionMessage(raw)) return false;
   const message = raw;
+  if (message.type === "RECOVER_TEAM_RESULT") {
+    void recoverTeamTaskResult(message.projectId, message.taskId, message.jobId).then(
+      (result) => sendResponse({ accepted: true, ...result }),
+      (error) => sendResponse({ accepted: false, error: error instanceof Error ? error.message : String(error) })
+    );
+    return true;
+  }
   if (message.type === "RUN_TASK") {
     void updateScheduler(async () => {
       const key = createTaskScopeKey(message.projectId, message.taskId);
