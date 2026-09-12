@@ -11,7 +11,9 @@ test("team mode sends authenticated jobs without exposing Codex OAuth to the ext
   assert.match(background, /async function teamGatewaySettings\(\)/);
   assert.match(background, /pixelFlowTeamGatewayUrl/);
   assert.match(background, /pixelFlowTeamToken/);
+  assert.match(background, /pixelFlowTeamMemberToken/);
   assert.match(background, /headers: \{ Authorization: `Bearer \$\{token\}`/);
+  assert.match(background, /"X-Pixel-Member-Token": memberToken/);
   assert.match(background, /async function executeTeamTask\(projectId, taskId, project, task\)/);
   assert.match(background, /requestId: `\$\{projectId\}:\$\{taskId\}:\$\{Date\.now\(\)\}`/);
   assert.match(background, /async function submitTeamGatewayJob\(input\)/);
@@ -25,6 +27,8 @@ test("team mode sends authenticated jobs without exposing Codex OAuth to the ext
   assert.match(background, /response\.status === 429 && attempt < 6/);
   assert.match(background, /response\.headers\.get\("Retry-After"\)/);
   assert.match(background, /自动重试后仍被限流/);
+  assert.match(background, /response\.status === 429 && \/额度\//);
+  assert.match(background, /response\.status === 401/);
   assert.doesNotMatch(background, /codex\/images\/generations/);
   assert.doesNotMatch(background, /\.codex\/auth\.json/);
 });

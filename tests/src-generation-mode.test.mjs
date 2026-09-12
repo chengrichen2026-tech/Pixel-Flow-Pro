@@ -47,9 +47,15 @@ test("rebuilt API settings use the same local storage contract", async () => {
 test("team settings keep member credentials local and request only the configured origin", async () => {
   const settings = await readFile(new URL("src/team-settings.ts", root), "utf8");
   const manifest = await readFile(new URL("public/manifest.json", root), "utf8");
+  const app = await readFile(new URL("src/App.tsx", root), "utf8");
   assert.match(settings, /pixelFlowTeamGatewayUrl/);
   assert.match(settings, /pixelFlowTeamToken/);
+  assert.match(settings, /pixelFlowTeamMemberToken/);
+  assert.match(settings, /pfm_/);
+  assert.match(settings, /settings\.url && settings\.token && settings\.memberToken/);
   assert.match(settings, /chrome\.permissions\.contains\(permission\) \|\| await chrome\.permissions\.request\(permission\)/);
   assert.match(settings, /chrome\.storage\.local\.set/);
   assert.match(manifest, /"optional_host_permissions"/);
+  assert.match(app, /平台访问 Key/);
+  assert.match(app, /成员令牌/);
 });
