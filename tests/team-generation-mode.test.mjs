@@ -20,7 +20,7 @@ test("team mode sends authenticated jobs without exposing Codex OAuth to the ext
   assert.match(background, /async function downloadTeamGatewayImages\(job\)/);
   assert.match(background, /\/result-chunks\//);
   assert.match(background, /\/acknowledge`, \{ method: "POST" \}/);
-  assert.match(background, /TEAM_GATEWAY_CHUNK_CHARACTERS = 6e4/);
+  assert.match(background, /TEAM_GATEWAY_CHUNK_CHARACTERS = 6e5/);
   assert.match(background, /TEAM_GATEWAY_CHUNK_PACE_MS = 250/);
   assert.match(background, /response\.status === 429 && attempt < 6/);
   assert.match(background, /response\.headers\.get\("Retry-After"\)/);

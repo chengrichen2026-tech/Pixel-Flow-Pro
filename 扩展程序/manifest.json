@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Pixel Flow｜像素流",
   "description": "AI 创意任务画布：支持 GPT-web、API Key 与团队网关生图。",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "permissions": ["storage", "tabs", "tabGroups", "notifications", "downloads", "clipboardWrite", "scripting", "alarms"],
   "host_permissions": ["https://chatgpt.com/*", "https://*.oaiusercontent.com/*", "https://aihub.rbmanon.cn/*", "https://*.trycloudflare.com/*", "http://127.0.0.1:43130/*", "http://127.0.0.1:43129/*", "http://127.0.0.1:43128/*", "ws://127.0.0.1:43128/*"],
   "optional_host_permissions": ["http://*/*", "https://*/*"],

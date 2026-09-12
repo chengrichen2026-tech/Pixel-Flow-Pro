@@ -7108,7 +7108,7 @@ async function teamGatewayRequest(path, options = {}) {
   }
   throw new Error("团队生图服务请求失败");
 }
-const TEAM_GATEWAY_CHUNK_CHARACTERS = 6e4;
+const TEAM_GATEWAY_CHUNK_CHARACTERS = 6e5;
 const TEAM_GATEWAY_CHUNK_PACE_MS = 250;
 async function submitTeamGatewayJob(input) {
   const health = await teamGatewayRequest("/health");
