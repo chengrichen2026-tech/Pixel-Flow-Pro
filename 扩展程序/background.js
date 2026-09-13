@@ -6978,6 +6978,18 @@ function bytesToBase64(buffer) {
   }
   return btoa(binary);
 }
+function base64ToBytes(base64) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
+}
+async function sha256Hex(buffer) {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", buffer));
+  return [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
 async function waitForTabReady(tabId) {
   const current = await chrome.tabs.get(tabId);
   if (current.status === "complete") return;
@@ -7033,11 +7045,42 @@ async function rememberActiveTab(key, tabId) {
 var API_WORKER_URL = "http://127.0.0.1:43129";
 var API_RECOVERY_ALARM = "pixel-flow-api-recovery";
 var BROWSER_RESULT_RECOVERY_ALARM = "pixel-flow-browser-result-recovery";
+var TEAM_WEB_WORKER_ALARM = "pixel-flow-team-web-worker";
+var TEAM_WEB_PROJECT_ID = "pixel-flow-team-web-worker";
+var TEAM_WEB_ACTIVE_STORAGE = "pixelFlowTeamWebWorkerActiveJob";
+var activeTeamWebJob;
+var teamWebWorkerReady = Promise.all([
+  schedulerReady,
+  chrome.storage.local.get(TEAM_WEB_ACTIVE_STORAGE)
+]).then(([, stored]) => {
+  activeTeamWebJob = stored[TEAM_WEB_ACTIVE_STORAGE];
+  const conversationUrl = concreteChatGptConversationUrl(activeTeamWebJob?.conversationUrl);
+  if (!activeTeamWebJob || !conversationUrl) return;
+  const key = createTaskScopeKey(TEAM_WEB_PROJECT_ID, activeTeamWebJob.job.id);
+  const message = recoveryMessage({
+    type: "EXECUTE_IN_CHATGPT_V3",
+    projectId: TEAM_WEB_PROJECT_ID,
+    taskId: activeTeamWebJob.job.id,
+    prompt: activeTeamWebJob.job.prompt,
+    images: [],
+    expectedConversationUrl: conversationUrl,
+    startedAt: activeTeamWebJob.startedAt,
+    submittedAt: activeTeamWebJob.submittedAt ?? activeTeamWebJob.startedAt,
+    phase: "submitted"
+  });
+  browserTaskMessages.set(key, message);
+  tabRegistry.map(key, void 0, conversationUrl);
+  scheduleBrowserResultRecoveryAlarm();
+});
+void teamWebWorkerReady.then(() => teamWebWorkerTick()).catch(() => void 0);
 function scheduleApiRecoveryAlarm() {
   chrome.alarms.create(API_RECOVERY_ALARM, { delayInMinutes: 0.5, periodInMinutes: 0.5 });
 }
 function scheduleBrowserResultRecoveryAlarm() {
   chrome.alarms.create(BROWSER_RESULT_RECOVERY_ALARM, { delayInMinutes: 0.5, periodInMinutes: 0.5 });
+}
+function scheduleTeamWebWorkerAlarm() {
+  chrome.alarms.create(TEAM_WEB_WORKER_ALARM, { delayInMinutes: 0.5, periodInMinutes: 0.5 });
 }
 async function reconcileBrowserTaskResults() {
   await schedulerReady;
@@ -7046,7 +7089,8 @@ async function reconcileBrowserTaskResults() {
     return;
   }
   for (const [key, message] of browserTaskMessages) {
-    if (!queue.running.includes(key)) continue;
+    const remoteKey = activeTeamWebJob ? createTaskScopeKey(TEAM_WEB_PROJECT_ID, activeTeamWebJob.job.id) : "";
+    if (!queue.running.includes(key) && key !== remoteKey) continue;
     try {
       const mapped = await tabRegistry.ensure(key, message.expectedConversationUrl);
       let adapterState = await probeAdapter(chrome.tabs, mapped.tabId, message);
@@ -7124,6 +7168,12 @@ async function submitTeamGatewayJob(input) {
       body: JSON.stringify(input)
     });
   }
+  if (Number(health.protocolVersion || 1) < 4) {
+    throw new Error("团队任务箱版本过旧，暂不支持 Flare / Sunburst 模型选择");
+  }
+  if (input.provider === "chatgpt_web" && Number(health.protocolVersion || 1) < 5) {
+    throw new Error("团队任务箱版本过旧，暂不支持团队 GPT-web");
+  }
   const images = Array.isArray(input.images) ? input.images : [];
   const submitted = await teamGatewayRequest("/jobs", {
     method: "POST",
@@ -7132,7 +7182,10 @@ async function submitTeamGatewayJob(input) {
       requestId: input.requestId,
       prompt: input.prompt,
       ratio: input.ratio,
-      imageCount: images.length
+      imageCount: images.length,
+      resultDelivery: "direct",
+      imageModel: input.imageModel === "sunburst" ? "sunburst" : "flare",
+      provider: input.provider === "chatgpt_web" ? "chatgpt_web" : "codex_cloud"
     })
   });
   try {
@@ -7165,6 +7218,22 @@ async function downloadTeamGatewayImages(job) {
   const images = Array.isArray(job.images) ? job.images : [];
   if (images.every((image) => typeof image.base64 === "string")) return images;
   return Promise.all(images.map(async (image, fallbackIndex) => {
+    if (typeof image.downloadUrl === "string") {
+      if (!image.downloadUrl.startsWith("https://")) throw new Error("团队生图直传地址无效");
+      const response = await fetch(image.downloadUrl, { cache: "no-store" });
+      if (!response.ok) throw new Error(`团队生图直传下载返回 HTTP ${response.status}`);
+      const buffer = await response.arrayBuffer();
+      if (Number.isInteger(image.byteLength) && buffer.byteLength !== image.byteLength) {
+        throw new Error("团队生图直传文件大小校验失败");
+      }
+      if (typeof image.sha256 === "string" && await sha256Hex(buffer) !== image.sha256) {
+        throw new Error("团队生图直传文件完整性校验失败");
+      }
+      return {
+        base64: bytesToBase64(buffer),
+        mimeType: image.mimeType || response.headers.get("Content-Type") || "image/png"
+      };
+    }
     const imageIndex = Number.isInteger(image.imageIndex) ? image.imageIndex : fallbackIndex;
     const chunks = [];
     for (let chunkIndex = 0; chunkIndex < image.totalChunks; chunkIndex += 1) {
@@ -7177,6 +7246,271 @@ async function downloadTeamGatewayImages(job) {
       mimeType: image.mimeType || "image/png"
     };
   }));
+}
+async function createTeamPreview(image) {
+  if (typeof createImageBitmap !== "function" || typeof OffscreenCanvas !== "function") return null;
+  const source = new Blob([base64ToBytes(image.base64)], { type: image.mimeType || "image/png" });
+  const bitmap = await createImageBitmap(source);
+  try {
+    const scale = Math.min(1, 480 / Math.max(bitmap.width, bitmap.height));
+    const width = Math.max(1, Math.round(bitmap.width * scale));
+    const height = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = new OffscreenCanvas(width, height);
+    const context = canvas.getContext("2d");
+    if (!context) return null;
+    context.drawImage(bitmap, 0, 0, width, height);
+    const preview = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.78 });
+    return {
+      base64: bytesToBase64(await preview.arrayBuffer()),
+      mimeType: "image/jpeg"
+    };
+  } finally {
+    bitmap.close();
+  }
+}
+async function teamWebWorkerSettings() {
+  const values = await chrome.storage.local.get([
+    "pixelFlowTeamWebWorkerRelayUrl",
+    "pixelFlowTeamWebWorkerDeviceToken",
+    "pixelFlowTeamWebWorkerId",
+    "pixelFlowTeamWebWorkerEnabled"
+  ]);
+  const relayUrl = typeof values.pixelFlowTeamWebWorkerRelayUrl === "string" ? values.pixelFlowTeamWebWorkerRelayUrl.trim().replace(/\/$/, "") : "";
+  const deviceToken = typeof values.pixelFlowTeamWebWorkerDeviceToken === "string" ? values.pixelFlowTeamWebWorkerDeviceToken.trim() : "";
+  const workerId = typeof values.pixelFlowTeamWebWorkerId === "string" ? values.pixelFlowTeamWebWorkerId.trim() : "";
+  return { relayUrl, deviceToken, workerId, enabled: values.pixelFlowTeamWebWorkerEnabled === true };
+}
+async function teamWebWorkerRequest(path, options = {}) {
+  const settings = await teamWebWorkerSettings();
+  if (!settings.enabled || !settings.relayUrl || !settings.deviceToken || !settings.workerId) throw new Error("网页生图机尚未配对或已暂停");
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const response = await fetch(`${settings.relayUrl}/web-worker${path}`, {
+      ...options,
+      headers: {
+        Authorization: `Bearer ${settings.deviceToken}`,
+        ...(options.body ? { "Content-Type": "application/json" } : {}),
+        ...(options.headers || {})
+      }
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (response.ok) return payload;
+    if ((response.status === 429 || response.status >= 500) && attempt < 4) {
+      const retryAfter = Number(response.headers.get("Retry-After"));
+      await new Promise((resolveWait) => setTimeout(resolveWait, Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1e3 : Math.min(16e3, 1e3 * 2 ** attempt)));
+      continue;
+    }
+    throw new Error(payload.message || payload.error || `网页生图任务中继返回 HTTP ${response.status}`);
+  }
+  throw new Error("网页生图任务中继持续不可用");
+}
+async function saveActiveTeamWebJob() {
+  if (activeTeamWebJob) await chrome.storage.local.set({ [TEAM_WEB_ACTIVE_STORAGE]: activeTeamWebJob });
+  else await chrome.storage.local.remove(TEAM_WEB_ACTIVE_STORAGE);
+}
+function activeTeamWebKey() {
+  return activeTeamWebJob ? createTaskScopeKey(TEAM_WEB_PROJECT_ID, activeTeamWebJob.job.id) : "";
+}
+async function downloadTeamWebInputs(job) {
+  return Promise.all((job.inputImages || []).map(async (descriptor) => {
+    const chunks = [];
+    for (let chunkIndex = 0; chunkIndex < descriptor.totalChunks; chunkIndex += 1) {
+      const chunk = await teamWebWorkerRequest(`/jobs/${job.id}/input-chunks/${descriptor.imageIndex}/${chunkIndex}`);
+      chunks.push(chunk.base64);
+    }
+    return {
+      name: descriptor.name,
+      mimeType: descriptor.mimeType || "image/png",
+      base64: chunks.join("")
+    };
+  }));
+}
+async function uploadTeamWebImage(jobId, image, endpoint, imageIndex, name) {
+  const totalChunks = Math.max(1, Math.ceil(image.base64.length / TEAM_GATEWAY_CHUNK_CHARACTERS));
+  for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex += 1) {
+    await teamWebWorkerRequest(`/jobs/${jobId}/${endpoint}`, {
+      method: "POST",
+      body: JSON.stringify({
+        imageIndex,
+        chunkIndex,
+        totalChunks,
+        name,
+        mimeType: image.mimeType || "image/png",
+        base64: image.base64.slice(chunkIndex * TEAM_GATEWAY_CHUNK_CHARACTERS, (chunkIndex + 1) * TEAM_GATEWAY_CHUNK_CHARACTERS)
+      })
+    });
+  }
+}
+async function clearActiveTeamWebJob(closeTab = true) {
+  const key = activeTeamWebKey();
+  if (key) {
+    browserTaskMessages.delete(key);
+    resumedBrowserUrls.delete(key);
+    browserRecoveryReloadedAt.delete(key);
+    await saveBrowserTaskMessages();
+    await removeActiveScope(key);
+    if (closeTab) await tabRegistry.hibernate(key).catch(() => void 0);
+  }
+  activeTeamWebJob = void 0;
+  await saveActiveTeamWebJob();
+  if (browserTaskMessages.size === 0) await chrome.alarms.clear(BROWSER_RESULT_RECOVERY_ALARM);
+}
+async function failActiveTeamWebJob(reason, detail) {
+  const job = activeTeamWebJob?.job;
+  if (!job) return;
+  await teamWebWorkerRequest(`/jobs/${job.id}/fail`, {
+    method: "POST",
+    body: JSON.stringify({ error: detail || "ChatGPT 网页执行失败" })
+  }).catch(() => void 0);
+  if (["login_required", "verification_required", "usage_limited"].includes(reason)) {
+    await chrome.storage.local.set({ pixelFlowTeamWebWorkerEnabled: false });
+  }
+  await clearActiveTeamWebJob();
+}
+async function completeActiveTeamWebJob(message) {
+  const active = activeTeamWebJob;
+  if (!active || !Array.isArray(message.images) || message.images.length === 0) throw new Error("ChatGPT 已结束，但没有取得生成图片");
+  const generatedAt = Date.now();
+  const generationStartedAt = active.generationStartedAt ?? active.submittedAt ?? active.startedAt;
+  await teamWebWorkerRequest(`/jobs/${active.job.id}/generated`, {
+    method: "POST",
+    body: JSON.stringify({ generationStartedAt, generatedAt, generationDurationMs: Math.max(0, generatedAt - generationStartedAt) })
+  });
+  for (let imageIndex = 0; imageIndex < message.images.length; imageIndex += 1) {
+    await uploadTeamWebImage(active.job.id, message.images[imageIndex], "result-chunks", imageIndex, `result-${imageIndex + 1}.png`);
+  }
+  const preview = await createTeamPreview(message.images[0]).catch(() => null);
+  if (preview) await uploadTeamWebImage(active.job.id, preview, "preview-chunks", 0, "preview-1.jpg");
+  await teamWebWorkerRequest(`/jobs/${active.job.id}/complete`, {
+    method: "POST",
+    body: JSON.stringify({ resultCount: message.images.length })
+  });
+  await clearActiveTeamWebJob();
+  await chrome.notifications.create(`team-web-worker:${active.job.id}`, {
+    type: "basic",
+    iconUrl: chrome.runtime.getURL("icon.svg"),
+    title: "团队 GPT-web 已完成",
+    message: `已回传 ${message.images.length} 张图片`
+  });
+  setTimeout(() => void teamWebWorkerTick(), 1e3);
+}
+async function handleTeamWebPageTaskMessage(message, senderTab) {
+  await teamWebWorkerReady;
+  if (message.projectId !== TEAM_WEB_PROJECT_ID || message.taskId !== activeTeamWebJob?.job.id) return false;
+  const key = activeTeamWebKey();
+  if (!key || !tabRegistry.ownsTab(key, senderTab?.id)) return false;
+  const conversationUrl = resolveTaskConversationUrl(message, senderTab?.url);
+  if (conversationUrl) {
+    tabRegistry.updateConversation(key, conversationUrl);
+    activeTeamWebJob.conversationUrl = conversationUrl;
+  }
+  if (message.type === "TASK_STATUS") {
+    const pending = browserTaskMessages.get(key);
+    const phase = message.status === "generating" ? "submitted" : message.status;
+    if (pending) {
+      browserTaskMessages.set(key, { ...pending, phase, submittedAt: phase === "submitted" ? pending.submittedAt ?? Date.now() : pending.submittedAt });
+      await saveBrowserTaskMessages();
+    }
+    activeTeamWebJob.phase = phase;
+    if (phase === "submitted") {
+      activeTeamWebJob.submittedAt ??= Date.now();
+      activeTeamWebJob.generationStartedAt ??= Date.now();
+    }
+    await saveActiveTeamWebJob();
+    await teamWebWorkerRequest(`/jobs/${activeTeamWebJob.job.id}/heartbeat`, { method: "POST", body: "{}" }).catch(() => void 0);
+    if (message.status === "manual_action") {
+      await teamWebWorkerRequest("/heartbeat", { method: "POST", body: JSON.stringify({ state: "needs_action", detail: message.detail || "请在执行机完成 ChatGPT 手动发送" }) }).catch(() => void 0);
+    }
+    return true;
+  }
+  if (message.type === "TASK_RESULT") {
+    await completeActiveTeamWebJob(message).catch(async (error) => {
+      await failActiveTeamWebJob("delivery_error", error instanceof Error ? error.message : String(error));
+    });
+    return true;
+  }
+  if (message.type === "TASK_ERROR") {
+    await failActiveTeamWebJob(message.reason, message.detail);
+    return true;
+  }
+  return false;
+}
+async function startActiveTeamWebJob() {
+  const active = activeTeamWebJob;
+  if (!active) return;
+  const key = activeTeamWebKey();
+  const images = await downloadTeamWebInputs(active.job);
+  const mapped = await tabRegistry.ensure(key, active.conversationUrl);
+  await rememberActiveTab(key, mapped.tabId);
+  await waitForTabReady(mapped.tabId);
+  const message = {
+    type: "EXECUTE_IN_CHATGPT",
+    projectId: TEAM_WEB_PROJECT_ID,
+    taskId: active.job.id,
+    expectedConversationUrl: active.conversationUrl,
+    prompt: appendAspectRatioPrompt(active.job.prompt, active.job.ratio ?? "auto"),
+    images,
+    startedAt: active.startedAt,
+    phase: "preparing_tab"
+  };
+  browserTaskMessages.set(key, recoveryMessage(message));
+  await saveBrowserTaskMessages();
+  scheduleBrowserResultRecoveryAlarm();
+  await sendWithCurrentChatGptAdapter(chrome.tabs, chrome.scripting, mapped.tabId, message);
+}
+async function teamWebWorkerTick() {
+  await Promise.all([schedulerReady, teamWebWorkerReady]);
+  const settings = await teamWebWorkerSettings();
+  if (!settings.enabled || !settings.relayUrl || !settings.deviceToken || !settings.workerId) {
+    await chrome.alarms.clear(TEAM_WEB_WORKER_ALARM);
+    return;
+  }
+  scheduleTeamWebWorkerAlarm();
+  if (activeTeamWebJob) {
+    const key = activeTeamWebKey();
+    if (!browserTaskMessages.has(key) && !concreteChatGptConversationUrl(activeTeamWebJob.conversationUrl)) {
+      await failActiveTeamWebJob("worker_interrupted", "网页生图机在建立 ChatGPT 对话前被中断，请重新运行该任务");
+      return;
+    }
+    await teamWebWorkerRequest(`/jobs/${activeTeamWebJob.job.id}/heartbeat`, { method: "POST", body: "{}" }).catch(() => void 0);
+    return;
+  }
+  for (const key of queue.running) {
+    if (await taskGenerationMode(key) === "browser") {
+      await teamWebWorkerRequest("/heartbeat", { method: "POST", body: JSON.stringify({ state: "ready", detail: "正在等待本机 GPT-web 任务完成" }) }).catch(() => void 0);
+      return;
+    }
+  }
+  const claimed = await teamWebWorkerRequest("/claim", { method: "POST", body: "{}" });
+  if (!claimed.job) return;
+  activeTeamWebJob = { job: claimed.job, startedAt: Date.now(), phase: "claimed" };
+  await saveActiveTeamWebJob();
+  await startActiveTeamWebJob().catch(async (error) => {
+    await failActiveTeamWebJob("start_error", error instanceof Error ? error.message : String(error));
+  });
+}
+async function finalizeTeamGatewayJob(jobId, images) {
+  try {
+    const preview = images[0] ? await createTeamPreview(images[0]) : null;
+    if (preview) {
+      const totalChunks = Math.max(1, Math.ceil(preview.base64.length / TEAM_GATEWAY_CHUNK_CHARACTERS));
+      for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex += 1) {
+        await teamGatewayRequest(`/jobs/${jobId}/preview-chunks`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            imageIndex: 0,
+            chunkIndex,
+            totalChunks,
+            name: "preview-1.jpg",
+            mimeType: preview.mimeType,
+            base64: preview.base64.slice(chunkIndex * TEAM_GATEWAY_CHUNK_CHARACTERS, (chunkIndex + 1) * TEAM_GATEWAY_CHUNK_CHARACTERS)
+          })
+        });
+      }
+    }
+  } catch {
+  }
+  await teamGatewayRequest(`/jobs/${jobId}/acknowledge`, { method: "POST" });
 }
 async function waitForApiWorkerJob(jobId) {
   while (true) {
@@ -7197,7 +7531,7 @@ async function waitForTeamGatewayJob(jobId) {
 async function recoverTeamTaskResult(projectId, taskId, jobId) {
   const project = await projectRepository.loadProject(projectId);
   const task = project?.graph.nodes.find((node) => node.id === taskId && node.kind === "task");
-  if (!project || !task || task.generationMode !== "team") throw new Error("找不到团队生图任务");
+  if (!project || !task || !["team", "team_web"].includes(task.generationMode)) throw new Error("找不到团队生图任务");
   const existingResults = project.graph.edges.filter(
     (edge) => edge.source === taskId && edge.kind === "output"
   );
@@ -7209,7 +7543,7 @@ async function recoverTeamTaskResult(projectId, taskId, jobId) {
   const images = await downloadTeamGatewayImages(job);
   if (!images.length) throw new Error("云端任务没有可恢复的图片");
   await persistAndBroadcast({ type: "TASK_RESULT", projectId, taskId, images, responseText: "" });
-  void teamGatewayRequest(`/jobs/${jobId}/acknowledge`, { method: "POST" }).catch(() => {});
+  await finalizeTeamGatewayJob(jobId, images).catch(() => {});
   return { recovered: true, resultCount: images.length, jobId };
 }
 async function executeApiTask(projectId, taskId, project, task) {
@@ -7312,6 +7646,8 @@ async function executeTeamTask(projectId, taskId, project, task) {
         requestId: `${projectId}:${taskId}:${Date.now()}`,
         prompt,
         ratio: task.aspectRatio ?? "auto",
+        imageModel: task.teamImageModel === "sunburst" ? "sunburst" : "flare",
+        provider: task.generationMode === "team_web" ? "chatgpt_web" : "codex_cloud",
         images: await Promise.all(imageBlobs.map(async (item) => ({
           name: item.name,
           mimeType: item.blob.type || "image/png",
@@ -7332,7 +7668,7 @@ async function executeTeamTask(projectId, taskId, project, task) {
       return true;
     });
     if (!handled) return;
-    void teamGatewayRequest(`/jobs/${jobId}/acknowledge`, { method: "POST" }).catch(() => {});
+    await finalizeTeamGatewayJob(jobId, images).catch(() => {});
     await chrome.notifications.create(createTaskNotificationId(projectId, taskId), {
       type: "basic",
       iconUrl: chrome.runtime.getURL("icon.svg"),
@@ -7369,7 +7705,7 @@ async function executeTask(projectId, taskId) {
       await executeApiTask(projectId, taskId, project, task);
       return;
     }
-    if (task.generationMode === "team") {
+    if (task.generationMode === "team" || task.generationMode === "team_web") {
       await executeTeamTask(projectId, taskId, project, task);
       return;
     }
@@ -7455,7 +7791,7 @@ async function taskGenerationMode(key) {
   if (!scope) return "browser";
   const project = await projectRepository.loadProject(scope.projectId);
   const task = project?.graph.nodes.find((node) => node.id === scope.taskId && node.kind === "task");
-  return task?.generationMode === "api" ? "api" : task?.generationMode === "team" ? "team" : "browser";
+  return task?.generationMode === "api" ? "api" : task?.generationMode === "team" ? "team" : task?.generationMode === "team_web" ? "team_web" : "browser";
 }
 async function advanceQueueByMode() {
   let slots = Math.max(0, MAX_CONCURRENCY - queue.running.length);
@@ -7472,6 +7808,10 @@ async function advanceQueueByMode() {
       continue;
     }
     const mode = await taskGenerationMode(key);
+    if (mode === "browser" && activeTeamWebJob) {
+      waiting.push(key);
+      continue;
+    }
     if (mode === "browser" && browserRunning >= MAX_BROWSER_CONCURRENCY) {
       waiting.push(key);
       continue;
@@ -7500,12 +7840,12 @@ async function recoverInterruptedApiTasks() {
     if (!scope) continue;
     const project = await projectRepository.loadProject(scope.projectId);
     const task = project?.graph.nodes.find((node) => node.id === scope.taskId && node.kind === "task");
-    if (task?.generationMode === "api" || task?.generationMode === "team") interruptedByKey.set(key, { key, ...scope });
+    if (["api", "team", "team_web"].includes(task?.generationMode)) interruptedByKey.set(key, { key, ...scope });
   }
   const activeStatuses = new Set(["sending", "generating", "uploading", "waiting_page"]);
   for (const project of await projectRepository.listProjects()) {
     for (const task of project.graph.nodes) {
-      if (task.kind !== "task" || !["api", "team"].includes(task.generationMode) || !activeStatuses.has(task.status)) continue;
+      if (task.kind !== "task" || !["api", "team", "team_web"].includes(task.generationMode) || !activeStatuses.has(task.status)) continue;
       const key = createTaskScopeKey(project.id, task.id);
       interruptedByKey.set(key, { key, projectId: project.id, taskId: task.id });
     }
@@ -7525,7 +7865,7 @@ async function recoverInterruptedApiTasks() {
           projectId: item.projectId,
           taskId: item.taskId,
           status: "generating",
-          detail: task.generationMode === "team" ? "已重连团队生图任务，正在继续等待结果" : "已重连本机 API 任务，正在继续等待结果",
+          detail: task.generationMode === "team" || task.generationMode === "team_web" ? "已重连团队生图任务，正在继续等待结果" : "已重连本机 API 任务，正在继续等待结果",
           apiJobId: task.apiJobId
         });
         continue;
@@ -7536,8 +7876,8 @@ async function recoverInterruptedApiTasks() {
         type: "TASK_ERROR",
         projectId: item.projectId,
         taskId: item.taskId,
-        reason: task?.generationMode === "team" ? "team_interrupted" : "api_interrupted",
-        detail: task?.generationMode === "team" ? "团队任务在提交前被扩展重载中断，请重新运行" : "API 任务因扩展重载或后台中断而停止；为避免重复计费，未自动重试。请先检查平台调用记录。"
+        reason: task?.generationMode === "team" || task?.generationMode === "team_web" ? "team_interrupted" : "api_interrupted",
+        detail: task?.generationMode === "team" || task?.generationMode === "team_web" ? "团队任务在提交前被扩展重载中断，请重新运行" : "API 任务因扩展重载或后台中断而停止；为避免重复计费，未自动重试。请先检查平台调用记录。"
       });
     }
   });
@@ -7547,16 +7887,16 @@ async function reconcileCompletedApiTasks() {
   let activeApiJobs = 0;
   for (const project of await projectRepository.listProjects()) {
     for (const task of project.graph.nodes) {
-      if (task.kind !== "task" || !["api", "team"].includes(task.generationMode) || !task.apiJobId) continue;
+      if (task.kind !== "task" || !["api", "team", "team_web"].includes(task.generationMode) || !task.apiJobId) continue;
       activeApiJobs += 1;
       let job;
       try {
-        job = await (task.generationMode === "team" ? teamGatewayRequest : apiWorkerRequest)(`/jobs/${task.apiJobId}`);
+        job = await (["team", "team_web"].includes(task.generationMode) ? teamGatewayRequest : apiWorkerRequest)(`/jobs/${task.apiJobId}`);
       } catch {
         continue;
       }
       if (job.status !== "completed" && job.status !== "failed") continue;
-      const completedImages = job.status === "completed" && task.generationMode === "team" ? await downloadTeamGatewayImages(job) : job.images || [];
+      const completedImages = job.status === "completed" && ["team", "team_web"].includes(task.generationMode) ? await downloadTeamGatewayImages(job) : job.images || [];
       const key = createTaskScopeKey(project.id, task.id);
       const handled = await updateScheduler(async () => {
         if (!queue.running.includes(key)) return false;
@@ -7574,10 +7914,10 @@ async function reconcileCompletedApiTasks() {
             type: "TASK_ERROR",
             projectId: project.id,
             taskId: task.id,
-            reason: task.generationMode === "team" ? "team_error" : "api_error",
-            detail: job.error || (task.generationMode === "team" ? "团队生图失败" : "API 生图失败")
+            reason: ["team", "team_web"].includes(task.generationMode) ? "team_error" : "api_error",
+            detail: job.error || (["team", "team_web"].includes(task.generationMode) ? "团队生图失败" : "API 生图失败")
           });
-          queue = fail(queue, key, task.generationMode === "team" ? "team_error" : "api_error");
+          queue = fail(queue, key, ["team", "team_web"].includes(task.generationMode) ? "team_error" : "api_error");
         }
         pendingScopes.delete(key);
         await removeActiveScope(key);
@@ -7585,7 +7925,7 @@ async function reconcileCompletedApiTasks() {
       });
       if (!handled) continue;
       activeApiJobs -= 1;
-      if (task.generationMode === "team") {
+      if (task.generationMode === "team" || task.generationMode === "team_web") {
         void teamGatewayRequest(`/jobs/${task.apiJobId}/acknowledge`, { method: "POST" }).catch(() => {});
       } else {
         void apiWorkerRequest(`/jobs/${task.apiJobId}`, { method: "DELETE" }).catch(() => {});
@@ -7594,7 +7934,7 @@ async function reconcileCompletedApiTasks() {
         await chrome.notifications.create(createTaskNotificationId(project.id, task.id), {
           type: "basic",
           iconUrl: chrome.runtime.getURL("icon.svg"),
-          title: task.generationMode === "team" ? "团队生图完成" : "API 生图完成",
+          title: task.generationMode === "team" || task.generationMode === "team_web" ? "团队生图完成" : "API 生图完成",
           message: `已生成 ${completedImages.length} 张图片`
         });
       }
@@ -7603,6 +7943,7 @@ async function reconcileCompletedApiTasks() {
   if (activeApiJobs === 0) await chrome.alarms.clear(API_RECOVERY_ALARM);
 }
 async function handlePageTaskMessage(message, senderTab) {
+  if (message.projectId === TEAM_WEB_PROJECT_ID) return handleTeamWebPageTaskMessage(message, senderTab);
   await schedulerReady;
   const key = createTaskScopeKey(message.projectId, message.taskId);
   if (!tabRegistry.ownsTab(key, senderTab?.id)) return false;
@@ -7689,6 +8030,11 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   })().catch(() => {});
 });
 chrome.runtime.onMessage.addListener((raw, sender, sendResponse) => {
+  if (raw?.type === "TEAM_WEB_WORKER_SETTINGS_CHANGED") {
+    sendResponse({ accepted: true });
+    void teamWebWorkerTick();
+    return false;
+  }
   if (!isExtensionMessage(raw)) return false;
   const message = raw;
   if (message.type === "RECOVER_TEAM_RESULT") {
@@ -7784,6 +8130,7 @@ void recoverInterruptedApiTasks().then(() => updateScheduler(async () => void 0)
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === API_RECOVERY_ALARM) void reconcileCompletedApiTasks();
   if (alarm.name === BROWSER_RESULT_RECOVERY_ALARM) void reconcileBrowserTaskResults();
+  if (alarm.name === TEAM_WEB_WORKER_ALARM) void teamWebWorkerTick();
 });
 chrome.notifications.onClicked.addListener((notificationId) => {
   const url = notificationIdToCanvasUrl(notificationId, chrome.runtime.getURL("index.html"));

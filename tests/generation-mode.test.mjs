@@ -9,8 +9,9 @@ test("browser runs wait for an in-flight mode save", async () => {
   assert.match(source, /const pendingModeSave = modeSavePromises\.get\(key\)/);
   assert.match(source, /if \(selectedMode !== "api" && !pendingModeSave\) return/);
   assert.match(source, /await pendingModeSave/);
-  assert.match(source, /savedMode === "api" \? "api" : savedMode === "team" \? "team" : "browser"/);
+  assert.match(source, /savedMode === "api" \? "api" : savedMode === "team" \? "team" : savedMode === "team_web" \? "team_web" : "browser"/);
   assert.match(source, /<option value="team">团队生图<\/option>/);
+  assert.match(source, /<option value="team_web">团队 GPT-web<\/option>/);
 });
 
 test("running ChatGPT task groups stay expanded so background tabs are not frozen", async () => {

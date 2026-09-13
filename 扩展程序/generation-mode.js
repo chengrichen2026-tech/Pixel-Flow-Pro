@@ -31,7 +31,7 @@
       request.onerror = () => reject(request.error);
     });
     const savedMode = project?.graph?.nodes?.find((node) => node.id === taskId && node.kind === "task")?.generationMode;
-    const mode = savedMode === "api" ? "api" : savedMode === "team" ? "team" : "browser";
+    const mode = savedMode === "api" ? "api" : savedMode === "team" ? "team" : savedMode === "team_web" ? "team_web" : "browser";
     modeCache.set(key, mode);
     return mode;
   }
@@ -157,7 +157,7 @@
       label.title = "生图模式";
       const select = document.createElement("select");
       select.setAttribute("aria-label", "生图模式");
-      select.innerHTML = '<option value="browser">GPT-web</option><option value="api">API</option><option value="team">团队生图</option>';
+      select.innerHTML = '<option value="browser">GPT-web</option><option value="api">API</option><option value="team">团队生图</option><option value="team_web">团队 GPT-web</option>';
       select.value = mode;
       select.addEventListener("change", async () => {
         const activeStatus = card.querySelector(".task-status")?.getAttribute("data-status");

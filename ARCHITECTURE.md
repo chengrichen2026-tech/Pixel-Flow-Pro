@@ -8,6 +8,8 @@
 
 `团队模式：同伴 React 画布 → background 携成员令牌提交任务 → Tailscale HTTPS → 主机 127.0.0.1:43130 Team Gateway → Codex OAuth 生图 → background 轮询/重连 → 同伴 IndexedDB → React 画布`
 
+`团队 GPT-web：同伴 React 画布 → 妙搭任务箱(provider=chatgpt_web) → Cloudflare 中继 → 已配对执行机 Pixel Flow background → 现有 ChatGPT contentScript → 任务箱结果分块 → 同伴 IndexedDB → React 画布`
+
 ## 稳定边界
 
 - 生产画布逻辑：`src/` React/TypeScript 经 Vite 构建为 `扩展程序/assets/pixel-flow.js`，正式 `index.html` 已切换到该入口
@@ -42,8 +44,9 @@ IndexedDB 名称为 `gpt-node-canvas`，版本 1：
 2. 浏览器模式真实上传附件、发送提示词、进入对话、完成生成并写回结果。
 3. API 模式真实提交 Worker job、完成生成并写回结果。
 4. 团队模式真实通过成员令牌提交 Gateway job、由 Codex OAuth 完成生成并写回同伴画布。
-5. 受影响路径均回读 `completed`、`runCount` 增加、结果节点/资产存在，完成后活动任务映射已清理。
-6. 删除临时画布与本地验收资产，回读不存在后才收尾。
+5. 团队 GPT-web 模式必须由另一台已配对设备领取任务，复用现有 ChatGPT adapter 生成并回传任务箱，再写回同伴画布。
+6. 受影响路径均回读 `completed`、`runCount` 增加、结果节点/资产存在，完成后活动任务映射已清理。
+7. 删除临时画布与本地验收资产，回读不存在后才收尾。
 
 任一真实闭环未运行或未取得上述证据时，结论必须标记为“代码验证通过，深链路未验收”。
 

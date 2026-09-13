@@ -8,28 +8,34 @@ test("rebuilt tasks own generation mode instead of requiring DOM injection", asy
   const app = await readFile(new URL("src/App.tsx", root), "utf8");
   const types = await readFile(new URL("src/types.ts", root), "utf8");
   const store = await readFile(new URL("src/store.ts", root), "utf8");
-  assert.match(types, /export type GenerationMode = "browser" \| "api" \| "team"/);
+  assert.match(types, /export type GenerationMode = "browser" \| "api" \| "team" \| "team_web"/);
   assert.match(types, /generationMode\?: GenerationMode/);
+  assert.match(types, /export type TeamImageModel = "flare" \| "sunburst"/);
+  assert.match(types, /teamImageModel\?: TeamImageModel/);
   assert.match(types, /apiJobId\?: string/);
   assert.match(store, /generationMode:"api"/);
   assert.match(app, /className="generation-mode"/);
   assert.match(app, /aria-label="生图模式"/);
-  assert.match(app, /n\.generationMode==='api'\?'api':n\.generationMode==='team'\?'team':'browser'/);
+  assert.match(app, /n\.generationMode==='api'\?'api':n\.generationMode==='team'\?'team':n\.generationMode==='team_web'\?'team_web':'browser'/);
   assert.match(app, /<option value="team">团队生图<\/option>/);
+  assert.match(app, /<option value="team_web">团队 GPT-web<\/option>/);
+  assert.match(app, /className="team-model-toggle"/);
+  assert.match(app, /value==='flare'\?'Flare':'Sunburst'/);
+  assert.match(app, /aria-label="团队生图模型"/);
 });
 
 test("rebuilt mode switching preserves production safety rules", async () => {
   const app = await readFile(new URL("src/App.tsx", root), "utf8");
   assert.match(app, /\['queued','waiting_page','uploading','sending','generating','manual_action'\]\.includes\(status\)/);
-  assert.match(app, /generationMode:next,apiJobId:undefined,statusDetail:undefined/);
+  assert.match(app, /generationMode:next,teamImageModel:next==='team'/);
   assert.match(app, /currentMode==='api'&&!await readApiKey\(\)/);
-  assert.match(app, /currentMode==='team'&&!await hasTeamGateway\(\)/);
+  assert.match(app, /\(currentMode==='team'\|\|currentMode==='team_web'\)&&!await hasTeamGateway\(\)/);
   assert.match(app, /pixel-flow:open-api-settings/);
-  assert.match(app, /const pendingModeSave=useRef<Promise<void>>\(Promise\.resolve\(\)\)/);
-  assert.match(app, /pendingModeSave\.current=saving;await saving/);
-  assert.match(app, /const run=async\(\)=>\{await pendingModeSave\.current/);
+  assert.match(app, /const pendingSettingsSave=useRef<Promise<void>>\(Promise\.resolve\(\)\)/);
+  assert.match(app, /pendingSettingsSave\.current=saving;await saving/);
+  assert.match(app, /const run=async\(\)=>\{await pendingSettingsSave\.current/);
   assert.match(app, /const currentTask=useStore\.getState\(\)\.project/);
-  assert.match(app, /currentTask\?\.generationMode==='team'\?'team':'browser'/);
+  assert.match(app, /currentTask\?\.generationMode==='team'\?'team':currentTask\?\.generationMode==='team_web'\?'team_web':'browser'/);
 });
 
 test("rebuilt API settings use the same local storage contract", async () => {
@@ -58,4 +64,17 @@ test("team settings keep member credentials local and request only the configure
   assert.match(manifest, /"optional_host_permissions"/);
   assert.match(app, /平台访问 Key/);
   assert.match(app, /成员令牌/);
+});
+
+test("web worker pairing keeps the ChatGPT session local and exposes pause controls", async () => {
+  const settings = await readFile(new URL("src/team-web-worker-settings.ts", root), "utf8");
+  const app = await readFile(new URL("src/App.tsx", root), "utf8");
+  assert.match(settings, /pixelFlowTeamWebWorkerDeviceToken/);
+  assert.match(settings, /\/web-worker\/pair/);
+  assert.match(settings, /TEAM_WEB_WORKER_SETTINGS_CHANGED/);
+  assert.match(settings, /void chrome\.runtime\.sendMessage/);
+  assert.match(settings, /pfw_/);
+  assert.match(app, /网页生图执行机/);
+  assert.match(app, /配对并开始接单/);
+  assert.match(app, /暂停接单/);
 });

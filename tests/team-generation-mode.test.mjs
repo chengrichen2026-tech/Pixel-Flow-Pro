@@ -18,6 +18,15 @@ test("team mode sends authenticated jobs without exposing Codex OAuth to the ext
   assert.match(background, /requestId: `\$\{projectId\}:\$\{taskId\}:\$\{Date\.now\(\)\}`/);
   assert.match(background, /async function submitTeamGatewayJob\(input\)/);
   assert.match(background, /protocolVersion/);
+  assert.match(background, /Number\(health\.protocolVersion \|\| 1\) < 4/);
+  assert.match(background, /resultDelivery: "direct"/);
+  assert.match(background, /imageModel: input\.imageModel === "sunburst" \? "sunburst" : "flare"/);
+  assert.match(background, /imageModel: task\.teamImageModel === "sunburst" \? "sunburst" : "flare"/);
+  assert.match(background, /image\.downloadUrl/);
+  assert.match(background, /团队生图直传文件完整性校验失败/);
+  assert.match(background, /async function finalizeTeamGatewayJob/);
+  assert.match(background, /\/preview-chunks/);
+  assert.match(background, /createImageBitmap/);
   assert.match(background, /\/input-chunks/);
   assert.match(background, /async function downloadTeamGatewayImages\(job\)/);
   assert.match(background, /\/result-chunks\//);
@@ -34,10 +43,10 @@ test("team mode sends authenticated jobs without exposing Codex OAuth to the ext
 });
 
 test("team jobs recover through the persistent worker path", () => {
-  assert.match(background, /task\.generationMode === "team"[\s\S]*await executeTeamTask/);
-  assert.match(background, /\["api", "team"\]\.includes\(task\.generationMode\)/);
-  assert.match(background, /task\.generationMode === "team" \? teamGatewayRequest : apiWorkerRequest/);
-  assert.match(background, /title: task\.generationMode === "team" \? "团队生图完成" : "API 生图完成"/);
+  assert.match(background, /task\.generationMode === "team" \|\| task\.generationMode === "team_web"[\s\S]*await executeTeamTask/);
+  assert.match(background, /\["api", "team", "team_web"\]\.includes\(task\.generationMode\)/);
+  assert.match(background, /\["team", "team_web"\]\.includes\(task\.generationMode\) \? teamGatewayRequest : apiWorkerRequest/);
+  assert.match(background, /title: task\.generationMode === "team" \|\| task\.generationMode === "team_web" \? "团队生图完成" : "API 生图完成"/);
   assert.match(background, /task\.generationMode === "team"[\s\S]*teamGatewayRequest\(`\/jobs\/\$\{task\.apiJobId\}\/acknowledge`/);
   assert.match(background, /async function recoverTeamTaskResult/);
   assert.match(background, /RECOVER_TEAM_RESULT/);
@@ -45,8 +54,27 @@ test("team jobs recover through the persistent worker path", () => {
 });
 
 test("structured commands can create team generation tasks", () => {
-  assert.match(bridge, /command\.generationMode==="team"\?"team":"api"/);
-  assert.match(mcp, /enum:\["api","browser","team"\]/);
+  assert.match(bridge, /command\.generationMode==="team"\?"team":command\.generationMode==="team_web"\?"team_web":"api"/);
+  assert.match(bridge, /command\.teamImageModel==="sunburst"\?"sunburst":"flare"/);
+  assert.match(mcp, /enum:\["api","browser","team","team_web"\]/);
+  assert.match(mcp, /teamImageModel:\{type:"string",enum:\["flare","sunburst"\]\}/);
+});
+
+test("remote team web jobs reuse the existing ChatGPT adapter and return chunks", () => {
+  assert.match(background, /TEAM_WEB_PROJECT_ID = "pixel-flow-team-web-worker"/);
+  assert.match(background, /async function startActiveTeamWebJob\(\)/);
+  assert.match(background, /sendWithCurrentChatGptAdapter\(chrome\.tabs, chrome\.scripting, mapped\.tabId, message\)/);
+  assert.match(background, /async function handleTeamWebPageTaskMessage/);
+  assert.match(background, /uploadTeamWebImage\(active\.job\.id, message\.images\[imageIndex\], "result-chunks"/);
+  assert.match(background, /pixelFlowTeamWebWorkerEnabled: false/);
+  assert.match(background, /TEAM_WEB_WORKER_ALARM/);
+  assert.match(background, /sendResponse\(\{ accepted: true \}\);[\s\S]*void teamWebWorkerTick\(\)/);
+  assert.doesNotMatch(background, /run_chatgpt_web\.py/);
+  assert.ok(
+    background.indexOf("var teamWebWorkerReady = Promise.all")
+      < background.indexOf("void teamWebWorkerReady.then"),
+    "team web worker startup must run after its readiness promise is assigned",
+  );
 });
 
 test("macOS team gateway service scripts are present", async () => {
