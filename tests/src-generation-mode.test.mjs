@@ -78,3 +78,12 @@ test("web worker pairing keeps the ChatGPT session local and exposes pause contr
   assert.match(app, /配对并开始接单/);
   assert.match(app, /暂停接单/);
 });
+
+test("generation settings stay usable in short browser viewports", async () => {
+  const app = await readFile(new URL("src/App.tsx", root), "utf8");
+  const styles = await readFile(new URL("src/styles.css", root), "utf8");
+  assert.match(app, /className="api-settings-body"/);
+  assert.match(styles, /\.api-settings\{[^}]*max-height:calc\(100dvh - 40px\)[^}]*display:flex[^}]*flex-direction:column[^}]*overflow:hidden/);
+  assert.match(styles, /\.api-settings-body\{[^}]*min-height:0[^}]*overflow-y:auto/);
+  assert.match(styles, /\.api-settings footer\{[^}]*flex:0 0 auto/);
+});
