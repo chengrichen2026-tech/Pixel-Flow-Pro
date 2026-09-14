@@ -19,7 +19,7 @@ test("team mode sends authenticated jobs without exposing Codex OAuth to the ext
   assert.match(background, /async function submitTeamGatewayJob\(input\)/);
   assert.match(background, /protocolVersion/);
   assert.match(background, /Number\(health\.protocolVersion \|\| 1\) < 4/);
-  assert.match(background, /resultDelivery: "direct"/);
+  assert.match(background, /resultDelivery: input\.provider === "chatgpt_web"[\s\S]*\? "bundle" : "direct"/);
   assert.match(background, /imageModel: input\.imageModel === "sunburst" \? "sunburst" : "flare"/);
   assert.match(background, /imageModel: task\.teamImageModel === "sunburst" \? "sunburst" : "flare"/);
   assert.match(background, /image\.downloadUrl/);
@@ -87,4 +87,11 @@ test("macOS team gateway service scripts are present", async () => {
   assert.match(install, /Library\/Application Support\/Pixel Flow Team Gateway/);
   assert.match(install, /127\.0\.0\.1:43130\/health/);
   assert.match(uninstall, /launchctl bootout/);
+});
+
+
+test("Team Web waiting details are visible during active tasks", async () => {
+  const app = await readFile(new URL("src/App.tsx", root), "utf8");
+  assert.match(app, /mode==='team_web'&&n.statusDetail&&\['queued','sending','generating'\]\.includes\(n.status\)/);
+  assert.match(app, /role="status">\{n.statusDetail\}/);
 });

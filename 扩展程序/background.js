@@ -6511,7 +6511,7 @@ async function applyTaskMessage(project, message, saveAsset) {
 }
 
 // src/shared/protocol.ts
-var CHATGPT_ADAPTER_VERSION = 25;
+var CHATGPT_ADAPTER_VERSION = 26;
 var taskTypes = /* @__PURE__ */ new Set([
   "RUN_TASK",
   "RECOVER_TEAM_RESULT",
@@ -7049,6 +7049,16 @@ var TEAM_WEB_WORKER_ALARM = "pixel-flow-team-web-worker";
 var TEAM_WEB_PROJECT_ID = "pixel-flow-team-web-worker";
 var TEAM_WEB_ACTIVE_STORAGE = "pixelFlowTeamWebWorkerActiveJob";
 var activeTeamWebJob;
+const teamWebDeliveries = new Map();
+const teamResultDownloads = new Map();
+let teamWebTickPromise;
+function singleFlight(map, key, run) {
+  if (map.has(key)) return map.get(key);
+  const pending = Promise.resolve().then(run);
+  map.set(key, pending);
+  pending.catch(() => { if (map.get(key) === pending) map.delete(key); });
+  return pending;
+}
 var teamWebWorkerReady = Promise.all([
   schedulerReady,
   chrome.storage.local.get(TEAM_WEB_ACTIVE_STORAGE)
@@ -7098,7 +7108,7 @@ async function reconcileBrowserTaskResults() {
         await chrome.scripting.executeScript({ target: { tabId: mapped.tabId }, files: ["contentScript.js"] });
         adapterState = await probeAdapter(chrome.tabs, mapped.tabId, message);
       }
-      if (message.phase !== "submitted") continue;
+      if (message.phase !== "submitted" || adapterState?.submitActive || teamWebDeliveries.has(message.taskId)) continue;
       const concreteUrl = concreteChatGptConversationUrl(mapped.conversationUrl);
       if (!concreteUrl) continue;
       await chrome.tabs.sendMessage(mapped.tabId, { ...message, type: "RESUME_CHATGPT_RESULT", images: [] });
@@ -7183,7 +7193,7 @@ async function submitTeamGatewayJob(input) {
       prompt: input.prompt,
       ratio: input.ratio,
       imageCount: images.length,
-      resultDelivery: "direct",
+      resultDelivery: input.provider === "chatgpt_web" && Number(health.protocolVersion) >= 6 ? "bundle" : "direct",
       imageModel: input.imageModel === "sunburst" ? "sunburst" : "flare",
       provider: input.provider === "chatgpt_web" ? "chatgpt_web" : "codex_cloud"
     })
@@ -7215,9 +7225,12 @@ async function submitTeamGatewayJob(input) {
   }
 }
 async function downloadTeamGatewayImages(job) {
+  return singleFlight(teamResultDownloads, job.id, () => downloadTeamGatewayImagesOnce(job));
+}
+async function downloadTeamGatewayImagesOnce(job) {
   const images = Array.isArray(job.images) ? job.images : [];
   if (images.every((image) => typeof image.base64 === "string")) return images;
-  return Promise.all(images.map(async (image, fallbackIndex) => {
+  return (await Promise.all(images.map(async (image, fallbackIndex) => {
     if (typeof image.downloadUrl === "string") {
       if (!image.downloadUrl.startsWith("https://")) throw new Error("团队生图直传地址无效");
       const response = await fetch(image.downloadUrl, { cache: "no-store" });
@@ -7229,10 +7242,12 @@ async function downloadTeamGatewayImages(job) {
       if (typeof image.sha256 === "string" && await sha256Hex(buffer) !== image.sha256) {
         throw new Error("团队生图直传文件完整性校验失败");
       }
-      return {
-        base64: bytesToBase64(buffer),
-        mimeType: image.mimeType || response.headers.get("Content-Type") || "image/png"
-      };
+      if (image.mimeType === "application/vnd.pixel-flow.images+json") {
+        const bundle = JSON.parse(new TextDecoder().decode(buffer));
+        if (bundle.version !== 1 || !Array.isArray(bundle.images) || bundle.images.length < 1 || bundle.images.length > 10 || bundle.images.some(item => !/^image\/(png|jpeg|webp)$/.test(item.mimeType) || typeof item.base64 !== "string" || !/^[A-Za-z0-9+/]+={0,2}$/.test(item.base64))) throw new Error("团队结果包格式无效");
+        return bundle.images;
+      }
+      return [{ base64: bytesToBase64(buffer), mimeType: image.mimeType || response.headers.get("Content-Type") || "image/png" }];
     }
     const imageIndex = Number.isInteger(image.imageIndex) ? image.imageIndex : fallbackIndex;
     const chunks = [];
@@ -7245,7 +7260,7 @@ async function downloadTeamGatewayImages(job) {
       base64: chunks.join(""),
       mimeType: image.mimeType || "image/png"
     };
-  }));
+  }))).flat();
 }
 async function createTeamPreview(image) {
   if (typeof createImageBitmap !== "function" || typeof OffscreenCanvas !== "function") return null;
@@ -7340,7 +7355,8 @@ async function uploadTeamWebImage(jobId, image, endpoint, imageIndex, name) {
     });
   }
 }
-async function clearActiveTeamWebJob(closeTab = true) {
+async function clearActiveTeamWebJob(closeTab = true, expected = activeTeamWebJob) {
+  if (!expected || activeTeamWebJob !== expected) return;
   const key = activeTeamWebKey();
   if (key) {
     browserTaskMessages.delete(key);
@@ -7350,24 +7366,35 @@ async function clearActiveTeamWebJob(closeTab = true) {
     await removeActiveScope(key);
     if (closeTab) await tabRegistry.hibernate(key).catch(() => void 0);
   }
+  if (activeTeamWebJob !== expected) return;
   activeTeamWebJob = void 0;
+  teamWebDeliveries.delete(expected.job.id);
   await saveActiveTeamWebJob();
   if (browserTaskMessages.size === 0) await chrome.alarms.clear(BROWSER_RESULT_RECOVERY_ALARM);
 }
-async function failActiveTeamWebJob(reason, detail) {
-  const job = activeTeamWebJob?.job;
+async function failActiveTeamWebJob(reason, detail, expected = activeTeamWebJob) {
+  if (!expected || activeTeamWebJob !== expected) return;
+  const job = expected.job;
   if (!job) return;
   await teamWebWorkerRequest(`/jobs/${job.id}/fail`, {
     method: "POST",
     body: JSON.stringify({ error: detail || "ChatGPT 网页执行失败" })
   }).catch(() => void 0);
+  if (activeTeamWebJob !== expected) return;
   if (["login_required", "verification_required", "usage_limited"].includes(reason)) {
     await chrome.storage.local.set({ pixelFlowTeamWebWorkerEnabled: false });
   }
-  await clearActiveTeamWebJob();
+  await clearActiveTeamWebJob(true, expected);
 }
 async function completeActiveTeamWebJob(message) {
   const active = activeTeamWebJob;
+  if (!active || active.job.id !== message.taskId) return;
+  return singleFlight(teamWebDeliveries, active.job.id, async () => {
+    try { await deliverTeamWebJob(message, active); }
+    catch (error) { await failActiveTeamWebJob("delivery_error", error instanceof Error ? error.message : String(error), active); }
+  });
+}
+async function deliverTeamWebJob(message, active) {
   if (!active || !Array.isArray(message.images) || message.images.length === 0) throw new Error("ChatGPT 已结束，但没有取得生成图片");
   const generatedAt = Date.now();
   const generationStartedAt = active.generationStartedAt ?? active.submittedAt ?? active.startedAt;
@@ -7375,16 +7402,29 @@ async function completeActiveTeamWebJob(message) {
     method: "POST",
     body: JSON.stringify({ generationStartedAt, generatedAt, generationDurationMs: Math.max(0, generatedAt - generationStartedAt) })
   });
-  for (let imageIndex = 0; imageIndex < message.images.length; imageIndex += 1) {
-    await uploadTeamWebImage(active.job.id, message.images[imageIndex], "result-chunks", imageIndex, `result-${imageIndex + 1}.png`);
-  }
+  active.phase = "delivering";
+  await saveActiveTeamWebJob();
   const preview = await createTeamPreview(message.images[0]).catch(() => null);
   if (preview) await uploadTeamWebImage(active.job.id, preview, "preview-chunks", 0, "preview-1.jpg");
-  await teamWebWorkerRequest(`/jobs/${active.job.id}/complete`, {
-    method: "POST",
-    body: JSON.stringify({ resultCount: message.images.length })
+  const bundleBody = active.job.resultDelivery === "bundle" ? JSON.stringify({ version: 1, images: message.images }) : "";
+  if (active.job.resultDelivery === "bundle" && new TextEncoder().encode(bundleBody).byteLength > 18e6) {
+    await teamWebWorkerRequest(`/jobs/${active.job.id}/use-chunks`, { method: "POST", body: "{}" });
+    active.job.resultDelivery = "chunks";
+    await saveActiveTeamWebJob();
+  }
+  if (active.job.resultDelivery === "bundle") {
+    await teamWebWorkerRequest(`/jobs/${active.job.id}/result-bundle`, {
+      method: "POST", body: bundleBody
+    });
+  } else {
+    for (let imageIndex = 0; imageIndex < message.images.length; imageIndex += 1) {
+      await uploadTeamWebImage(active.job.id, message.images[imageIndex], "result-chunks", imageIndex, `result-${imageIndex + 1}.png`);
+    }
+  }
+  if (active.job.resultDelivery !== "bundle") await teamWebWorkerRequest(`/jobs/${active.job.id}/complete`, {
+    method: "POST", body: JSON.stringify({ resultCount: message.images.length })
   });
-  await clearActiveTeamWebJob();
+  await clearActiveTeamWebJob(true, active);
   await chrome.notifications.create(`team-web-worker:${active.job.id}`, {
     type: "basic",
     iconUrl: chrome.runtime.getURL("icon.svg"),
@@ -7395,13 +7435,15 @@ async function completeActiveTeamWebJob(message) {
 }
 async function handleTeamWebPageTaskMessage(message, senderTab) {
   await teamWebWorkerReady;
-  if (message.projectId !== TEAM_WEB_PROJECT_ID || message.taskId !== activeTeamWebJob?.job.id) return false;
+  const active = activeTeamWebJob;
+  if (message.projectId !== TEAM_WEB_PROJECT_ID || message.taskId !== active?.job.id) return false;
   const key = activeTeamWebKey();
   if (!key || !tabRegistry.ownsTab(key, senderTab?.id)) return false;
+  if (message.type !== "TASK_RESULT" && teamWebDeliveries.has(message.taskId)) return true;
   const conversationUrl = resolveTaskConversationUrl(message, senderTab?.url);
   if (conversationUrl) {
     tabRegistry.updateConversation(key, conversationUrl);
-    activeTeamWebJob.conversationUrl = conversationUrl;
+    active.conversationUrl = conversationUrl;
   }
   if (message.type === "TASK_STATUS") {
     const pending = browserTaskMessages.get(key);
@@ -7410,25 +7452,28 @@ async function handleTeamWebPageTaskMessage(message, senderTab) {
       browserTaskMessages.set(key, { ...pending, phase, submittedAt: phase === "submitted" ? pending.submittedAt ?? Date.now() : pending.submittedAt });
       await saveBrowserTaskMessages();
     }
-    activeTeamWebJob.phase = phase;
+    if (activeTeamWebJob !== active) return true;
+    active.phase = phase;
     if (phase === "submitted") {
-      activeTeamWebJob.submittedAt ??= Date.now();
-      activeTeamWebJob.generationStartedAt ??= Date.now();
+      active.submittedAt ??= Date.now();
+      active.generationStartedAt ??= Date.now();
     }
     await saveActiveTeamWebJob();
-    await teamWebWorkerRequest(`/jobs/${activeTeamWebJob.job.id}/heartbeat`, { method: "POST", body: "{}" }).catch(() => void 0);
+    await teamWebWorkerRequest(`/jobs/${active.job.id}/heartbeat`, { method: "POST", body: JSON.stringify({ phase: active.phase }) }).catch(() => void 0);
     if (message.status === "manual_action") {
       await teamWebWorkerRequest("/heartbeat", { method: "POST", body: JSON.stringify({ state: "needs_action", detail: message.detail || "请在执行机完成 ChatGPT 手动发送" }) }).catch(() => void 0);
     }
     return true;
   }
   if (message.type === "TASK_RESULT") {
+    const expected = active;
     await completeActiveTeamWebJob(message).catch(async (error) => {
-      await failActiveTeamWebJob("delivery_error", error instanceof Error ? error.message : String(error));
+      await failActiveTeamWebJob("delivery_error", error instanceof Error ? error.message : String(error), expected);
     });
     return true;
   }
   if (message.type === "TASK_ERROR") {
+    if (teamWebDeliveries.has(message.taskId)) return true;
     await failActiveTeamWebJob(message.reason, message.detail);
     return true;
   }
@@ -7458,6 +7503,11 @@ async function startActiveTeamWebJob() {
   await sendWithCurrentChatGptAdapter(chrome.tabs, chrome.scripting, mapped.tabId, message);
 }
 async function teamWebWorkerTick() {
+  if (teamWebTickPromise) return teamWebTickPromise;
+  teamWebTickPromise = teamWebWorkerTickOnce().finally(() => { teamWebTickPromise = undefined; });
+  return teamWebTickPromise;
+}
+async function teamWebWorkerTickOnce() {
   await Promise.all([schedulerReady, teamWebWorkerReady]);
   const settings = await teamWebWorkerSettings();
   if (!settings.enabled || !settings.relayUrl || !settings.deviceToken || !settings.workerId) {
@@ -7471,7 +7521,7 @@ async function teamWebWorkerTick() {
       await failActiveTeamWebJob("worker_interrupted", "网页生图机在建立 ChatGPT 对话前被中断，请重新运行该任务");
       return;
     }
-    await teamWebWorkerRequest(`/jobs/${activeTeamWebJob.job.id}/heartbeat`, { method: "POST", body: "{}" }).catch(() => void 0);
+    await teamWebWorkerRequest(`/jobs/${activeTeamWebJob.job.id}/heartbeat`, { method: "POST", body: JSON.stringify({ phase: activeTeamWebJob.phase }) }).catch(() => void 0);
     return;
   }
   for (const key of queue.running) {
@@ -7480,18 +7530,21 @@ async function teamWebWorkerTick() {
       return;
     }
   }
-  const claimed = await teamWebWorkerRequest("/claim", { method: "POST", body: "{}" });
+  const claimed = await teamWebWorkerRequest("/claim", { method: "POST", body: JSON.stringify({ supportsBundle: true }) });
   if (!claimed.job) return;
   activeTeamWebJob = { job: claimed.job, startedAt: Date.now(), phase: "claimed" };
   await saveActiveTeamWebJob();
+  const expected = activeTeamWebJob;
   await startActiveTeamWebJob().catch(async (error) => {
-    await failActiveTeamWebJob("start_error", error instanceof Error ? error.message : String(error));
+    await failActiveTeamWebJob("start_error", error instanceof Error ? error.message : String(error), expected);
   });
 }
 async function finalizeTeamGatewayJob(jobId, images) {
   try {
     const preview = images[0] ? await createTeamPreview(images[0]) : null;
     if (preview) {
+      const job = await teamGatewayRequest(`/jobs/${jobId}`);
+      if (job.provider === "chatgpt_web") { await teamGatewayRequest(`/jobs/${jobId}/acknowledge`, { method: "POST" }); teamResultDownloads.delete(jobId); return; }
       const totalChunks = Math.max(1, Math.ceil(preview.base64.length / TEAM_GATEWAY_CHUNK_CHARACTERS));
       for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex += 1) {
         await teamGatewayRequest(`/jobs/${jobId}/preview-chunks`, {
@@ -7511,6 +7564,7 @@ async function finalizeTeamGatewayJob(jobId, images) {
   } catch {
   }
   await teamGatewayRequest(`/jobs/${jobId}/acknowledge`, { method: "POST" });
+  teamResultDownloads.delete(jobId);
 }
 async function waitForApiWorkerJob(jobId) {
   while (true) {
@@ -7520,11 +7574,14 @@ async function waitForApiWorkerJob(jobId) {
     await new Promise((resolve) => setTimeout(resolve, 2e3));
   }
 }
-async function waitForTeamGatewayJob(jobId) {
+async function waitForTeamGatewayJob(jobId, onProgress) {
+  let lastDetail;
   while (true) {
     const job = await teamGatewayRequest(`/jobs/${jobId}`);
     if (job.status === "completed") return downloadTeamGatewayImages(job);
     if (job.status === "failed") throw new Error(job.error || "团队生图失败");
+    const detail = job.detail || (job.status === "queued" ? "等待团队执行机接单" : "团队执行机处理中");
+    if (detail !== lastDetail) { lastDetail = detail; await onProgress?.(detail); }
     await new Promise((resolve) => setTimeout(resolve, 2e3));
   }
 }
@@ -7658,7 +7715,7 @@ async function executeTeamTask(projectId, taskId, project, task) {
     }
     await persistAndBroadcast({ type: "TASK_STATUS", projectId, taskId, status: "generating", detail: void 0, apiJobId: jobId });
     scheduleApiRecoveryAlarm();
-    const images = await waitForTeamGatewayJob(jobId);
+    const images = await waitForTeamGatewayJob(jobId, (detail) => persistAndBroadcast({ type: "TASK_STATUS", projectId, taskId, status: "generating", detail, apiJobId: jobId }));
     const handled = await updateScheduler(async () => {
       if (!queue.running.includes(key)) return false;
       await persistAndBroadcast({ type: "TASK_RESULT", projectId, taskId, images, responseText: "" });
@@ -7888,6 +7945,7 @@ async function reconcileCompletedApiTasks() {
   for (const project of await projectRepository.listProjects()) {
     for (const task of project.graph.nodes) {
       if (task.kind !== "task" || !["api", "team", "team_web"].includes(task.generationMode) || !task.apiJobId) continue;
+      if (!queue.running.includes(createTaskScopeKey(project.id, task.id))) continue;
       activeApiJobs += 1;
       let job;
       try {
@@ -7926,7 +7984,7 @@ async function reconcileCompletedApiTasks() {
       if (!handled) continue;
       activeApiJobs -= 1;
       if (task.generationMode === "team" || task.generationMode === "team_web") {
-        void teamGatewayRequest(`/jobs/${task.apiJobId}/acknowledge`, { method: "POST" }).catch(() => {});
+        void teamGatewayRequest(`/jobs/${task.apiJobId}/acknowledge`, { method: "POST" }).then(() => teamResultDownloads.delete(task.apiJobId)).catch(() => {});
       } else {
         void apiWorkerRequest(`/jobs/${task.apiJobId}`, { method: "DELETE" }).catch(() => {});
       }

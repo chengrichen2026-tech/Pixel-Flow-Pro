@@ -152,8 +152,8 @@ test("browser results preserve the original latest-assistant-turn writeback path
 test("reinjected ChatGPT adapter replaces a stale page listener after extension reload", async () => {
   const content = await readFile(new URL("public/contentScript.js", root), "utf8");
   const background = await readFile(new URL("public/background.js", root), "utf8");
-  assert.match(content, /CHATGPT_ADAPTER_VERSION = 25/);
-  assert.match(background, /CHATGPT_ADAPTER_VERSION = 25/);
+  assert.match(content, /CHATGPT_ADAPTER_VERSION = 26/);
+  assert.match(background, /CHATGPT_ADAPTER_VERSION = 26/);
   assert.match(content, /__gptNodeCanvasMessageListener/);
   assert.match(content, /removeListener\(previousMessageListener\)/);
   assert.match(content, /addListener\(currentMessageListener\)/);
@@ -169,13 +169,13 @@ test("browser results are recovered by a service-worker alarm without opening th
   assert.match(background, /async function reconcileBrowserTaskResults\(\)/);
   assert.match(background, /type: "RESUME_CHATGPT_RESULT"/);
   assert.match(background, /alarm\.name === BROWSER_RESULT_RECOVERY_ALARM/);
-  assert.match(background, /if \(message\.phase !== "submitted"\) continue/);
+  assert.match(background, /if \(message\.phase !== "submitted" \|\| adapterState\?\.submitActive/);
   assert.match(background, /const concreteUrl = concreteChatGptConversationUrl\(mapped\.conversationUrl\)/);
   assert.match(background, /Date\.now\(\) - \(message\.submittedAt \?\? message\.startedAt \?\? 0\) > 12e4/);
   assert.match(background, /await chrome\.tabs\.reload\(mapped\.tabId\)/);
   assert.match(content, /__gptNodeCanvasActiveResumeTasks/);
   assert.match(content, /__gptNodeCanvasActiveSubmitTasks/);
-  assert.doesNotMatch(content, /activeSubmitTasks\.has\(resumeKey\)/);
+  assert.match(content, /activeSubmitTasks\.has\(resumeKey\)/);
   assert.match(content, /taskPhases\.set\(taskKey, "preparing_tab"\)/);
   assert.match(content, /await input\.onPhase\?\.\("submitted"\)/);
   assert.match(content, /signalBackgroundPageActivity\(\)/);

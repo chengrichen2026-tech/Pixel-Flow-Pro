@@ -1,7 +1,7 @@
 "use strict";
 (() => {
   // src/shared/protocol.ts
-  var CHATGPT_ADAPTER_VERSION = 25;
+  var CHATGPT_ADAPTER_VERSION = 26;
   var taskTypes = /* @__PURE__ */ new Set([
     "RUN_TASK",
     "CANCEL_TASK",
@@ -624,7 +624,7 @@
         signalBackgroundPageActivity();
         const resumePhase = taskPhases.get(resumeKey);
         if (resumePhase && !["submitted", "generating", "collecting_result"].includes(resumePhase)) return true;
-        if (activeResumeTasks.has(resumeKey)) return true;
+        if (activeSubmitTasks.has(resumeKey) || activeResumeTasks.has(resumeKey)) return true;
         activeResumeTasks.add(resumeKey);
         taskPhases.set(resumeKey, "collecting_result");
         void resumeTask({ prompt: message.prompt }).then((result) => report({
