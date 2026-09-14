@@ -9,7 +9,7 @@
     "build:background": "node scripts/build-background.mjs",
     "build:rebuild-preview": "vite build",
     "check": "tsc --noEmit",
-    "test": "node --test tests/all.test.mjs",
+    "test": "tsx --test tests/all.test.mjs",
     "api-worker:install": "zsh api-worker/install.sh",
     "api-worker:uninstall": "zsh api-worker/uninstall.sh",
     "team-gateway:init": "zsh team-gateway/manage.sh init",
@@ -46,6 +46,7 @@
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^6.0.0",
+    "tsx": "^4.23.13",
     "typescript": "^5.9.0",
     "vite": "^8.0.0"
   }
