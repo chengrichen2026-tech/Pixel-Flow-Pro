@@ -46,7 +46,7 @@ test("team jobs recover through the persistent worker path", () => {
   assert.match(background, /task\.generationMode === "team" \|\| task\.generationMode === "team_web"[\s\S]*await executeTeamTask/);
   assert.match(background, /\["api", "team", "team_web"\]\.includes\(task\.generationMode\)/);
   assert.match(background, /\["team", "team_web"\]\.includes\(task\.generationMode\) \? teamGatewayRequest : apiWorkerRequest/);
-  assert.match(background, /title: task\.generationMode === "team" \|\| task\.generationMode === "team_web" \? "团队生图完成" : "API 生图完成"/);
+  assert.match(background, /title: task\.generationMode === "team_web" \? "Team Web 已完成" : task\.generationMode === "team" \? "Team Cloud 已完成" : "API Key 已完成"/);
   assert.match(background, /task\.generationMode === "team"[\s\S]*teamGatewayRequest\(`\/jobs\/\$\{task\.apiJobId\}\/acknowledge`/);
   assert.match(background, /async function recoverTeamTaskResult/);
   assert.match(background, /RECOVER_TEAM_RESULT/);

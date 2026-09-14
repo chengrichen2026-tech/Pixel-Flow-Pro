@@ -157,7 +157,7 @@
       label.title = "生图模式";
       const select = document.createElement("select");
       select.setAttribute("aria-label", "生图模式");
-      select.innerHTML = '<option value="browser">GPT-web</option><option value="api">API</option><option value="team">团队生图</option><option value="team_web">团队 GPT-web</option>';
+      select.innerHTML = '<option value="browser">ChatGPT Web</option><option value="api">API Key</option><option value="team">Team Cloud</option><option value="team_web">Team Web</option>';
       select.value = mode;
       select.addEventListener("change", async () => {
         const activeStatus = card.querySelector(".task-status")?.getAttribute("data-status");

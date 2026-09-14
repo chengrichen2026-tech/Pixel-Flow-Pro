@@ -17,8 +17,10 @@ test("rebuilt tasks own generation mode instead of requiring DOM injection", asy
   assert.match(app, /className="generation-mode"/);
   assert.match(app, /aria-label="生图模式"/);
   assert.match(app, /n\.generationMode==='api'\?'api':n\.generationMode==='team'\?'team':n\.generationMode==='team_web'\?'team_web':'browser'/);
-  assert.match(app, /<option value="team">团队生图<\/option>/);
-  assert.match(app, /<option value="team_web">团队 GPT-web<\/option>/);
+  assert.match(app, /<option value="browser">ChatGPT Web<\/option>/);
+  assert.match(app, /<option value="api">API Key<\/option>/);
+  assert.match(app, /<option value="team">Team Cloud<\/option>/);
+  assert.match(app, /<option value="team_web">Team Web<\/option>/);
   assert.match(app, /className="team-model-toggle"/);
   assert.match(app, /value==='flare'\?'Flare':'Sunburst'/);
   assert.match(app, /aria-label="团队生图模型"/);

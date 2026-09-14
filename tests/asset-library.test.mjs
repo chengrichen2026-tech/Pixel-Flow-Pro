@@ -24,7 +24,10 @@ test("new prompt tasks and templates default to API generation", async () => {
   assert.match(source, /name: "未命名生图模板"[^}]+generationMode: "api"/s);
   assert.match(source, /name: "未命名生图模板"[^}]+teamImageModel: "flare"/s);
   assert.match(source, /\["browser", "team", "team_web"\]\.includes\(String\(data\.get\("generationMode"\)\)\)[^\n]+: "api"/);
-  assert.match(source, /<option value="team"[^>]*>团队生图<\/option>/);
+  assert.match(source, /<option value="browser"[^>]*>ChatGPT Web<\/option>/);
+  assert.match(source, /<option value="api"[^>]*>API Key<\/option>/);
+  assert.match(source, /<option value="team"[^>]*>Team Cloud<\/option>/);
+  assert.match(source, /<option value="team_web"[^>]*>Team Web<\/option>/);
   assert.match(source, /name="teamImageModel"/);
   assert.match(source, /teamImageModel: template\.teamImageModel === "sunburst" \? "sunburst" : "flare"/);
 });

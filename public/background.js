@@ -7172,7 +7172,7 @@ async function submitTeamGatewayJob(input) {
     throw new Error("团队任务箱版本过旧，暂不支持 Flare / Sunburst 模型选择");
   }
   if (input.provider === "chatgpt_web" && Number(health.protocolVersion || 1) < 5) {
-    throw new Error("团队任务箱版本过旧，暂不支持团队 GPT-web");
+    throw new Error("团队任务箱版本过旧，暂不支持 Team Web");
   }
   const images = Array.isArray(input.images) ? input.images : [];
   const submitted = await teamGatewayRequest("/jobs", {
@@ -7388,7 +7388,7 @@ async function completeActiveTeamWebJob(message) {
   await chrome.notifications.create(`team-web-worker:${active.job.id}`, {
     type: "basic",
     iconUrl: chrome.runtime.getURL("icon.svg"),
-    title: "团队 GPT-web 已完成",
+    title: "Team Web 已完成",
     message: `已回传 ${message.images.length} 张图片`
   });
   setTimeout(() => void teamWebWorkerTick(), 1e3);
@@ -7476,7 +7476,7 @@ async function teamWebWorkerTick() {
   }
   for (const key of queue.running) {
     if (await taskGenerationMode(key) === "browser") {
-      await teamWebWorkerRequest("/heartbeat", { method: "POST", body: JSON.stringify({ state: "ready", detail: "正在等待本机 GPT-web 任务完成" }) }).catch(() => void 0);
+      await teamWebWorkerRequest("/heartbeat", { method: "POST", body: JSON.stringify({ state: "ready", detail: "正在等待本机 ChatGPT Web 任务完成" }) }).catch(() => void 0);
       return;
     }
   }
@@ -7672,7 +7672,7 @@ async function executeTeamTask(projectId, taskId, project, task) {
     await chrome.notifications.create(createTaskNotificationId(projectId, taskId), {
       type: "basic",
       iconUrl: chrome.runtime.getURL("icon.svg"),
-      title: "团队生图完成",
+      title: task.generationMode === "team_web" ? "Team Web 已完成" : "Team Cloud 已完成",
       message: `已生成 ${images.length} 张图片`
     });
   } catch (error) {
@@ -7934,7 +7934,7 @@ async function reconcileCompletedApiTasks() {
         await chrome.notifications.create(createTaskNotificationId(project.id, task.id), {
           type: "basic",
           iconUrl: chrome.runtime.getURL("icon.svg"),
-          title: task.generationMode === "team" || task.generationMode === "team_web" ? "团队生图完成" : "API 生图完成",
+          title: task.generationMode === "team_web" ? "Team Web 已完成" : task.generationMode === "team" ? "Team Cloud 已完成" : "API Key 已完成",
           message: `已生成 ${completedImages.length} 张图片`
         });
       }

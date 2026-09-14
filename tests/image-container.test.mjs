@@ -15,7 +15,7 @@ test("image containers are native canvas nodes and fan out into hidden independe
   assert.match(app, /image-container-card/);
 });
 
-test("container children keep five slots and stagger up to five GPT-web launches", async () => {
+test("container children keep five slots and stagger up to five ChatGPT Web launches", async () => {
   const background = await source("public/background.js");
   assert.match(background, /var MAX_CONCURRENCY = 5/);
   assert.match(background, /var MAX_BROWSER_CONCURRENCY = 5/);
