@@ -1,10 +1,12 @@
-import { copyFile, cp, mkdir, readdir } from "node:fs/promises";
+import { copyFile, cp, mkdir, readdir, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
 const output = resolve(root, "扩展程序");
+const outputAssets = resolve(output, "assets");
 await mkdir(output, { recursive: true });
-await mkdir(resolve(output, "assets"), { recursive: true });
+await rm(outputAssets, { recursive: true, force: true });
+await mkdir(outputAssets, { recursive: true });
 await cp(resolve(root, "public", "icons"), resolve(output, "icons"), { recursive: true });
 for (const file of ["manifest.json", "background.js", "contentScript.js", "api-client.js", "icon.svg", "icon-16.png", "icon-32.png", "icon-48.png", "icon-128.png"]) {
   await copyFile(resolve(root, "public", file), resolve(output, file));
@@ -16,6 +18,6 @@ await copyFile(resolve(root, "production", "generation-mode.js"), resolve(output
 await copyFile(resolve(root, "production", "asset-library.js"), resolve(output, "asset-library.js"));
 await copyFile(resolve(root, "production", "brand-logo.png"), resolve(output, "brand-logo.png"));
 for (const file of await readdir(resolve(root, "rebuild-preview", "assets"))) {
-  await copyFile(resolve(root, "rebuild-preview", "assets", file), resolve(output, "assets", file));
+  await copyFile(resolve(root, "rebuild-preview", "assets", file), resolve(outputAssets, file));
 }
 console.log("Pixel Flow production build: native src entry");

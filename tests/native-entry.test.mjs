@@ -17,6 +17,7 @@ test("production entry loads the rebuilt source bundle", async () => {
 test("production build no longer ships a legacy rollback entry", async () => {
   const build = await readFile(new URL("scripts/build-extension.mjs", root), "utf8");
   assert.match(build, /rebuild-preview", "assets"/);
+  assert.match(build, /rm\(outputAssets, \{ recursive: true, force: true \}\)/);
   assert.doesNotMatch(build, /legacy-ui-patches|legacy-index|legacy", "ui/);
 });
 

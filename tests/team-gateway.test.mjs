@@ -100,5 +100,7 @@ test("token CLI can save one-time credentials without printing the token", async
   assert.equal(credentials.gatewayUrl, "https://example.trycloudflare.com");
   assert.equal(credentials.dailyLimit, null);
   assert.match(credentials.token, /^pft_/);
-  assert.equal((await stat(outputPath)).mode & 0o777, 0o600);
+  if (process.platform !== "win32") {
+    assert.equal((await stat(outputPath)).mode & 0o777, 0o600);
+  }
 });
