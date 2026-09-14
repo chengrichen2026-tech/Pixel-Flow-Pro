@@ -23,6 +23,7 @@ test("team mode sends authenticated jobs without exposing Codex OAuth to the ext
   assert.match(background, /imageModel: input\.imageModel === "sunburst" \? "sunburst" : "flare"/);
   assert.match(background, /imageModel: task\.teamImageModel === "sunburst" \? "sunburst" : "flare"/);
   assert.match(background, /image\.downloadUrl/);
+  assert.match(background, /teamGatewayResultRequest\(image\.proxyPath\)/);
   assert.match(background, /团队生图直传文件完整性校验失败/);
   assert.match(background, /async function finalizeTeamGatewayJob/);
   assert.match(background, /\/preview-chunks/);

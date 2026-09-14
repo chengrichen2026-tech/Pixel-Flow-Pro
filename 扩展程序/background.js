@@ -7167,6 +7167,20 @@ async function teamGatewayRequest(path, options = {}) {
   }
   throw new Error("团队生图服务请求失败");
 }
+async function teamGatewayResultRequest(path) {
+  const { baseUrl, token, memberToken } = await teamGatewaySettings();
+  let response;
+  try {
+    response = await fetch(`${baseUrl}${path}`, {
+      cache: "no-store",
+      headers: { Authorization: `Bearer ${token}`, "X-Pixel-Member-Token": memberToken }
+    });
+  } catch {
+    throw new Error("无法通过团队任务箱下载结果");
+  }
+  if (!response.ok) throw new Error(`团队任务箱结果代理返回 HTTP ${response.status}`);
+  return response;
+}
 const TEAM_GATEWAY_CHUNK_CHARACTERS = 6e5;
 const TEAM_GATEWAY_CHUNK_PACE_MS = 250;
 async function submitTeamGatewayJob(input) {
@@ -7233,7 +7247,9 @@ async function downloadTeamGatewayImagesOnce(job) {
   return (await Promise.all(images.map(async (image, fallbackIndex) => {
     if (typeof image.downloadUrl === "string") {
       if (!image.downloadUrl.startsWith("https://")) throw new Error("团队生图直传地址无效");
-      const response = await fetch(image.downloadUrl, { cache: "no-store" });
+      const response = typeof image.proxyPath === "string" && image.proxyPath.startsWith("/jobs/")
+        ? await teamGatewayResultRequest(image.proxyPath)
+        : await fetch(image.downloadUrl, { cache: "no-store" });
       if (!response.ok) throw new Error(`团队生图直传下载返回 HTTP ${response.status}`);
       const buffer = await response.arrayBuffer();
       if (Number.isInteger(image.byteLength) && buffer.byteLength !== image.byteLength) {

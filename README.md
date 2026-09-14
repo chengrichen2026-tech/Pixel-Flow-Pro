@@ -6,7 +6,9 @@
 
 Pixel Flow 是一个基于 Chrome Manifest V3 的 AI 创意任务画布，通过节点组织图片、文字、生成任务和结果。它兼容四种生图方式：ChatGPT Web 复用当前电脑已登录的 ChatGPT；API Key 通过本机 Pixel Flow API Worker 调用图片接口；Team Cloud 通过妙搭任务箱与 Cloudflare Worker 使用管理员封存的 Codex OAuth；Team Web 把任务派发给另一台已配对、已登录 ChatGPT 的网页生图机。每张任务卡都可以独立选择模式。
 
-## 当前版本与关键交互（v0.3.12）
+## 当前版本与关键交互（v0.3.13）
+
+- 团队结果下载改由妙搭任务箱服务端代理 Cloudflare 中继；伙伴浏览器不再直连 `workers.dev`，解决生成已完成但本地显示 `Failed to fetch` 或长时间停在“正在回传结果”。旧协议未返回代理路径时仍兼容原直链。
 
 - Team Web 性能修复：原监听与恢复监听互斥，同一任务只回传和下载一次，迟到消息不会影响下一单；协议 v6 使用带大小和 SHA-256 校验的多图结果包直传，超大结果自动回退到旧分块协议。执行机离线、等待手动发送和结果回传阶段会显示明确提示。
 

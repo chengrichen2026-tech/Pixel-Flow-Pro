@@ -96,3 +96,17 @@ test('signed bundle download validates digest and expands multiple images once',
   assert.equal(a.length, 2); assert.equal(a, b); assert.equal(requests, 1);
   await assert.rejects(context.downloadTeamGatewayImages({ ...job, id: 'bad', images: [{ ...job.images[0], sha256: 'tampered' }] }), /完整性/);
 });
+
+test('signed result prefers the authenticated taskbox proxy over the workers.dev URL', async () => {
+  const bundle = { version: 1, images: [message.images[0]] };
+  const calls = [];
+  const { context } = runtime({
+    teamGatewayResultRequest: async path => { calls.push(path); return new Response(JSON.stringify(bundle)); },
+    fetch: async url => { calls.push(url); throw new Error('direct workers.dev fetch must not run'); },
+    sha256Hex: async () => 'verified',
+  });
+  vm.runInContext(section('async function downloadTeamGatewayImages(', 'async function createTeamPreview('), context);
+  const images = await context.downloadTeamGatewayImages({ id: 'proxy-a', images: [{ mimeType: 'application/vnd.pixel-flow.images+json', downloadUrl: 'https://relay.example/results/a', proxyPath: '/jobs/proxy-a/result-file', sha256: 'verified' }] });
+  assert.equal(images.length, 1);
+  assert.deepEqual(calls, ['/jobs/proxy-a/result-file']);
+});
