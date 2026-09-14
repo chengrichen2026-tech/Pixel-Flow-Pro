@@ -33,6 +33,7 @@ test("team gateway keeps Codex OAuth on the server and runs one queued job", asy
   assert.match(serverSource, /dailyLimit !== null && usageToday\(member\.id\) >= dailyLimit/);
   assert.match(serverSource, /status: "failed", error: "团队网关曾重启；为避免重复消耗额度，未自动重试"/);
   assert.ok(manifest.optional_host_permissions.includes("https://*/*"));
+  assert.ok(!manifest.optional_host_permissions.includes("http://*/*"));
   assert.ok(manifest.host_permissions.includes("https://*.trycloudflare.com/*"));
   assert.ok(manifest.host_permissions.includes("http://127.0.0.1:43130/*"));
   const temporary = await mkdtemp(join(tmpdir(), "pixel-flow-team-test-"));

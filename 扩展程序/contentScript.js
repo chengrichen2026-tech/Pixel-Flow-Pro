@@ -1,7 +1,7 @@
 "use strict";
 (() => {
   // src/shared/protocol.ts
-  var CHATGPT_ADAPTER_VERSION = 26;
+  var CHATGPT_ADAPTER_VERSION = 28;
   var taskTypes = /* @__PURE__ */ new Set([
     "RUN_TASK",
     "CANCEL_TASK",
@@ -203,7 +203,7 @@
         lastBackgroundWake = Date.now();
         signalBackgroundPageActivity();
       }
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      await waitForPageChange(200);
     }
     throw new AdapterError("upload_failed", `第 ${imageNumber} 张参考图没有完成上传稳定，已停止发送提示词`);
   }
@@ -331,7 +331,7 @@
       if (Date.now() - started > timeoutMs) {
         throw new AdapterError("selector_missing", "\u7B49\u5F85 30 \u79D2\u540E\u4ECD\u672A\u627E\u5230 ChatGPT \u8F93\u5165\u533A");
       }
-      await new Promise((resolve) => setTimeout(resolve, 250));
+      await waitForPageChange(250);
       assertExpectedConversation(expectedConversationUrl);
       page = inspectPage();
     }
@@ -399,8 +399,24 @@
     const started = Date.now();
     while (!check()) {
       if (Date.now() - started > timeoutMs) throw failure;
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      await waitForPageChange(200);
     }
+  }
+  async function waitForPageChange(timeoutMs = 500) {
+    await new Promise((resolve) => {
+      let settled = false;
+      let timer;
+      const observer = new MutationObserver(finish);
+      function finish() {
+        if (settled) return;
+        settled = true;
+        observer.disconnect();
+        clearTimeout(timer);
+        resolve();
+      }
+      if (document.body) observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["src", "aria-busy"] });
+      timer = setTimeout(finish, timeoutMs);
+    });
   }
   function signalBackgroundPageActivity() {
     window.dispatchEvent(new Event("focus"));
@@ -445,7 +461,7 @@
           lastBackgroundWake = Date.now();
           signalBackgroundPageActivity();
         }
-        await new Promise((resolve) => setTimeout(resolve, 200));
+        await waitForPageChange(200);
       }
       await waitForStableComposerAttachments(expectedAttachmentCount, index + 1);
     }
@@ -463,7 +479,7 @@
       }
       if (!assertConversation()) {
         stableChecks = 0;
-        await new Promise((resolve) => setTimeout(resolve, 500));
+        await waitForPageChange(500);
         continue;
       }
       const turns = assistantTurns();
@@ -492,7 +508,7 @@
         stableChecks = 0;
       }
       previousSignature = signature;
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      await waitForPageChange(500);
     }
     throw new AdapterError("timeout", "\u7B49\u5F85 ChatGPT \u751F\u6210\u7ED3\u679C\u8D85\u65F6");
   }

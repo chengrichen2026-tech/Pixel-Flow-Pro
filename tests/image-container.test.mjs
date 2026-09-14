@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readBackgroundSource } from "./helpers/background-source.mjs";
 import { readFile } from "node:fs/promises";
+import { BROWSER_LAUNCH_GAP_MS, MAX_BROWSER_CONCURRENCY, MAX_CONCURRENCY } from "../src/domain/queue.ts";
 
 const root = new URL("..", import.meta.url);
 const source = async (path) => readFile(new URL(path, root), "utf8");
@@ -16,10 +18,12 @@ test("image containers are native canvas nodes and fan out into hidden independe
 });
 
 test("container children keep five slots and stagger up to five ChatGPT Web launches", async () => {
-  const background = await source("public/background.js");
-  assert.match(background, /var MAX_CONCURRENCY = 5/);
-  assert.match(background, /var MAX_BROWSER_CONCURRENCY = 5/);
-  assert.match(background, /var BROWSER_LAUNCH_GAP_MS = 6e3/);
+  const background = await readBackgroundSource();
+  assert.equal(MAX_CONCURRENCY, 5);
+  assert.equal(MAX_BROWSER_CONCURRENCY, 5);
+  assert.equal(BROWSER_LAUNCH_GAP_MS, 6_000);
+  assert.match(background, /let browserRunning = activeTeamWebJob \? 1 : 0/);
+  assert.doesNotMatch(background, /mode === "browser" && activeTeamWebJob/);
   assert.match(background, /BROWSER_LAUNCH_GAP_MS - \(Date\.now\(\) - lastBrowserLaunchAt\)/);
   assert.match(background, /async function advanceQueueByMode\(\)/);
   assert.match(background, /mode === "browser" && browserRunning >= MAX_BROWSER_CONCURRENCY/);
@@ -61,7 +65,7 @@ test("every container child sends both its container image and outside shared in
 
 test("standalone canvas images keep download controls while container items omit them", async () => {
   const [background, app, styles, icons] = await Promise.all([
-    source("public/background.js"), source("src/App.tsx"), source("src/styles.css"), source("src/icons.tsx"),
+    readBackgroundSource(), source("src/App.tsx"), source("src/styles.css"), source("src/icons.tsx"),
   ]);
   assert.match(background, /x: owner\.position\.x \+ 560 \+ existingResults \* 360, y: owner\.position\.y/);
   assert.match(app, /className="result-download nodrag"/);
@@ -82,8 +86,8 @@ test("container images can be selected and dragged out without moving the contai
 });
 
 test("generated image titles are numbered without a duplicated generic label", async () => {
-  const background = await source("public/background.js");
-  assert.match(background, /title: `\\u751F\\u6210\\u7ED3\\u679C\$\{existingResults \+ 1\}`/);
+  const background = await readBackgroundSource();
+  assert.match(background, /title: `(?:生成结果|\\u751F\\u6210\\u7ED3\\u679C)\$\{existingResults \+ 1\}`/);
 });
 
 test("image container toolbar uses the approved generated icon asset", async () => {

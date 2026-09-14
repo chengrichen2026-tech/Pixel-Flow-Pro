@@ -20,8 +20,11 @@ Pixel Flow 扩展通过 `ws://127.0.0.1:43128/canvas` 连接本机 Bridge，Code
 ## 底层命令
 
 - `canvas.create` / `canvas.open` / `canvas.delete`
-- `task.create` / `task.run` / `task.duplicate` / `task.delete`
+- `task.create` / `task.run` / `task.recoverTeamResult` / `task.duplicate` / `task.delete`
 - `node.move` / `node.delete`
+- `asset.deleteIfUnused`（仅删除指定且未被任何画布、图片容器、提示词封面或素材库引用的底层图片资产）
+- `run.list`（读取当前画布或指定任务的权威 TaskRun 记录，可按 `taskId` 收窄）
+- `run.delete`（只删除明确指定且属于当前 TaskRun schema 的运行记录，用于临时验收清理）
 - `history.undo`
 - `library.autoTagProducts`（`preview=true` 只返回拟变更，`preview=false` 写入并通知素材库刷新）
 - `library.import`（接收规范化的提示词、产品图或图库数据；API 本身不调用 AI，也不负责识图）
@@ -54,6 +57,8 @@ Agent 负责读取本地文件或表格、识别图片内容、生成名称和�
 `imageDataUrl` 必须是 Base64 Data URL。提示词示例图可省略；产品图和图库图片必须提供 `imageDataUrl`，或引用扩展中已存在的 `assetId`。`merge` 按同库同名更新或新增；`replace` 用本次条目替换指定库的记录，但不会主动删除可能仍被画布引用的底层图片资产。
 
 所有写操作必须使用唯一 `requestId`，并传入最近 `pixel_flow_get_state` 返回的 `expectedRevision`。如果 revision 冲突，先重新读取状态，不要盲目重试写操作。
+
+`task.run` 只表示运行请求已被当前扩展接受；最终完成必须继续用 `pixel_flow_get_state` 和 `run.list` 回读 TaskRun 终态、结果节点、资产与输出边。`task.recoverTeamResult` 必须同时传入 `projectId`、`taskId` 和已知 `jobId`，只恢复已有团队结果，不新建生图请求。
 
 ## 运维
 

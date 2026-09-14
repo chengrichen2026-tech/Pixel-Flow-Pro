@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { readBackgroundSource } from "./helpers/background-source.mjs";
 
-const background = await readFile(new URL("../public/background.js", import.meta.url), "utf8");
+const background = await readBackgroundSource();
 const manifest = JSON.parse(await readFile(new URL("../public/manifest.json", import.meta.url), "utf8"));
 
 test("API completion recovery uses a service-worker wake alarm", () => {

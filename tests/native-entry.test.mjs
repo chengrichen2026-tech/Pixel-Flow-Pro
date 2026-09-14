@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 
 const root = new URL("../", import.meta.url);
@@ -19,6 +19,9 @@ test("production build no longer ships a legacy rollback entry", async () => {
   assert.match(build, /rebuild-preview", "assets"/);
   assert.match(build, /rm\(outputAssets, \{ recursive: true, force: true \}\)/);
   assert.doesNotMatch(build, /legacy-ui-patches|legacy-index|legacy", "ui/);
+  assert.doesNotMatch(build, /generation-mode\.js/);
+  await assert.rejects(access(new URL("production/generation-mode.js", root)));
+  await assert.rejects(access(new URL("扩展程序/generation-mode.js", root)));
 });
 
 test("legacy asset management enters native compatibility mode", async () => {

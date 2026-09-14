@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readBackgroundSource } from './helpers/background-source.mjs';
 import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
-const source = await readFile(new URL('../public/background.js', import.meta.url), 'utf8');
+const source = await readBackgroundSource();
 function section(start, end) { return source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start))); }
 function runtime(overrides = {}) {
   const calls = [];
@@ -38,6 +39,46 @@ test('multi-image bundle makes one upload with no legacy complete call', async (
   await context.completeActiveTeamWebJob({ ...message, images: [...message.images, ...message.images] });
   assert.equal(calls.filter(x => x.endsWith('/result-bundle')).length, 1);
   assert.equal(calls.filter(x => x.endsWith('/result-chunks') || x.endsWith('/complete')).length, 0);
+});
+
+test('original result delivery completes before best-effort preview upload', () => {
+  const deliver = source.slice(source.indexOf('async function deliverTeamWebJob'), source.indexOf('async function handleTeamWebPageTaskMessage'));
+  assert.ok(deliver.indexOf('/result-bundle') < deliver.indexOf('createTeamPreview'));
+  assert.match(deliver, /uploadTeamWebImage\(active\.job\.id, preview, "preview-chunks"[\s\S]*\.catch\(\(\) => void 0\)/);
+});
+
+test('team submitter keeps polling an existing job across a transient gateway outage', async () => {
+  const progress = [];
+  let attempts = 0;
+  const context = vm.createContext({
+    Error, Promise,
+    setTimeout: callback => callback(),
+    teamGatewayRequest: async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error('无法连接团队生图服务，请检查网关地址、网络和服务状态');
+      return { status: 'completed', images: [{ mimeType: 'image/png', base64: 'done' }] };
+    },
+    downloadTeamGatewayImages: async job => job.images,
+  });
+  vm.runInContext(section('async function waitForTeamGatewayJob(', 'async function recoverTeamTaskResult('), context);
+  const images = await context.waitForTeamGatewayJob('job-a', detail => progress.push(detail));
+  assert.equal(attempts, 2);
+  assert.deepEqual(progress, ['团队服务暂时不可达，正在自动重连', '图片已生成，正在写回画布']);
+  assert.equal(images[0].base64, 'done');
+});
+
+test('finishing a remote web job immediately advances queued local browser work', () => {
+  assert.match(source, /await clearActiveTeamWebJob\(true, active\);\s*await updateScheduler\(async \(\) => void 0\);/);
+});
+
+test('worker reconciliation clears a terminal persisted remote job before claiming more work', () => {
+  assert.match(source, /teamWebWorkerRequest\(`\/jobs\/\$\{expected\.job\.id\}\/status`\)/);
+  assert.match(source, /\["completed", "failed", "canceled"\]\.includes\(remote\.status\)[\s\S]*await clearActiveTeamWebJob\(true, expected\);[\s\S]*await updateScheduler\(async \(\) => void 0\);/);
+});
+
+test('an active remote job without a concrete conversation resumes instead of only extending its lease', () => {
+  assert.match(source, /if \(!concreteChatGptConversationUrl\(activeTeamWebJob\.conversationUrl\)\) \{[\s\S]*await startActiveTeamWebJob\(\)/);
+  assert.match(source, /failActiveTeamWebJob\("start_error"/);
 });
 test('duplicate failing delivery reports failure once and stale result does not affect next job', async () => {
   const { context, calls } = runtime({ teamWebWorkerRequest: async () => { throw new Error('offline'); } });
@@ -109,4 +150,30 @@ test('signed result prefers the authenticated taskbox proxy over the workers.dev
   const images = await context.downloadTeamGatewayImages({ id: 'proxy-a', images: [{ mimeType: 'application/vnd.pixel-flow.images+json', downloadUrl: 'https://relay.example/results/a', proxyPath: '/jobs/proxy-a/result-file', sha256: 'verified' }] });
   assert.equal(images.length, 1);
   assert.deepEqual(calls, ['/jobs/proxy-a/result-file']);
+});
+
+test('signed result falls back to the still-valid workers.dev URL when the taskbox proxy is unavailable', async () => {
+  const calls = [];
+  const { context } = runtime({
+    teamGatewayResultRequest: async path => { calls.push(path); const error = new Error('proxy unavailable'); error.status = 502; throw error; },
+    fetch: async url => { calls.push(url); return new Response('image-bytes', { headers: { 'Content-Type': 'image/png' } }); },
+    sha256Hex: async () => 'verified',
+    bytesToBase64: () => 'aW1hZ2UtYnl0ZXM=',
+  });
+  vm.runInContext(section('async function downloadTeamGatewayImages(', 'async function createTeamPreview('), context);
+  const images = await context.downloadTeamGatewayImages({ id: 'proxy-fallback', images: [{ mimeType: 'image/png', downloadUrl: 'https://relay.example/results/a', proxyPath: '/jobs/proxy-fallback/result-file', sha256: 'verified' }] });
+  assert.equal(images.length, 1);
+  assert.deepEqual(calls, ['/jobs/proxy-fallback/result-file', 'https://relay.example/results/a']);
+});
+
+test('signed result does not bypass a taskbox authorization failure', async () => {
+  let directRequests = 0;
+  const { context } = runtime({
+    teamGatewayResultRequest: async () => { const error = new Error('unauthorized'); error.status = 401; throw error; },
+    fetch: async () => { directRequests++; return new Response('unexpected'); },
+    sha256Hex: async () => 'verified',
+  });
+  vm.runInContext(section('async function downloadTeamGatewayImages(', 'async function createTeamPreview('), context);
+  await assert.rejects(context.downloadTeamGatewayImages({ id: 'proxy-auth', images: [{ mimeType: 'image/png', downloadUrl: 'https://relay.example/results/a', proxyPath: '/jobs/proxy-auth/result-file', sha256: 'verified' }] }), /unauthorized/);
+  assert.equal(directRequests, 0);
 });

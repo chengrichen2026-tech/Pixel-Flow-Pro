@@ -709,6 +709,20 @@
     return { id: "", name: "未命名生图模板", copy: "", background: "", composition: "", extra: "", productIds: [], referenceIds: [], aspectRatio: "auto", count: 1, generationMode: "api", teamImageModel: "flare" };
   }
 
+  function templateProvider(mode) {
+    if (mode === "browser" || mode === "team_web") return "gpt_web";
+    return mode === "team" ? "team_cloud" : "api";
+  }
+
+  function templateWebLocation(mode) {
+    return mode === "team_web" ? "team" : "local";
+  }
+
+  function templateGenerationMode(provider, location) {
+    if (provider === "gpt_web") return location === "team" ? "team_web" : "browser";
+    return provider === "team_cloud" ? "team" : "api";
+  }
+
   function formTemplate(root = panel) {
     const form = root?.matches?.(".pf-template-form") ? root : root?.querySelector?.(".pf-template-form");
     if (!form) return blankTemplate();
@@ -719,7 +733,7 @@
       copy: String(data.get("copy") || "").trim(), background: String(data.get("background") || "").trim(),
       composition: String(data.get("composition") || "").trim(), extra: String(data.get("extra") || "").trim(),
       productIds: data.getAll("productIds").map(String), referenceIds: data.getAll("referenceIds").map(String), aspectRatio: String(data.get("aspectRatio") || "auto"),
-      count: Math.min(4, Math.max(1, Number(data.get("count") || 1))), generationMode: ["browser", "team", "team_web"].includes(String(data.get("generationMode"))) ? String(data.get("generationMode")) : "api", teamImageModel: data.get("teamImageModel") === "sunburst" ? "sunburst" : "flare"
+      count: Math.min(4, Math.max(1, Number(data.get("count") || 1))), generationMode: templateGenerationMode(String(data.get("generationProvider")), String(data.get("webExecutionLocation"))), teamImageModel: data.get("teamImageModel") === "sunburst" ? "sunburst" : "flare"
     };
   }
 
@@ -805,7 +819,7 @@
     try { pending = JSON.parse(localStorage.getItem(PENDING_RUN_KEY) || "null"); } catch { pending = null; }
     if (!pending || pending.projectId !== currentProjectId() || !Array.isArray(pending.taskIds)) return;
     localStorage.removeItem(PENDING_RUN_KEY);
-    for (const taskId of pending.taskIds) await chrome.runtime?.sendMessage({ type: "RUN_TASK", projectId: pending.projectId, taskId });
+    await chrome.runtime?.sendMessage({ type: "RUN_TASKS", projectId: pending.projectId, taskIds: pending.taskIds });
     notify(`已提交 ${pending.taskIds.length} 张图片任务`);
   }
 
@@ -857,12 +871,12 @@
 
   function templateUsageList(library, query) {
     const items = library.templates.filter((item) => `${item.name} ${promptText(item)}`.toLowerCase().includes(query));
-    return `<section class="pf-usage-templates">${items.map((item) => `<article><strong>${escapeHtml(item.name)}</strong><p>${item.count} 张 · ${escapeHtml(item.aspectRatio)} · ${item.generationMode === "api" ? "API Key" : item.generationMode === "team" ? `Team Cloud · ${item.teamImageModel === "sunburst" ? "Sunburst" : "Flare"}` : item.generationMode === "team_web" ? "Team Web" : "ChatGPT Web"}</p><button data-action="template-use" data-id="${item.id}">创建任务</button></article>`).join("") || "<p class=\"pf-empty\">还没有已保存的生图模板</p>"}</section>`;
+    return `<section class="pf-usage-templates">${items.map((item) => `<article><strong>${escapeHtml(item.name)}</strong><p>${item.count} 张 · ${escapeHtml(item.aspectRatio)} · ${item.generationMode === "api" ? "API" : item.generationMode === "team" ? `Team Cloud · ${item.teamImageModel === "sunburst" ? "Sunburst" : "Flare"}` : item.generationMode === "team_web" ? "GPT Web · 团队" : "GPT Web · 本机"}</p><button data-action="template-use" data-id="${item.id}">创建任务</button></article>`).join("") || "<p class=\"pf-empty\">还没有已保存的生图模板</p>"}</section>`;
   }
 
   function templateList(library, query) {
     const items = library.templates.filter((item) => `${item.name} ${promptText(item)}`.toLowerCase().includes(query));
-    return `<section class="pf-template-grid">${items.map((item) => `<article class="pf-template-item"><div class="pf-template-card-preview"><span>${escapeHtml(item.name.slice(0, 1) || "模")}</span><small>${item.count} 张</small></div><header class="pf-management-card-meta"><strong title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</strong><span><button data-action="template-edit" data-id="${item.id}" aria-label="编辑模板 ${escapeHtml(item.name)}" title="编辑">${libraryCardIcon("edit")}</button><button class="danger" data-action="template-delete" data-id="${item.id}" aria-label="删除模板 ${escapeHtml(item.name)}" title="删除">${libraryCardIcon("delete")}</button></span></header><div class="pf-template-card-tags"><span>${escapeHtml(item.aspectRatio)}</span><span>${item.generationMode === "api" ? "API Key" : item.generationMode === "team" ? "Team Cloud" : item.generationMode === "team_web" ? "Team Web" : "ChatGPT Web"}</span><span>${item.productIds.length + item.referenceIds.length} 张素材</span></div><p>${escapeHtml(promptText(item) || "尚未填写提示词内容")}</p></article>`).join("") || "<p class=\"pf-empty\">还没有生图模板，点击右上角新增模板</p>"}</section>`;
+    return `<section class="pf-template-grid">${items.map((item) => `<article class="pf-template-item"><div class="pf-template-card-preview"><span>${escapeHtml(item.name.slice(0, 1) || "模")}</span><small>${item.count} 张</small></div><header class="pf-management-card-meta"><strong title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</strong><span><button data-action="template-edit" data-id="${item.id}" aria-label="编辑模板 ${escapeHtml(item.name)}" title="编辑">${libraryCardIcon("edit")}</button><button class="danger" data-action="template-delete" data-id="${item.id}" aria-label="删除模板 ${escapeHtml(item.name)}" title="删除">${libraryCardIcon("delete")}</button></span></header><div class="pf-template-card-tags"><span>${escapeHtml(item.aspectRatio)}</span><span>${item.generationMode === "api" ? "API" : item.generationMode === "team" ? "Team Cloud" : item.generationMode === "team_web" ? "GPT Web · 团队" : "GPT Web · 本机"}</span><span>${item.productIds.length + item.referenceIds.length} 张素材</span></div><p>${escapeHtml(promptText(item) || "尚未填写提示词内容")}</p></article>`).join("") || "<p class=\"pf-empty\">还没有生图模板，点击右上角新增模板</p>"}</section>`;
   }
 
   function templateEditor(library, includeSavedTemplates = true, templateNodeId = "", templateId = editingTemplateId) {
@@ -878,8 +892,9 @@
       <label>自由补充 <small>可选</small><textarea name="extra" placeholder="其他临时要求，也可以留空">${escapeHtml(template.extra)}</textarea></label>
       <details class="pf-template-media-section"><summary><span>产品素材</span><small>已选 ${template.productIds.length} 张</small></summary><div class="pf-template-media">${mediaChecks("product", "productIds", template.productIds)}</div></details>
       <details class="pf-template-media-section"><summary><span>图库</span><small>已选 ${template.referenceIds.length} 张</small></summary><div class="pf-template-media">${mediaChecks("reference", "referenceIds", template.referenceIds)}</div></details>
-      <div class="pf-template-row"><label>比例<select name="aspectRatio">${[["auto", "自适应"], ["1:1", "1:1"], ["3:4", "3:4"], ["9:16", "9:16"], ["16:9", "16:9"]].map(([value, label]) => `<option value="${value}" ${template.aspectRatio === value ? "selected" : ""}>${label}</option>`).join("")}</select></label><label>数量<select name="count">${[1,2,3,4].map((value) => `<option value="${value}" ${template.count === value ? "selected" : ""}>${value} 张</option>`).join("")}</select></label><label>模式<select name="generationMode"><option value="browser" ${template.generationMode === "browser" ? "selected" : ""}>ChatGPT Web</option><option value="api" ${template.generationMode === "api" ? "selected" : ""}>API Key</option><option value="team" ${template.generationMode === "team" ? "selected" : ""}>Team Cloud</option><option value="team_web" ${template.generationMode === "team_web" ? "selected" : ""}>Team Web</option></select></label></div>
-      <label data-team-model-field ${template.generationMode === "team" ? "" : "hidden"}>团队模型<select name="teamImageModel"><option value="flare" ${template.teamImageModel !== "sunburst" ? "selected" : ""}>Flare · 快速生成</option><option value="sunburst" ${template.teamImageModel === "sunburst" ? "selected" : ""}>Sunburst · 精细生成与编辑</option></select></label>
+      <div class="pf-template-row"><label>比例<select name="aspectRatio">${[["auto", "自适应"], ["1:1", "1:1"], ["3:4", "3:4"], ["9:16", "9:16"], ["16:9", "16:9"]].map(([value, label]) => `<option value="${value}" ${template.aspectRatio === value ? "selected" : ""}>${label}</option>`).join("")}</select></label><label>数量<select name="count">${[1,2,3,4].map((value) => `<option value="${value}" ${template.count === value ? "selected" : ""}>${value} 张</option>`).join("")}</select></label><label>模式<select name="generationProvider"><option value="gpt_web" ${templateProvider(template.generationMode) === "gpt_web" ? "selected" : ""}>GPT Web</option><option value="team_cloud" ${templateProvider(template.generationMode) === "team_cloud" ? "selected" : ""}>Team Cloud</option><option value="api" ${templateProvider(template.generationMode) === "api" ? "selected" : ""}>API</option></select></label></div>
+      <label data-web-location-field ${templateProvider(template.generationMode) === "gpt_web" ? "" : "hidden"}>GPT Web 位置<select name="webExecutionLocation"><option value="local" ${templateWebLocation(template.generationMode) === "local" ? "selected" : ""}>本机</option><option value="team" ${templateWebLocation(template.generationMode) === "team" ? "selected" : ""}>团队</option></select></label>
+      <label data-team-model-field ${templateProvider(template.generationMode) === "team_cloud" ? "" : "hidden"}>Team Cloud 模型<select name="teamImageModel"><option value="flare" ${template.teamImageModel !== "sunburst" ? "selected" : ""}>Flare · 快速生成</option><option value="sunburst" ${template.teamImageModel === "sunburst" ? "selected" : ""}>Sunburst · 精细生成与编辑</option></select></label>
       <details><summary>查看最终提示词</summary><pre data-final-prompt>${escapeHtml(promptText(template)) || "填写后将在这里预览"}</pre></details>
       <footer class="pf-template-actions">${includeSavedTemplates ? '<button type="button" data-action="template-new">新建</button>' : ""}<button type="button" data-action="template-save" data-template-node-id="${templateNodeId}">保存到模板库</button><button type="button" class="primary" data-action="template-run" data-template-node-id="${templateNodeId}">运行模板</button></footer>
       ${includeSavedTemplates ? `<section class="pf-saved-templates"><h3>已保存模板</h3>${library.templates.map((item) => `<button type="button" data-action="template-edit" data-id="${item.id}"><strong>${escapeHtml(item.name)}</strong><small>${item.count} 张 · ${escapeHtml(item.aspectRatio)}</small></button>`).join("") || "<p class=\"pf-empty\">还没有保存的模板</p>"}</section>` : ""}
@@ -1290,8 +1305,11 @@
     }
     if (input?.closest?.(".pf-template-form")) {
       const form = input.closest(".pf-template-form");
+      const provider = form?.querySelector('[name="generationProvider"]')?.value;
+      const webLocationField = form?.querySelector("[data-web-location-field]");
       const modelField = form?.querySelector("[data-team-model-field]");
-      if (modelField) modelField.hidden = form.querySelector('[name="generationMode"]')?.value !== "team";
+      if (webLocationField) webLocationField.hidden = provider !== "gpt_web";
+      if (modelField) modelField.hidden = provider !== "team_cloud";
       const preview = form?.querySelector("[data-final-prompt]");
       if (preview) preview.textContent = promptText(formTemplate(form)) || "填写后将在这里预览";
     }

@@ -6,7 +6,8 @@ export type TeamGatewaySettings = { url: string; token: string; memberToken: str
 
 export function normalizeTeamGatewayUrl(value: string) {
   const url = new URL(value.trim());
-  if (!/^https?:$/.test(url.protocol)) throw new Error("团队网关只支持 HTTP 或 HTTPS");
+  const legacyLoopback = url.protocol === "http:" && ["127.0.0.1", "localhost"].includes(url.hostname) && url.port === "43130";
+  if (url.protocol !== "https:" && !legacyLoopback) throw new Error("团队网关必须使用 HTTPS；旧本机网关仅支持 127.0.0.1:43130");
   if (url.username || url.password || url.search || url.hash) throw new Error("团队网关地址不能包含账号、查询参数或锚点");
   return url.href.replace(/\/$/, "");
 }

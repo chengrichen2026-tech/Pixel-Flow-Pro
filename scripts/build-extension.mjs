@@ -14,7 +14,6 @@ for (const file of ["manifest.json", "background.js", "contentScript.js", "api-c
 await copyFile(resolve(root, "production", "index.html"), resolve(output, "index.html"));
 await copyFile(resolve(root, "production", "pixel-flow-theme.css"), resolve(output, "pixel-flow-theme.css"));
 await copyFile(resolve(root, "production", "keyboard-shortcuts.js"), resolve(output, "keyboard-shortcuts.js"));
-await copyFile(resolve(root, "production", "generation-mode.js"), resolve(output, "generation-mode.js"));
 await copyFile(resolve(root, "production", "asset-library.js"), resolve(output, "asset-library.js"));
 await copyFile(resolve(root, "production", "brand-logo.png"), resolve(output, "brand-logo.png"));
 for (const file of await readdir(resolve(root, "rebuild-preview", "assets"))) {

@@ -1,8 +1,9 @@
 import Dexie, { type EntityTable } from "dexie";
 import type { Project } from "./types";
+import type { TaskRunRecord } from "./storage/task-run-repository";
 
 type AssetRecord = { id: string; blob: Blob; createdAt: number };
-type RunRecord = { id: string; projectId: string; taskId: string; startedAt: number };
+type RunRecord = Partial<TaskRunRecord> & { id: string; projectId: string; taskId: string; startedAt: number };
 
 export class PixelFlowDatabase extends Dexie {
   projects!: EntityTable<Project, "id">;

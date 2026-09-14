@@ -37,7 +37,7 @@ npm run team-gateway:uninstall
 
 ```bash
 PIXEL_FLOW_TEAM_CREDENTIAL_OUTPUT="runtime/伙伴1.json" \
-PIXEL_FLOW_TEAM_GATEWAY_URL="https://example.trycloudflare.com" \
+PIXEL_FLOW_TEAM_GATEWAY_URL="https://pixel-flow.example.ts.net" \
 npm run team-gateway:token -- create 伙伴1 unlimited
 ```
 

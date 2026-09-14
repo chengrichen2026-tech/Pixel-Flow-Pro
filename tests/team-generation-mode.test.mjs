@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { readBackgroundSource } from "./helpers/background-source.mjs";
 
 const root = new URL("../", import.meta.url);
-const background = await readFile(new URL("public/background.js", root), "utf8");
+const background = await readBackgroundSource();
 const bridge = await readFile(new URL("src/codex-bridge.tsx", root), "utf8");
 const mcp = await readFile(new URL("tools/pixel-flow-mcp/server.mjs", root), "utf8");
 
@@ -44,14 +45,18 @@ test("team mode sends authenticated jobs without exposing Codex OAuth to the ext
 });
 
 test("team jobs recover through the persistent worker path", () => {
-  assert.match(background, /task\.generationMode === "team" \|\| task\.generationMode === "team_web"[\s\S]*await executeTeamTask/);
+  assert.match(background, /runtimeTask\.generationMode === "team" \|\| runtimeTask\.generationMode === "team_web"[\s\S]*await executeTeamTask/);
   assert.match(background, /\["api", "team", "team_web"\]\.includes\(task\.generationMode\)/);
   assert.match(background, /\["team", "team_web"\]\.includes\(task\.generationMode\) \? teamGatewayRequest : apiWorkerRequest/);
   assert.match(background, /title: task\.generationMode === "team_web" \? "Team Web 已完成" : task\.generationMode === "team" \? "Team Cloud 已完成" : "API Key 已完成"/);
-  assert.match(background, /task\.generationMode === "team"[\s\S]*teamGatewayRequest\(`\/jobs\/\$\{task\.apiJobId\}\/acknowledge`/);
+  assert.match(background, /task\.generationMode === "team"[\s\S]*teamGatewayRequest\(`\/jobs\/\$\{jobId\}\/acknowledge`/);
   assert.match(background, /async function recoverTeamTaskResult/);
   assert.match(background, /RECOVER_TEAM_RESULT/);
   assert.match(background, /await downloadTeamGatewayImages\(job\)/);
+  assert.match(background, /async function cancelTeamGatewayJob\(jobId(?:: string)?\)/);
+  assert.match(background, /teamGatewayRequest\(`\/jobs\/\$\{jobId\}\/cancel`, \{ method: "POST" \}\)/);
+  assert.match(background, /const providerJobId = run\?\.providerJobId \|\| task\?\.apiJobId;[\s\S]*cancelTeamGatewayJob\(providerJobId\)/);
+  assert.match(background, /job\.status === "canceled"/);
 });
 
 test("structured commands can create team generation tasks", () => {
@@ -69,6 +74,7 @@ test("remote team web jobs reuse the existing ChatGPT adapter and return chunks"
   assert.match(background, /uploadTeamWebImage\(active\.job\.id, message\.images\[imageIndex\], "result-chunks"/);
   assert.match(background, /pixelFlowTeamWebWorkerEnabled: false/);
   assert.match(background, /TEAM_WEB_WORKER_ALARM/);
+  assert.match(background, /\["completed", "failed", "canceled"\]\.includes\(remote\.status\)/);
   assert.match(background, /sendResponse\(\{ accepted: true \}\);[\s\S]*void teamWebWorkerTick\(\)/);
   assert.doesNotMatch(background, /run_chatgpt_web\.py/);
   assert.ok(
@@ -93,6 +99,6 @@ test("macOS team gateway service scripts are present", async () => {
 
 test("Team Web waiting details are visible during active tasks", async () => {
   const app = await readFile(new URL("src/App.tsx", root), "utf8");
-  assert.match(app, /mode==='team_web'&&n.statusDetail&&\['queued','sending','generating'\]\.includes\(n.status\)/);
+  assert.match(app, /n\.statusDetail&&<p className=\{`status-detail/);
   assert.match(app, /role="status">\{n.statusDetail\}/);
 });

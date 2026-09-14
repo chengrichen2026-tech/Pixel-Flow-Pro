@@ -1,5 +1,12 @@
 import "./api-client.test.mjs";
+import "./task-run-contract.test.mjs";
+import "./run-projection.test.mjs";
+import "./task-run-repository.test.mjs";
+import "./background-domain.test.mjs";
+import "./background-infrastructure.test.mjs";
 import "./generation-mode.test.mjs";
+import "./generation-ui.test.mjs";
+import "./documentation-consistency.test.mjs";
 import "./asset-library.test.mjs";
 import "./api-recovery.test.mjs";
 import "./src-generation-mode.test.mjs";

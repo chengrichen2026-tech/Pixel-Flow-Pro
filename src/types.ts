@@ -1,3 +1,5 @@
+import type { RunStatus } from "./domain/task-run.ts";
+
 export type Point = { x: number; y: number };
 export type TaskStatus = "idle" | "queued" | "waiting_page" | "uploading" | "sending" | "generating" | "completed" | "failed" | "manual_action";
 export type ImageNode = { id: string; kind: "image"; assetId: string; title: string; position: Point; width?: number; height?: number; hidden?: boolean };
@@ -5,11 +7,11 @@ export type ImageContainerItem = { id: string; assetId: string; title: string };
 export type ImageContainerNode = { id: string; kind: "image_container"; name: string; items: ImageContainerItem[]; position: Point; width?: number; height?: number };
 export type ResultNode = { id: string; kind: "result"; assetId: string; taskId: string; title?: string; position: Point; width?: number; height?: number };
 export type TextNode = { id: string; kind: "text"; text: string; position: Point };
-export type TextResultNode = { id: string; kind: "text_result"; taskId: string; text: string; position: Point };
+export type TextResultNode = { id: string; kind: "text_result"; taskId: string; title?: string; text: string; position: Point };
 export type GenerationMode = "browser" | "api" | "team" | "team_web";
 export type TeamImageModel = "flare" | "sunburst";
 export type BatchItem = { id: string; title: string; status: TaskStatus; taskId?: string; detail?: string };
-export type TaskNode = { id: string; kind: "task"; name: string; prompt: string; position: Point; inputEdgeOrder: string[]; runCount: number; status: string; aspectRatio?: string; generationMode?: GenerationMode; teamImageModel?: TeamImageModel; apiJobId?: string; conversationUrl?: string; statusDetail?: string; templateId?: string; templateNodeId?: string; templateSlot?: number; batchItems?: BatchItem[]; batchParentTaskId?: string; batchItemId?: string; hidden?: boolean };
+export type TaskNode = { id: string; kind: "task"; name: string; prompt: string; position: Point; inputEdgeOrder: string[]; runCount: number; status: string; runtimeStatus?: RunStatus; recoverableResult?: boolean; aspectRatio?: string; generationMode?: GenerationMode; teamImageModel?: TeamImageModel; apiJobId?: string; conversationUrl?: string; statusDetail?: string; templateId?: string; templateNodeId?: string; templateSlot?: number; batchItems?: BatchItem[]; batchParentTaskId?: string; batchItemId?: string; hidden?: boolean };
 export type CanvasNode = ImageNode | ImageContainerNode | ResultNode | TextNode | TextResultNode | TaskNode;
 export type CanvasEdge = { id: string; source: string; target: string; kind?: "input" | "output" };
 export type Project = { id: string; name: string; graph: { nodes: CanvasNode[]; edges: CanvasEdge[] }; createdAt: number; updatedAt: number };

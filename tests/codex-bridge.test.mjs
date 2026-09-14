@@ -12,3 +12,27 @@ test("structured commands can recover one completed cloud result without regener
   assert.match(client, /RECOVER_TEAM_RESULT/);
   assert.match(client, /projectId, taskId, and jobId are required/);
 });
+
+test("structured cleanup deletes only explicitly requested unreferenced assets", async () => {
+  const client = await readFile(new URL("src/codex-bridge.tsx", root), "utf8");
+  assert.match(client, /op==="asset\.deleteIfUnused"/);
+  assert.match(client, /node\.kind==="image"\|\|node\.kind==="result"/);
+  assert.match(client, /node\.kind==="image_container"/);
+  assert.match(client, /prompt\.exampleAssetId/);
+  assert.match(client, /media\.assetId/);
+  assert.match(client, /db\.assets\.bulkDelete\(deletable\)/);
+});
+
+test("structured commands expose current-version TaskRun records", async () => {
+  const client = await readFile(new URL("src/codex-bridge.tsx", root), "utf8");
+  assert.match(client, /op==="run\.list"/);
+  assert.match(client, /run\.schemaVersion===2/);
+  assert.match(client, /run\.projectId===projectId/);
+});
+
+test("structured cleanup deletes only explicit current-version TaskRun records", async () => {
+  const client = await readFile(new URL("src/codex-bridge.tsx", root), "utf8");
+  assert.match(client, /op==="run\.delete"/);
+  assert.match(client, /existing\[index\]\?\.schemaVersion===2/);
+  assert.match(client, /db\.runs\.bulkDelete\(deletable\)/);
+});

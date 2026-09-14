@@ -1,11 +1,12 @@
 {
   "name": "pixel-flow",
   "private": true,
-  "version": "0.3.13",
+  "version": "0.3.14",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npm run check && npm run build:rebuild-preview && node scripts/build-extension.mjs",
+    "build": "npm run check && npm run build:background && npm run build:rebuild-preview && node scripts/build-extension.mjs",
+    "build:background": "node scripts/build-background.mjs",
     "build:rebuild-preview": "vite build",
     "check": "tsc --noEmit",
     "test": "node --test tests/all.test.mjs",

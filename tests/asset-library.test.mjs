@@ -23,11 +23,11 @@ test("new prompt tasks and templates default to API generation", async () => {
   assert.match(source, /prompt\.content[^}]+generationMode: "api"/s);
   assert.match(source, /name: "未命名生图模板"[^}]+generationMode: "api"/s);
   assert.match(source, /name: "未命名生图模板"[^}]+teamImageModel: "flare"/s);
-  assert.match(source, /\["browser", "team", "team_web"\]\.includes\(String\(data\.get\("generationMode"\)\)\)[^\n]+: "api"/);
-  assert.match(source, /<option value="browser"[^>]*>ChatGPT Web<\/option>/);
-  assert.match(source, /<option value="api"[^>]*>API Key<\/option>/);
-  assert.match(source, /<option value="team"[^>]*>Team Cloud<\/option>/);
-  assert.match(source, /<option value="team_web"[^>]*>Team Web<\/option>/);
+  assert.match(source, /templateGenerationMode\(String\(data\.get\("generationProvider"\)\), String\(data\.get\("webExecutionLocation"\)\)\)/);
+  assert.match(source, /<option value="gpt_web"[^>]*>GPT Web<\/option>/);
+  assert.match(source, /<option value="team_cloud"[^>]*>Team Cloud<\/option>/);
+  assert.match(source, /<option value="api"[^>]*>API<\/option>/);
+  assert.match(source, /name="webExecutionLocation"/);
   assert.match(source, /name="teamImageModel"/);
   assert.match(source, /teamImageModel: template\.teamImageModel === "sunburst" \? "sunburst" : "flare"/);
 });
@@ -100,7 +100,7 @@ test("template runs remain independent tasks and retry failed slots only", async
   assert.match(source, /templateSlot: index \+ 1/);
   assert.match(source, /previousTasks\.filter\(\(task\) => task\.status === "failed"\)/);
   assert.match(source, /failed\.map\(\(task\) => task\.id\)/);
-  assert.match(source, /type: "RUN_TASK"/);
+  assert.match(source, /type: "RUN_TASKS"/);
 });
 
 test("the canvas template toolbar entry stays non-destructive while the feature is unfinished", async () => {
@@ -478,7 +478,6 @@ test("authoritative prompt imports replace the prompt library and stale covers",
 
 test("performance safeguards defer thumbnails, release object URLs, and filter DOM observers", async () => {
   const source = await readFile(new URL("production/asset-library.js", root), "utf8");
-  const mode = await readFile(new URL("production/generation-mode.js", root), "utf8");
   const store = await readFile(new URL("src/store.ts", root), "utf8");
   const app = await readFile(new URL("src/App.tsx", root), "utf8");
   assert.match(source, /new IntersectionObserver/);
@@ -487,7 +486,6 @@ test("performance safeguards defer thumbnails, release object URLs, and filter D
   assert.match(source, /releaseObjectUrls\(panel\)/);
   assert.match(source, /releaseObjectUrls\(gallery\)/);
   assert.match(source, /mutation\.addedNodes/);
-  assert.match(mode, /mutation\.addedNodes/);
   assert.match(store, /const assetUrls = new Map/);
   assert.match(store, /URL\.revokeObjectURL\(url\)/);
   assert.match(app, /className:output\?'task-result-edge'/);

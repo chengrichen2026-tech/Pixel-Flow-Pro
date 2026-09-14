@@ -1,133 +1,119 @@
 # Pixel Flow
 
-> **新电脑安装：**如果你希望让 Codex 安装 Pixel Flow、API Worker、Bridge 和 MCP，请复制 [发送给 Codex 的 macOS / Windows 安装命令](CODEX_INSTALL_PROMPTS.md)。
+Pixel Flow 是一个运行在 Chrome / Edge 中的本地 AI 创意任务画布。它用节点组织图片、文字、生成任务和结果，并把一次生图拆成可查看、可取消、可重试、可恢复的运行记录。
 
-> **团队伙伴安装：**只使用 Team Cloud、不登录 ChatGPT 的伙伴请阅读 [团队生图伙伴安装指南](TEAM_GATEWAY_PARTNER_GUIDE.md)。
+> 新电脑安装：使用 [Codex 安装指令](CODEX_INSTALL_PROMPTS.md)。
+>
+> 团队伙伴只使用 Team Cloud：阅读 [团队生图伙伴安装指南](TEAM_GATEWAY_PARTNER_GUIDE.md)。
 
-Pixel Flow 是一个基于 Chrome Manifest V3 的 AI 创意任务画布，通过节点组织图片、文字、生成任务和结果。它兼容四种生图方式：ChatGPT Web 复用当前电脑已登录的 ChatGPT；API Key 通过本机 Pixel Flow API Worker 调用图片接口；Team Cloud 通过妙搭任务箱与 Cloudflare Worker 使用管理员封存的 Codex OAuth；Team Web 把任务派发给另一台已配对、已登录 ChatGPT 的网页生图机。每张任务卡都可以独立选择模式。
+## 当前版本
 
-## 当前版本与关键交互（v0.3.13）
+当前版本为 **v0.3.14**。任务卡恢复紧凑的单一“生图模式”入口，只显示三个主模式：
 
-- 团队结果下载改由妙搭任务箱服务端代理 Cloudflare 中继；伙伴浏览器不再直连 `workers.dev`，解决生成已完成但本地显示 `Failed to fetch` 或长时间停在“正在回传结果”。旧协议未返回代理路径时仍兼容原直链。
+| 主模式 | 二级选择 | 底层兼容值 |
+| --- | --- | --- |
+| GPT Web | 本机 / 团队 | `browser / team_web` |
+| Team Cloud | Flare / Sunburst | `team` + `teamImageModel` |
+| API | 固定 gpt-image-2 | `api` |
 
-- Team Web 性能修复：原监听与恢复监听互斥，同一任务只回传和下载一次，迟到消息不会影响下一单；协议 v6 使用带大小和 SHA-256 校验的多图结果包直传，超大结果自动回退到旧分块协议。执行机离线、等待手动发送和结果回传阶段会显示明确提示。
+GPT Web 选择“团队”即原 Team Web 链路。已有画布继续读取 `api / browser / team / team_web`，无需迁移。
 
-- Team Web：伙伴任务经妙搭任务箱分配给另一台已配对的 Pixel Flow 扩展；执行机直接沿用现有 ChatGPT Web 的新对话、参考图上传、发送、恢复和结果识别链路，原图与预览回传后写入伙伴画布。
-- 网页生图机配对：任务箱管理员生成十分钟有效的一次性配对码；执行机只保存可撤销设备令牌，ChatGPT 密码、Cookie 和登录态不会上传。执行机可暂停接单，登录验证或额度阻断时自动停机。
+### 任务运行
 
-- 团队模型选择：任务卡选择“Team Cloud”后显示 `Flare / Sunburst` 双状态模型控件，新任务默认 Flare；模板、复制任务、批量子任务、失败重试和结构化命令都会保留选择并传递到团队任务箱协议 v4。
+- `TaskRun` 是一次运行的权威状态，任务卡明确显示排队、准备环境、上传参考图、发送、等待执行机、生成、写回、完成、失败、等待手动处理和取消。
+- 普通任务、图片容器批量、模板运行和失败重试统一进入同一调度入口。
+- 活动任务可以取消；失败或取消后可以重试；仍有团队云端 Job 的失败任务可以恢复已有结果，不重复生图。
+- 扩展重载会从 TaskRun 恢复队列、对话 URL 和 provider Job，不会把终态任务重新提交。
+- 完成结果与 TaskRun、任务卡投影、结果资产和结果节点在同一事务中写入，重复或迟到结果不会重复创建节点。
 
-- 团队结果单文件直传：协议 v3 任务由 Cloudflare 私有 KV 暂存完整结果并签发 1 小时有效的下载地址；Pixel Flow 一次下载、校验字节数与 SHA-256 后写回画布，不再等待结果图逐块进入妙搭数据库。旧客户端和旧任务继续使用分块协议。
+### 画布与素材
 
-- 团队成员凭证：团队模式改为“妙搭平台访问 Key＋成员专属令牌”双凭证；成员令牌用于身份、每日额度和任务归属，仅保存在当前浏览器本地。
+- 无限画布支持图片、文字、任务、结果和图片容器。
+- 图片或文字可连到任务；多张输入按任务卡缩略图顺序发送。
+- 图片容器会为容器内每张图创建独立子任务；容器外连入的图片作为每个子任务的共享参考图。
+- 同一任务的多张结果在右侧横向排列，每张结果可直接下载。
+- 支持拖入图片、Finder / 系统剪贴板粘贴、节点移动、框选、缩放、断开输入线和每画布独立撤销。
+- 图片、结果、图片容器和任务支持 `Command/Ctrl+C`、`Command/Ctrl+V`；任务副本保留输入、提示词、比例和模式，但重置运行状态。
+- 单张图片或结果复制时会同时写入系统剪贴板；容器多图不能保证被外部聊天工具识别为多个独立附件。
 
-- 云端结果恢复：结构化命令可把已经在妙搭完成的指定团队任务结果写回原画布任务，不重新调用 OpenAI；用于修复浏览器已显示失败、云端随后恢复完成的场景。
+### 资产库与模板
 
-- 团队快速调度：Cloudflare 每5秒反向检查妙搭，发现任务后写入 Queue，消费者以最大并发3处理；每分钟 Cron 继续作为检测器恢复和漏单兜底。
-- 参考图上传提速：妙搭协议 v2 的参考图分块从 60,000 提升到 600,000 字符，显著减少上传请求和分块节流等待。
+- 左侧图标栏提供提示词库、产品素材、参考图库和生图模板。
+- 提示词可替换或追加到选中任务，也可拖入画布成为文字节点。
+- 产品图和参考图可拖入画布，或点击连接到当前选中任务。
+- 提示词、产品和图库支持名称、标签、示例图或素材维护；各库支持独立备份与导入。
+- 生图模板可组合文案、构图、背景和自由补充，选择比例、三个主模式、对应二级选项、产品图、参考图和 1–4 张输出；模板生成的任务独立运行，失败项可单独重试。
+- 底部工具栏的“生图模版”按钮仍是开发中占位；可用模板入口在左侧生图模板库。
 
-- 团队历史与预览：结果写回 Pixel Flow 后改为签收，不再删除整个云端任务；任务箱固定保留最近30条，并保存 480px JPEG 预览图，参考图和原尺寸结果分块在签收后清理。
-- 妙搭限流恢复：团队生图请求遇到 HTTP 429 时会尊重 `Retry-After` 或指数退避，图片分块之间增加节流；Mac Worker 空闲轮询由 3 秒调整为 15 秒，避免下载完成结果时被高频请求挤占额度。
-- 团队模式执行修复：任务卡切换为“Team Cloud”后，即使立即点击运行，也会等待模式写入完成并重新读取最新任务状态，不再误走 ChatGPT Web。
-- 妙搭云端任务箱：团队模式支持协议 v2，把提示词、参考图分块和结果状态暂存在固定妙搭地址；Cloudflare Worker 领取任务，主机 Mac 无需在线。
-- 协议兼容：旧版本机 Team Gateway / Quick Tunnel 继续按协议 v1 工作；妙搭任务箱使用 600,000 字符分块。
+### 三个模式、四条执行链路
 
-- 图片容器：选中一张或多张画布图片后新建“图片容器”，容器连接到任务后会逐张执行；容器外连接到同一任务的图片会作为每个子任务的共享参考图一并发送。
-- 批量结果：同一任务的结果图从任务右侧开始横向并排，间距 40px；每张生成图右上角有下载按钮，可直接保存到本机。
-- 图片复制：画布中选中普通图片、生成结果或图片容器后，可使用 `Command/Ctrl+C` 和 `Command/Ctrl+V` 复制／粘贴。多选会整体复制，连续粘贴每次向右下偏移 36px；生成结果的副本会成为普通图片，不继承旧任务连线。
-- 生图任务复制：选中任务后可用 `Command/Ctrl+C` 和 `Command/Ctrl+V`，也可点击卡片“复制任务”。副本保留提示词、比例、模式和输入连线，运行状态重置；复制后可用 `Command/Ctrl+Z` 撤销。
-- 统一撤销：`Command/Ctrl+Z` 已覆盖删除节点、节点移动、新增任务和复制任务，各画布历史相互隔离。
-- Codex 结构化命令：可通过只监听本机的 Bridge 和 `pixel-flow` MCP 读取画布、新建/执行任务、撤销及下载图片，详见 [COMMAND_API.md](COMMAND_API.md)。
-- 系统剪贴板：单选普通图片或生成结果后按 `Command/Ctrl+C`，会同时写入系统剪贴板，可直接粘贴到聊天工具。当前 macOS 系统剪贴板与部分聊天工具不能可靠接收容器的多张独立图片；容器内图片的画布内复制可用，但“容器 → 聊天工具多附件粘贴”仍是待解决限制。
-- 底部“生图模版”按钮：当前仅显示“功能还没想好，开发中！”，不会新增模板或任务节点。
+- **API**：通过本机 `127.0.0.1:43129` API Worker 调用 `aihub.rbmanon.cn`，模型固定为 `gpt-image-2`、质量 `medium`。纯文字走 `generations`，参考图走 JSON Base64 `edits`。
+- **GPT Web · 本机**：使用当前浏览器已登录的 ChatGPT，新建或恢复真实对话，上传参考图、发送提示词并把结果写回画布。
+- **GPT Web · 团队**：任务进入妙搭任务箱，由已配对且登录 ChatGPT 的远端 Pixel Flow 执行机领取。协议 v6 优先使用带字节数与 SHA-256 校验的结果 bundle，超大结果回退分块；协议 v8 支持提交方取消。
+- **Team Cloud**：通过妙搭任务箱、Cloudflare Queue / Worker 和服务端 Codex OAuth 生图；可选 Flare / Sunburst，伙伴只保存平台访问 Key 和成员令牌。
 
-> 验收边界：上述画布交互已经过代码回归、TypeScript 与构建验证。容器批量任务的真实 API Key / ChatGPT Web 供应商闭环尚未在本轮功能更新后重新验收，不能据此推断供应商侧已完成复验。
+Team Web 的性能与验收记录见 [TEAM_WEB_PERFORMANCE.md](TEAM_WEB_PERFORMANCE.md)。旧本机 Team Gateway / Quick Tunnel 仍是兼容路径，不是新伙伴的推荐方案。
 
-## 本地资产与生图模板 MVP
+## 快速开始
 
-- 左侧采用 Lovart 式两级侧栏：默认保留 60px 图标栏，分别对应提示词库、产品素材库、参考图库和生图模板库；点击图标后在其右侧展开对应内容，激活图标高亮，可用面板标题栏的收起按钮恢复宽画布。顶部不再提供“资产库”按钮。画布、底部工具栏、迷你地图和缩放控件会随侧栏展开状态自动避让。
-- 完整提示词可以替换或追加到当前选中的普通生图任务，也可以拖入画布成为文字节点。
-- 产品素材和参考图保存在本地浏览器，可拖入画布，或一键连接到选中的任务。
-- 生图模板保留文案、构图、背景和自由补充四个可选提示词模块；构图与背景分别只调用提示词库中对应标签的内容，也可自由填写或留空。产品素材与参考图库默认折叠，只显示已选数量，展开后再选择；模板同时支持比例、ChatGPT Web / API Key / Team Cloud / Team Web 模式和 1–4 张生图数量。
-- 运行模板会创建一个汇总模板卡和相互独立的普通生图任务；每个任务复用现有调度与回写链路，失败项可单独运行，也可从模板卡批量重试失败项。
-- MVP 的提示词、预设和模板元数据保存在扩展自己的本地存储；产品图和参考图复用现有 `assets` 表。当前不包含团队共享、云同步、标签或自动去重。
+1. 将下载包完整解压。
+2. 打开 `chrome://extensions` 或 `edge://extensions`，开启开发者模式。
+3. 选择“加载已解压的扩展”，指向 `扩展程序/`。
+4. 点击 Pixel Flow 图标打开画布。
+5. 放入图片或文字，新建任务并连接输入。
+6. 在任务卡选择 GPT Web、Team Cloud 或 API；再按模式选择 GPT Web 的本机/团队或 Team Cloud 的 Flare/Sunburst，并设置比例与提示词。
+7. 点击“运行任务”，按任务卡状态等待结果写回。
 
-## 开发
+首次配置统一从顶部 **生图设置** 进入：个人 API、团队提交凭证和网页生图机配对分别保存，凭证只保存在当前浏览器本地。
 
-Codex 结构化命令见 [COMMAND_API.md](COMMAND_API.md)。安装本机 Bridge 后，Codex 可直接读取画布、新建/执行生图任务、撤销和下载图片。
+## 备份与数据
+
+- 画布、图片资产和 TaskRun 保存在扩展 IndexedDB `gpt-node-canvas` 的 `projects / assets / runs` 表。
+- 提示词、产品、图库和模板索引保存在扩展本地存储；图片仍复用 `assets` 表。
+- “备份画布”会保存画布、连线和图片；各资产库另有独立导出与导入。
+- 删除扩展前必须先备份。重新构建或重新加载扩展不会主动删除现有画布。
+
+## Codex 结构化操作
+
+安装本机 Bridge 后，Codex 可通过 Pixel Flow MCP 读取真实画布、管理画布和任务、执行或恢复任务、读取 TaskRun、导入资产库及下载图片。Bridge 只监听 `127.0.0.1:43128`。
+
+详见 [COMMAND_API.md](COMMAND_API.md)。所有写操作都必须使用唯一 `requestId` 和最近状态的 `expectedRevision`，写后继续回读。
+
+## 开发与验证
 
 ```bash
 npm install
-npm run dev
+npm test
 npm run check
 npm run build
 ```
 
-`npm run build` 会把 `src/` 原生画布、按需加载的资产库调用侧、后台/ChatGPT 适配器输出到 `扩展程序/`。正式入口为 `index.html`。
+`npm run build` 会：
 
-`npm run build:rebuild-preview` 只构建 TypeScript 重建预览，不会覆盖生产扩展。重建模块只有在行为回归通过后才能进入生产版。
+1. 从 `src/background/service-worker.ts` 生成 `public/background.js`。
+2. 构建 React / TypeScript 画布。
+3. 清空并重建 `扩展程序/assets/`，避免旧哈希 chunk 残留。
+4. 将正式扩展产物写入 `扩展程序/`。
 
-## 目录
+构建成功不等于真实运行完成。涉及 UI、调度、生图、恢复或数据写回时，还要重新加载真实扩展，并按 [架构验收门槛](ARCHITECTURE.md#发布前深链路门槛)回读。
 
-- `src/`：正式 React/TypeScript 画布源码，包括节点、状态、API 设置、资产库调用侧和编辑闭环。
-- `production/`：正式/回退 HTML、视觉主题，以及暂时保留的资产管理与生图模板兼容模块。
-- `public/manifest.json`：扩展清单源文件。
-- `public/background.js`：当前后台调度兼容层。
-- `public/contentScript.js`：当前 ChatGPT 页面适配器兼容层。
-- `legacy/`：原 v0.2.3 打包脚本的只读基线，用于比对和回归。
-- `扩展程序/`：Chrome 实际加载的构建产物，不作为后续功能开发入口。
+## 源码边界
 
-## 数据兼容
+- `src/`：正式 React / TypeScript 画布、状态、存储和后台源码。
+- `production/`：正式 HTML、主题和仍在兼容期的资产管理模块。
+- `public/background.js`：构建产物，不手工修改。
+- `public/contentScript.js`：ChatGPT 页面适配器源码。
+- `api-worker/`：本机 API Key 持久 Worker。
+- `team-gateway/`：旧本机团队网关兼容实现。
+- `miaoda-worker/`：团队云链路的故障回退工具。
+- `扩展程序/`：Chrome / Edge 实际加载目录，不作为源码入口。
 
-数据库继续使用 `gpt-node-canvas`，表结构仍是 `projects / assets / runs`。重建源码和重新加载扩展不会主动删除现有画布数据。
+后台模块边界见 [BACKGROUND_ARCHITECTURE.md](BACKGROUND_ARCHITECTURE.md)，运行状态约束见 [GENERATION_ARCHITECTURE_BASELINE.md](GENERATION_ARCHITECTURE_BASELINE.md)。
 
-## 当前迁移状态
+## 已知限制
 
-- 正式入口使用 `src/` 构建产物；旧 v0.2.3 bundle 与补丁已移除。
-- 节点、画布管理、生图模式、API 设置、连线、撤销、复制、拖图/粘贴和资产库调用侧已由 `src/` 原生提供。
-- 资产管理端与生图模板暂时复用可读的 `production/asset-library.js`，运行在 native compatibility mode，不再注入旧画布栏或接管连线。
-- 后台任务调度与 ChatGPT 页面适配器暂时保留为兼容脚本，已纳入工程构建。
-- 新画布功能只写入 `src/`；修改 ChatGPT 页面适配时编辑 `public/contentScript.js`，不要直接改 `扩展程序/`。
-
-## Mac 交互
-
-- 触控板双指平行滑动：以默认约 2 倍速度平移画布。
-- 触控板双指并拢或张开：缩小或放大画布。
-- 点击素材到任务之间的输入实线：连线变红，并在点击位置显示“断开”标志；再次点击该标志只断开这条连接，不删除素材或任务，也不会重载页面或改变当前画布视图。生成结果的输出连线不提供此操作。
-- 左下角缩放按钮仍可使用。
-- 选中模块后按 `Backspace` 或 `Delete`：删除模块。
-- 选中普通图片、生成结果或图片容器后按 `Command+C`：复制画布节点；单选图片或结果还会复制真实图片到系统剪贴板。
-- 按 `Command+V`：粘贴最近复制的画布图片／容器；输入框、文本框和可编辑区域内仍使用系统原生复制粘贴。
-- 光标位于输入框、文本框或可编辑内容时，`Backspace` 只删除文字，不删除模块。
-
-## Windows 支持
-
-- 支持 Chrome 和 Edge 的未打包扩展加载。
-- `Ctrl+C / Ctrl+V` 可复制粘贴画布图片、图片容器和生图任务；任务副本保留提示词、模式、比例和输入连线，但会重置运行状态。`Ctrl+Z` 撤销当前画布的最近动作。
-- 选中普通图片、生成结果或图片容器后按 `Ctrl+C`：复制画布节点；单选图片或结果还会复制真实图片到系统剪贴板。
-- `Backspace` 或 `Delete` 删除已选模块；输入框内的退格编辑不受影响。
-- 浏览器生图无需安装本地 Worker。
-- API Key 生图需先安装 Node.js 20+，再运行 `npm run api-worker:install:windows`；它会为当前用户创建无需管理员权限的登录自启入口。
-- 手动启动：`npm run api-worker:start:windows`。
-- 卸载自启并停止 Worker：`npm run api-worker:uninstall:windows`。
-
-## 生图模式
-
-- 每张任务卡可选择 `ChatGPT Web`、`API Key`、`Team Cloud` 或 `Team Web`，新建任务和新建生图模板默认使用 API Key；已有任务保留原先保存的模式。
-- API 模式在顶部“API 设置”中保存 Key；Key 只进入 `chrome.storage.local`，不会写入项目、备份、日志或源码。
-- 无参考图：`POST https://aihub.rbmanon.cn/v1/images/generations`。
-- 有参考图：`POST https://aihub.rbmanon.cn/v1/images/edits`，使用 JSON `images[].image_url` Base64 Data URL；该网关不接受 multipart。
-- 模型固定 `gpt-image-2`，质量固定 `medium`；尺寸采用网关已验证的 16 像素倍数，例如 9:16 为 720×1280、16:9 为 1280×720。
-- API 模式会把提示词和参考图片发送到 `aihub.rbmanon.cn`，结果仍写回原版 IndexedDB 画布和结果节点。
-- API 请求最多等待 7 分钟；超时后任务失败并显示原因，不再永久停留在“生成中”。
-- 扩展重载时发现中断的 API 任务，会标记失败且不自动重试，避免重复计费。
-
-## 团队生图网关
-
-- 推荐方案：使用妙搭云端任务箱提供固定地址，由 Cloudflare 每5秒检测并投递 Queue；Mac 无需在线，Cron 每分钟负责检测器恢复和漏单兜底。
-- 网关默认只监听 `127.0.0.1:43130`，通过 Tailscale Serve 在私有 tailnet 内提供 HTTPS 地址，不直接开放公网端口。
-- Codex OAuth 以 AES-256-GCM 密文保存在 Cloudflare KV，解密密钥存 Cloudflare Secret；访问令牌不会发送到伙伴扩展或妙搭数据库。
-- 每位同伴使用独立的可撤销令牌。云端 Queue 最大并发为3；旧本机网关仍保留每日额度、请求去重、单并发排队和重启防重复消费能力。
-- 同伴在“生图设置”中保存网关地址与成员令牌。扩展只请求该网关 origin 的动态访问权限。
-- 初始化、安装、成员管理和接口说明见 [team-gateway/README.md](team-gateway/README.md)。
-- `miaoda-worker/` 仅作为故障回退保留，正式团队链路不依赖它。
+- ChatGPT 页面结构改变后，网页适配器可能需要更新。
+- API Key 请求最多等待 7 分钟；超时后进入失败，不自动重复计费。
+- Team Web 必须至少有一台在线且未暂停的网页生图机。
+- 外部聊天工具不一定支持一次粘贴容器中的多张独立图片。
+- 主后台组合根仍在继续类型化，当前仅 `src/background/service-worker.ts` 保留 `@ts-nocheck`。
