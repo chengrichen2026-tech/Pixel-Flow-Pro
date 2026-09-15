@@ -5194,6 +5194,18 @@ async function reconcileBrowserTaskResults() {
 }
 var TEAM_GATEWAY_CHUNK_CHARACTERS = 6e5;
 var TEAM_GATEWAY_CHUNK_PACE_MS = 250;
+var TEAM_WEB_SAFE_BUNDLE_BYTES = 8e6;
+function estimatedTeamWebBundleBytes(images) {
+	let bytes = 25;
+	for (let index = 0; index < images.length; index += 1) {
+		const image = images[index];
+		const mimeType = typeof image?.mimeType === "string" ? image.mimeType : "image/png";
+		const base64Length = typeof image?.base64 === "string" ? image.base64.length : 0;
+		bytes += 27 + mimeType.length + base64Length;
+		if (index > 0) bytes += 1;
+	}
+	return bytes;
+}
 async function submitTeamGatewayJob(input) {
 	const health = await teamGatewayRequest("/health");
 	if (Number(health.protocolVersion || 1) < 2) return teamGatewayRequest("/jobs", {
@@ -5327,7 +5339,8 @@ async function teamWebWorkerSettings() {
 async function teamWebWorkerRequest(path, options = {}) {
 	const settings = await teamWebWorkerSettings();
 	if (!settings.enabled || !settings.relayUrl || !settings.deviceToken || !settings.workerId) throw new Error("网页生图机尚未配对或已暂停");
-	for (let attempt = 0; attempt < 5; attempt += 1) {
+	let lastError;
+	for (let attempt = 0; attempt < 5; attempt += 1) try {
 		const response = await fetch(`${settings.relayUrl}/web-worker${path}`, {
 			...options,
 			headers: {
@@ -5338,14 +5351,20 @@ async function teamWebWorkerRequest(path, options = {}) {
 		});
 		const payload = await response.json().catch(() => ({}));
 		if (response.ok) return payload;
-		if ((response.status === 429 || response.status >= 500) && attempt < 4) {
-			const retryAfter = Number(response.headers.get("Retry-After"));
-			await new Promise((resolveWait) => setTimeout(resolveWait, Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1e3 : Math.min(16e3, 1e3 * 2 ** attempt)));
-			continue;
-		}
-		throw new Error(payload.message || payload.error || `网页生图任务中继返回 HTTP ${response.status}`);
+		const error = new Error(payload.message || payload.error || `网页生图任务中继返回 HTTP ${response.status}`);
+		error.status = response.status;
+		if (response.status !== 429 && response.status < 500) throw error;
+		lastError = error;
+		if (attempt === 4) throw error;
+		const retryAfter = Number(response.headers.get("Retry-After"));
+		await new Promise((resolveWait) => setTimeout(resolveWait, Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1e3 : Math.min(16e3, 1e3 * 2 ** attempt)));
+	} catch (error) {
+		if (Number.isFinite(Number(error?.status))) throw error;
+		lastError = error;
+		if (attempt === 4) throw error;
+		await new Promise((resolveWait) => setTimeout(resolveWait, Math.min(16e3, 1e3 * 2 ** attempt)));
 	}
-	throw new Error("网页生图任务中继持续不可用");
+	throw lastError ?? /* @__PURE__ */ new Error("网页生图任务中继持续不可用");
 }
 async function saveActiveTeamWebJob() {
 	if (activeTeamWebJob) await chrome.storage.local.set({ [TEAM_WEB_ACTIVE_STORAGE]: activeTeamWebJob });
@@ -5370,17 +5389,20 @@ async function downloadTeamWebInputs(job) {
 }
 async function uploadTeamWebImage(jobId, image, endpoint, imageIndex, name) {
 	const totalChunks = Math.max(1, Math.ceil(image.base64.length / TEAM_GATEWAY_CHUNK_CHARACTERS));
-	for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex += 1) await teamWebWorkerRequest(`/jobs/${jobId}/${endpoint}`, {
-		method: "POST",
-		body: JSON.stringify({
-			imageIndex,
-			chunkIndex,
-			totalChunks,
-			name,
-			mimeType: image.mimeType || "image/png",
-			base64: image.base64.slice(chunkIndex * TEAM_GATEWAY_CHUNK_CHARACTERS, (chunkIndex + 1) * TEAM_GATEWAY_CHUNK_CHARACTERS)
-		})
-	});
+	for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex += 1) {
+		await teamWebWorkerRequest(`/jobs/${jobId}/${endpoint}`, {
+			method: "POST",
+			body: JSON.stringify({
+				imageIndex,
+				chunkIndex,
+				totalChunks,
+				name,
+				mimeType: image.mimeType || "image/png",
+				base64: image.base64.slice(chunkIndex * TEAM_GATEWAY_CHUNK_CHARACTERS, (chunkIndex + 1) * TEAM_GATEWAY_CHUNK_CHARACTERS)
+			})
+		});
+		if (chunkIndex + 1 < totalChunks) await new Promise((resolveWait) => setTimeout(resolveWait, TEAM_GATEWAY_CHUNK_PACE_MS));
+	}
 }
 async function clearActiveTeamWebJob(closeTab = true, expected = activeTeamWebJob) {
 	if (!expected || activeTeamWebJob !== expected) return;
@@ -5418,12 +5440,21 @@ async function failActiveTeamWebJob(reason, detail, expected = activeTeamWebJob)
 async function completeActiveTeamWebJob(message) {
 	const active = activeTeamWebJob;
 	if (!active || active.job.id !== message.taskId) return;
-	return singleFlight(teamWebDeliveries, active.job.id, async () => {
-		try {
-			await deliverTeamWebJob(message, active);
-		} catch (error) {
-			await failActiveTeamWebJob("delivery_error", error instanceof Error ? error.message : String(error), active);
+	return singleFlight(teamWebDeliveries, active.job.id, () => deliverTeamWebJob(message, active)).catch(async (error) => {
+		const status = Number(error?.status);
+		if (!(!Number.isFinite(status) || status === 429 || status >= 500)) {
+			await failActiveTeamWebJob("delivery_error", typeof error?.message === "string" ? error.message : String(error), active);
+			return;
 		}
+		if (activeTeamWebJob !== active) return;
+		active.phase = "delivering";
+		active.deliveryError = typeof error?.message === "string" ? error.message : String(error);
+		await saveActiveTeamWebJob();
+		scheduleBrowserResultRecoveryAlarm();
+		await teamWebWorkerRequest(`/jobs/${active.job.id}/heartbeat`, {
+			method: "POST",
+			body: JSON.stringify({ phase: "delivering" })
+		}).catch(() => void 0);
 	});
 }
 async function deliverTeamWebJob(message, active) {
@@ -5440,11 +5471,8 @@ async function deliverTeamWebJob(message, active) {
 	});
 	active.phase = "delivering";
 	await saveActiveTeamWebJob();
-	const bundleBody = active.job.resultDelivery === "bundle" ? JSON.stringify({
-		version: 1,
-		images: message.images
-	}) : "";
-	if (active.job.resultDelivery === "bundle" && new TextEncoder().encode(bundleBody).byteLength > 18e6) {
+	const shouldUseBundle = active.job.resultDelivery === "bundle" && estimatedTeamWebBundleBytes(message.images) <= TEAM_WEB_SAFE_BUNDLE_BYTES;
+	if (active.job.resultDelivery === "bundle" && !shouldUseBundle) {
 		await teamWebWorkerRequest(`/jobs/${active.job.id}/use-chunks`, {
 			method: "POST",
 			body: "{}"
@@ -5452,11 +5480,16 @@ async function deliverTeamWebJob(message, active) {
 		active.job.resultDelivery = "chunks";
 		await saveActiveTeamWebJob();
 	}
-	if (active.job.resultDelivery === "bundle") await teamWebWorkerRequest(`/jobs/${active.job.id}/result-bundle`, {
-		method: "POST",
-		body: bundleBody
-	});
-	else for (let imageIndex = 0; imageIndex < message.images.length; imageIndex += 1) await uploadTeamWebImage(active.job.id, message.images[imageIndex], "result-chunks", imageIndex, `result-${imageIndex + 1}.png`);
+	if (active.job.resultDelivery === "bundle") {
+		const bundleBody = JSON.stringify({
+			version: 1,
+			images: message.images
+		});
+		await teamWebWorkerRequest(`/jobs/${active.job.id}/result-bundle`, {
+			method: "POST",
+			body: bundleBody
+		});
+	} else for (let imageIndex = 0; imageIndex < message.images.length; imageIndex += 1) await uploadTeamWebImage(active.job.id, message.images[imageIndex], "result-chunks", imageIndex, `result-${imageIndex + 1}.png`);
 	if (active.job.resultDelivery !== "bundle") await teamWebWorkerRequest(`/jobs/${active.job.id}/complete`, {
 		method: "POST",
 		body: JSON.stringify({ resultCount: message.images.length })

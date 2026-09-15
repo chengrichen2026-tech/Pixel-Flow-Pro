@@ -11,12 +11,23 @@ function runtime(overrides = {}) {
     Map, Promise, Date, JSON, TextDecoder, TextEncoder, Uint8Array,
     activeTeamWebJob: { job: { id: 'job-a', resultDelivery: 'chunks' }, startedAt: Date.now() },
     teamWebDeliveries: new Map(), teamResultDownloads: new Map(),
+    TEAM_WEB_SAFE_BUNDLE_BYTES: 8e6,
+    estimatedTeamWebBundleBytes: images => {
+      let bytes = '{"version":1,"images":['.length + 2;
+      for (let index = 0; index < images.length; index += 1) {
+        const image = images[index];
+        bytes += '{"mimeType":"","base64":""}'.length + (image.mimeType || 'image/png').length + image.base64.length;
+        if (index > 0) bytes += 1;
+      }
+      return bytes;
+    },
     teamWebWorkerRequest: async (path) => { calls.push(path); return {}; },
     saveActiveTeamWebJob: async () => {},
     createTeamPreview: async () => null,
     uploadTeamWebImage: async (id, _image, endpoint) => { calls.push(`${id}/${endpoint}`); },
     clearActiveTeamWebJob: async (_close, expected) => { if (context.activeTeamWebJob === expected) context.activeTeamWebJob = undefined; },
     failActiveTeamWebJob: async (_reason, _detail, expected) => { if (context.activeTeamWebJob === expected) { calls.push('fail'); context.activeTeamWebJob = undefined; } },
+    scheduleBrowserResultRecoveryAlarm: () => calls.push('schedule-recovery'),
     chrome: { notifications: { create: async () => {} } },
     setTimeout: () => {},
     ...overrides,
@@ -80,13 +91,24 @@ test('an active remote job without a concrete conversation resumes instead of on
   assert.match(source, /if \(!concreteChatGptConversationUrl\(activeTeamWebJob\.conversationUrl\)\) \{[\s\S]*await startActiveTeamWebJob\(\)/);
   assert.match(source, /failActiveTeamWebJob\("start_error"/);
 });
-test('duplicate failing delivery reports failure once and stale result does not affect next job', async () => {
-  const { context, calls } = runtime({ teamWebWorkerRequest: async () => { throw new Error('offline'); } });
+test('duplicate non-retryable delivery failure reports failure once and stale result does not affect next job', async () => {
+  const invalid = Object.assign(new Error('invalid bundle'), { status: 400 });
+  const { context, calls } = runtime({ teamWebWorkerRequest: async () => { throw invalid; } });
   await Promise.all([context.completeActiveTeamWebJob(message), context.completeActiveTeamWebJob(message)]);
   assert.deepEqual(calls, ['fail']);
   context.activeTeamWebJob = { job: { id: 'job-b' } };
   await context.completeActiveTeamWebJob(message);
   assert.equal(context.activeTeamWebJob.job.id, 'job-b');
+});
+test('transient delivery failure preserves the active conversation and schedules result recovery', async () => {
+  const unavailable = Object.assign(new Error('relay unavailable'), { status: 503 });
+  const { context, calls } = runtime({ teamWebWorkerRequest: async () => { throw unavailable; } });
+  await context.completeActiveTeamWebJob(message);
+  assert.equal(context.activeTeamWebJob.job.id, 'job-a');
+  assert.equal(context.activeTeamWebJob.phase, 'delivering');
+  assert.equal(context.activeTeamWebJob.deliveryError, 'relay unavailable');
+  assert.equal(context.teamWebDeliveries.has('job-a'), false);
+  assert.deepEqual(calls, ['schedule-recovery']);
 });
 test('late delivery failure cannot fail a new job', async () => {
   let reject;
@@ -108,6 +130,30 @@ test('download single-flight shares successful result and permits retry after fa
   await assert.rejects(context.singleFlight(map, 'y', async () => { throw new Error('fail'); }));
   assert.equal(await context.singleFlight(map, 'y', async () => 3), 3);
 });
+test('worker request retries thrown network errors as well as HTTP 503 responses', async () => {
+  let networkAttempts = 0;
+  const context = vm.createContext({
+    Error, Promise, Number, JSON, Response,
+    setTimeout: callback => callback(),
+    teamWebWorkerSettings: async () => ({ enabled: true, relayUrl: 'https://relay.example', deviceToken: 'pfw_token', workerId: 'web-a' }),
+    fetch: async () => {
+      networkAttempts += 1;
+      if (networkAttempts === 1) throw new TypeError('failed to fetch');
+      return Response.json({ ok: true });
+    },
+  });
+  vm.runInContext(section('async function teamWebWorkerRequest(', 'async function saveActiveTeamWebJob('), context);
+  assert.deepEqual(await context.teamWebWorkerRequest('/claim'), { ok: true });
+  assert.equal(networkAttempts, 2);
+
+  let unavailableAttempts = 0;
+  context.fetch = async () => {
+    unavailableAttempts += 1;
+    return Response.json({ error: 'unavailable' }, { status: 503 });
+  };
+  await assert.rejects(context.teamWebWorkerRequest('/claim'), error => error.status === 503);
+  assert.equal(unavailableAttempts, 5);
+});
 test('oversize multi-image bundle falls back to legacy chunks without losing images', async () => {
   const { context, calls } = runtime();
   context.activeTeamWebJob.job.resultDelivery = 'bundle';
@@ -115,6 +161,15 @@ test('oversize multi-image bundle falls back to legacy chunks without losing ima
   assert.equal(calls.filter(x => x.endsWith('/use-chunks')).length, 1);
   assert.equal(calls.filter(x => x.endsWith('/result-chunks')).length, 1);
   assert.equal(calls.filter(x => x.endsWith('/result-bundle')).length, 0);
+});
+test('large multi-image results choose chunks before serializing a combined bundle', async () => {
+  const { context, calls } = runtime();
+  context.activeTeamWebJob.job.resultDelivery = 'bundle';
+  const images = Array.from({ length: 5 }, () => ({ mimeType: 'image/png', base64: 'a'.repeat(2_000_000) }));
+  await context.completeActiveTeamWebJob({ ...message, images });
+  assert.equal(calls.filter(x => x.endsWith('/use-chunks')).length, 1);
+  assert.equal(calls.filter(x => x.endsWith('/result-bundle')).length, 0);
+  assert.equal(calls.filter(x => x.endsWith('/result-chunks')).length, 5);
 });
 test('real failure cleanup checks identity again after network await', async () => {
   let resolve;
