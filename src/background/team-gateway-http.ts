@@ -21,6 +21,10 @@ export async function teamGatewayRequest<T = Record<string, unknown>>(path: stri
     try {
       response = await fetch(`${baseUrl}/team${path}`, { ...options, headers: { "X-Pixel-Member-Token": memberToken, ...(options.headers || {}) } });
     } catch {
+      if (attempt < 6) {
+        await new Promise(resolve => setTimeout(resolve, Math.min(30_000, 1_000 * 2 ** attempt)));
+        continue;
+      }
       throw new Error("无法连接团队生图服务，请检查网络和服务状态");
     }
     const payload = await response.json().catch(() => ({})) as T & GatewayErrorPayload;
@@ -28,7 +32,7 @@ export async function teamGatewayRequest<T = Record<string, unknown>>(path: stri
     const payloadMessage = gatewayErrorMessage(payload);
     if (response.status === 429 && /额度/.test(payloadMessage)) throw new Error(payloadMessage);
     if (response.status === 401) throw new Error(payloadMessage || "成员令牌无效、已停用或已重置");
-    if (response.status === 429 && attempt < 6) {
+    if ((response.status === 429 || [502, 503, 504, 522, 524].includes(response.status)) && attempt < 6) {
       const retryAfterSeconds = Number(response.headers.get("Retry-After"));
       const retryDelay = Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0 ? retryAfterSeconds * 1_000 : Math.min(30_000, 2_000 * 2 ** attempt);
       await new Promise(resolve => setTimeout(resolve, retryDelay));

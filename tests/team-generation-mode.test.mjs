@@ -35,7 +35,7 @@ test("team mode sends authenticated jobs without exposing Codex OAuth to the ext
   assert.match(background, /\/acknowledge`, \{ method: "POST" \}/);
   assert.match(background, /TEAM_GATEWAY_CHUNK_CHARACTERS = 6e5/);
   assert.match(background, /TEAM_GATEWAY_CHUNK_PACE_MS = 250/);
-  assert.match(background, /response\.status === 429 && attempt < 6/);
+  assert.match(background, /\[502, 503, 504, 522, 524\]\.includes\(response\.status\)/);
   assert.match(background, /response\.headers\.get\("Retry-After"\)/);
   assert.match(background, /自动重试后仍被限流/);
   assert.match(background, /response\.status === 429 && \/额度\//);

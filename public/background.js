@@ -4703,6 +4703,10 @@ async function teamGatewayRequest(path, options = {}) {
 				}
 			});
 		} catch {
+			if (attempt < 6) {
+				await new Promise((resolve) => setTimeout(resolve, Math.min(3e4, 1e3 * 2 ** attempt)));
+				continue;
+			}
 			throw new Error("无法连接团队生图服务，请检查网络和服务状态");
 		}
 		const payload = await response.json().catch(() => ({}));
@@ -4710,7 +4714,13 @@ async function teamGatewayRequest(path, options = {}) {
 		const payloadMessage = gatewayErrorMessage(payload);
 		if (response.status === 429 && /额度/.test(payloadMessage)) throw new Error(payloadMessage);
 		if (response.status === 401) throw new Error(payloadMessage || "成员令牌无效、已停用或已重置");
-		if (response.status === 429 && attempt < 6) {
+		if ((response.status === 429 || [
+			502,
+			503,
+			504,
+			522,
+			524
+		].includes(response.status)) && attempt < 6) {
 			const retryAfterSeconds = Number(response.headers.get("Retry-After"));
 			const retryDelay = Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0 ? retryAfterSeconds * 1e3 : Math.min(3e4, 2e3 * 2 ** attempt);
 			await new Promise((resolve) => setTimeout(resolve, retryDelay));
