@@ -236,7 +236,9 @@ var BROWSER_RESULT_RECOVERY_ALARM = "pixel-flow-browser-result-recovery";
 var TEAM_WEB_WORKER_ALARM = "pixel-flow-team-web-worker";
 var TEAM_WEB_PROJECT_ID = "pixel-flow-team-web-worker";
 var TEAM_WEB_ACTIVE_STORAGE = "pixelFlowTeamWebWorkerActiveJob";
-var activeTeamWebJob;
+var TEAM_WEB_ACTIVE_JOBS_STORAGE = "pixelFlowTeamWebWorkerActiveJobs";
+const TEAM_WEB_MAX_CONCURRENCY = 3;
+const activeTeamWebJobs = new Map();
 const teamWebDeliveries = new Map();
 const teamResultDownloads = new Map();
 let teamWebTickPromise;
@@ -249,26 +251,29 @@ function singleFlight(map, key, run) {
 }
 var teamWebWorkerReady = Promise.all([
   schedulerReady,
-  chrome.storage.local.get(TEAM_WEB_ACTIVE_STORAGE)
+  chrome.storage.local.get([TEAM_WEB_ACTIVE_STORAGE, TEAM_WEB_ACTIVE_JOBS_STORAGE])
 ]).then(([, stored]) => {
-  activeTeamWebJob = stored[TEAM_WEB_ACTIVE_STORAGE];
-  const conversationUrl = concreteChatGptConversationUrl(activeTeamWebJob?.conversationUrl);
-  if (!activeTeamWebJob || !conversationUrl) return;
-  const key = createTaskScopeKey(TEAM_WEB_PROJECT_ID, activeTeamWebJob.job.id);
-  const message = recoveryMessage({
+  const restored = Array.isArray(stored[TEAM_WEB_ACTIVE_JOBS_STORAGE]) ? stored[TEAM_WEB_ACTIVE_JOBS_STORAGE] : stored[TEAM_WEB_ACTIVE_STORAGE] ? [stored[TEAM_WEB_ACTIVE_STORAGE]] : [];
+  for (const active of restored.filter(item => item?.job?.id)) {
+    activeTeamWebJobs.set(active.job.id, active);
+    const conversationUrl = concreteChatGptConversationUrl(active.conversationUrl);
+    if (!conversationUrl) continue;
+    const key = createTaskScopeKey(TEAM_WEB_PROJECT_ID, active.job.id);
+    const message = recoveryMessage({
     type: "EXECUTE_IN_CHATGPT_V3",
     projectId: TEAM_WEB_PROJECT_ID,
-    taskId: activeTeamWebJob.job.id,
-    prompt: activeTeamWebJob.job.prompt,
+    taskId: active.job.id,
+    prompt: active.job.prompt,
     images: [],
     expectedConversationUrl: conversationUrl,
-    startedAt: activeTeamWebJob.startedAt,
-    submittedAt: activeTeamWebJob.submittedAt ?? activeTeamWebJob.startedAt,
+    startedAt: active.startedAt,
+    submittedAt: active.submittedAt ?? active.startedAt,
     phase: "submitted"
   });
-  browserTaskMessages.set(key, message);
-  tabRegistry.map(key, void 0, conversationUrl);
-  scheduleBrowserResultRecoveryAlarm();
+    browserTaskMessages.set(key, message);
+    tabRegistry.map(key, void 0, conversationUrl);
+  }
+  if (activeTeamWebJobs.size) scheduleBrowserResultRecoveryAlarm();
 });
 void teamWebWorkerReady.then(() => teamWebWorkerTick()).catch(() => void 0);
 function scheduleApiRecoveryAlarm() {
@@ -287,8 +292,7 @@ async function reconcileBrowserTaskResults() {
     return;
   }
   for (const [key, message] of browserTaskMessages) {
-    const remoteKey = activeTeamWebJob ? createTaskScopeKey(TEAM_WEB_PROJECT_ID, activeTeamWebJob.job.id) : "";
-    if (!queue.running.includes(key) && key !== remoteKey) continue;
+    if (!queue.running.includes(key) && ![...activeTeamWebJobs.values()].some(active => createTaskScopeKey(TEAM_WEB_PROJECT_ID, active.job.id) === key)) continue;
     try {
       const mapped = await tabRegistry.ensure(key, message.expectedConversationUrl);
       let adapterState = await probeAdapter(chrome.tabs, mapped.tabId, message);
@@ -507,12 +511,14 @@ async function teamWebWorkerRequest(path, options = {}) {
   }
   throw lastError ?? new Error("网页生图任务中继持续不可用");
 }
-async function saveActiveTeamWebJob() {
-  if (activeTeamWebJob) await chrome.storage.local.set({ [TEAM_WEB_ACTIVE_STORAGE]: activeTeamWebJob });
-  else await chrome.storage.local.remove(TEAM_WEB_ACTIVE_STORAGE);
+async function saveActiveTeamWebJobs() {
+  const jobs = [...activeTeamWebJobs.values()];
+  if (jobs.length) await chrome.storage.local.set({ [TEAM_WEB_ACTIVE_JOBS_STORAGE]: jobs });
+  else await chrome.storage.local.remove(TEAM_WEB_ACTIVE_JOBS_STORAGE);
+  await chrome.storage.local.remove(TEAM_WEB_ACTIVE_STORAGE);
 }
-function activeTeamWebKey() {
-  return activeTeamWebJob ? createTaskScopeKey(TEAM_WEB_PROJECT_ID, activeTeamWebJob.job.id) : "";
+function activeTeamWebKey(active) {
+  return active?.job?.id ? createTaskScopeKey(TEAM_WEB_PROJECT_ID, active.job.id) : "";
 }
 async function downloadTeamWebInputs(job) {
   return Promise.all((job.inputImages || []).map(async (descriptor) => {
@@ -545,9 +551,9 @@ async function uploadTeamWebImage(jobId, image, endpoint, imageIndex, name) {
     if (chunkIndex + 1 < totalChunks) await new Promise((resolveWait) => setTimeout(resolveWait, TEAM_GATEWAY_CHUNK_PACE_MS));
   }
 }
-async function clearActiveTeamWebJob(closeTab = true, expected = activeTeamWebJob) {
-  if (!expected || activeTeamWebJob !== expected) return;
-  const key = activeTeamWebKey();
+async function clearActiveTeamWebJob(closeTab = true, expected) {
+  if (!expected || activeTeamWebJobs.get(expected.job.id) !== expected) return;
+  const key = activeTeamWebKey(expected);
   if (key) {
     browserTaskMessages.delete(key);
     resumedBrowserUrls.delete(key);
@@ -556,28 +562,28 @@ async function clearActiveTeamWebJob(closeTab = true, expected = activeTeamWebJo
     await removeActiveScope(key);
     if (closeTab) await tabRegistry.hibernate(key).catch(() => void 0);
   }
-  if (activeTeamWebJob !== expected) return;
-  activeTeamWebJob = void 0;
+  if (activeTeamWebJobs.get(expected.job.id) !== expected) return;
+  activeTeamWebJobs.delete(expected.job.id);
   teamWebDeliveries.delete(expected.job.id);
-  await saveActiveTeamWebJob();
+  await saveActiveTeamWebJobs();
   if (browserTaskMessages.size === 0) await chrome.alarms.clear(BROWSER_RESULT_RECOVERY_ALARM);
 }
-async function failActiveTeamWebJob(reason, detail, expected = activeTeamWebJob) {
-  if (!expected || activeTeamWebJob !== expected) return;
+async function failActiveTeamWebJob(reason, detail, expected) {
+  if (!expected || activeTeamWebJobs.get(expected.job.id) !== expected) return;
   const job = expected.job;
   if (!job) return;
   await teamWebWorkerRequest(`/jobs/${job.id}/fail`, {
     method: "POST",
     body: JSON.stringify({ error: detail || "ChatGPT 网页执行失败" })
   }).catch(() => void 0);
-  if (activeTeamWebJob !== expected) return;
+  if (activeTeamWebJobs.get(expected.job.id) !== expected) return;
   if (["login_required", "verification_required", "usage_limited"].includes(reason)) {
     await chrome.storage.local.set({ pixelFlowTeamWebWorkerEnabled: false });
   }
   await clearActiveTeamWebJob(true, expected);
 }
 async function completeActiveTeamWebJob(message) {
-  const active = activeTeamWebJob;
+  const active = activeTeamWebJobs.get(message.taskId);
   if (!active || active.job.id !== message.taskId) return;
   return singleFlight(teamWebDeliveries, active.job.id, () => deliverTeamWebJob(message, active)).catch(async (error) => {
     const status = Number(error?.status);
@@ -586,10 +592,10 @@ async function completeActiveTeamWebJob(message) {
       await failActiveTeamWebJob("delivery_error", typeof error?.message === "string" ? error.message : String(error), active);
       return;
     }
-    if (activeTeamWebJob !== active) return;
+    if (activeTeamWebJobs.get(active.job.id) !== active) return;
     active.phase = "delivering";
     active.deliveryError = typeof error?.message === "string" ? error.message : String(error);
-    await saveActiveTeamWebJob();
+    await saveActiveTeamWebJobs();
     scheduleBrowserResultRecoveryAlarm();
     await teamWebWorkerRequest(`/jobs/${active.job.id}/heartbeat`, {
       method: "POST",
@@ -606,12 +612,12 @@ async function deliverTeamWebJob(message, active) {
     body: JSON.stringify({ generationStartedAt, generatedAt, generationDurationMs: Math.max(0, generatedAt - generationStartedAt) })
   });
   active.phase = "delivering";
-  await saveActiveTeamWebJob();
+  await saveActiveTeamWebJobs();
   const shouldUseBundle = active.job.resultDelivery === "bundle" && estimatedTeamWebBundleBytes(message.images) <= TEAM_WEB_SAFE_BUNDLE_BYTES;
   if (active.job.resultDelivery === "bundle" && !shouldUseBundle) {
     await teamWebWorkerRequest(`/jobs/${active.job.id}/use-chunks`, { method: "POST", body: "{}" });
     active.job.resultDelivery = "chunks";
-    await saveActiveTeamWebJob();
+    await saveActiveTeamWebJobs();
   }
   if (active.job.resultDelivery === "bundle") {
     const bundleBody = JSON.stringify({ version: 1, images: message.images });
@@ -640,9 +646,9 @@ async function deliverTeamWebJob(message, active) {
 }
 async function handleTeamWebPageTaskMessage(message, senderTab) {
   await teamWebWorkerReady;
-  const active = activeTeamWebJob;
+  const active = activeTeamWebJobs.get(message.taskId);
   if (message.projectId !== TEAM_WEB_PROJECT_ID || message.taskId !== active?.job.id) return false;
-  const key = activeTeamWebKey();
+  const key = activeTeamWebKey(active);
   if (!key || !tabRegistry.ownsTab(key, senderTab?.id)) return false;
   if (message.type !== "TASK_RESULT" && teamWebDeliveries.has(message.taskId)) return true;
   const conversationUrl = resolveTaskConversationUrl(message, senderTab?.url);
@@ -657,13 +663,13 @@ async function handleTeamWebPageTaskMessage(message, senderTab) {
       browserTaskMessages.set(key, { ...pending, phase, submittedAt: phase === "submitted" ? pending.submittedAt ?? Date.now() : pending.submittedAt });
       await saveBrowserTaskMessages();
     }
-    if (activeTeamWebJob !== active) return true;
+    if (activeTeamWebJobs.get(active.job.id) !== active) return true;
     active.phase = phase;
     if (phase === "submitted") {
       active.submittedAt ??= Date.now();
       active.generationStartedAt ??= Date.now();
     }
-    await saveActiveTeamWebJob();
+    await saveActiveTeamWebJobs();
     await teamWebWorkerRequest(`/jobs/${active.job.id}/heartbeat`, { method: "POST", body: JSON.stringify({ phase: active.phase }) }).catch(() => void 0);
     if (message.status === "manual_action") {
       await teamWebWorkerRequest("/heartbeat", { method: "POST", body: JSON.stringify({ state: "needs_action", detail: message.detail || "请在执行机完成 ChatGPT 手动发送" }) }).catch(() => void 0);
@@ -679,15 +685,17 @@ async function handleTeamWebPageTaskMessage(message, senderTab) {
   }
   if (message.type === "TASK_ERROR") {
     if (teamWebDeliveries.has(message.taskId)) return true;
-    await failActiveTeamWebJob(message.reason, message.detail);
+    await failActiveTeamWebJob(message.reason, message.detail, active);
     return true;
   }
   return false;
 }
-async function startActiveTeamWebJob() {
-  const active = activeTeamWebJob;
+async function startActiveTeamWebJob(active) {
   if (!active) return;
-  const key = activeTeamWebKey();
+  const key = activeTeamWebKey(active);
+  const waitMs = Math.max(0, BROWSER_LAUNCH_GAP_MS - (Date.now() - lastBrowserLaunchAt));
+  if (waitMs) await new Promise((resolve) => setTimeout(resolve, waitMs));
+  lastBrowserLaunchAt = Date.now();
   const images = await downloadTeamWebInputs(active.job);
   const mapped = await tabRegistry.ensure(key, active.conversationUrl);
   await rememberActiveTab(key, mapped.tabId);
@@ -720,42 +728,38 @@ async function teamWebWorkerTickOnce() {
     return;
   }
   scheduleTeamWebWorkerAlarm();
-  if (activeTeamWebJob) {
-    const expected = activeTeamWebJob;
+  for (const expected of [...activeTeamWebJobs.values()]) {
     const remote = await teamWebWorkerRequest(`/jobs/${expected.job.id}/status`).catch(() => undefined);
     if (remote && ["completed", "failed", "canceled"].includes(remote.status)) {
       await clearActiveTeamWebJob(true, expected);
       await updateScheduler(async () => void 0);
       return;
     }
-    const key = activeTeamWebKey();
-    if (!browserTaskMessages.has(key) && !concreteChatGptConversationUrl(activeTeamWebJob.conversationUrl)) {
-      await failActiveTeamWebJob("worker_interrupted", "网页生图机在建立 ChatGPT 对话前被中断，请重新运行该任务");
-      return;
+    const key = activeTeamWebKey(expected);
+    if (!browserTaskMessages.has(key) && !concreteChatGptConversationUrl(expected.conversationUrl)) {
+      await failActiveTeamWebJob("worker_interrupted", "网页生图机在建立 ChatGPT 对话前被中断，请重新运行该任务", expected);
+      continue;
     }
-    if (!concreteChatGptConversationUrl(activeTeamWebJob.conversationUrl)) {
-      await startActiveTeamWebJob().catch(async (error) => {
+    if (!concreteChatGptConversationUrl(expected.conversationUrl)) {
+      await startActiveTeamWebJob(expected).catch(async (error) => {
         await failActiveTeamWebJob("start_error", error instanceof Error ? error.message : String(error), expected);
       });
-      return;
+      continue;
     }
-    await teamWebWorkerRequest(`/jobs/${activeTeamWebJob.job.id}/heartbeat`, { method: "POST", body: JSON.stringify({ phase: activeTeamWebJob.phase }) }).catch(() => void 0);
-    return;
+    await teamWebWorkerRequest(`/jobs/${expected.job.id}/heartbeat`, { method: "POST", body: JSON.stringify({ phase: expected.phase }) }).catch(() => void 0);
   }
-  for (const key of queue.running) {
-    if (await taskGenerationMode(key) === "browser") {
-      await teamWebWorkerRequest("/heartbeat", { method: "POST", body: JSON.stringify({ state: "ready", detail: "正在等待本机 ChatGPT Web 任务完成" }) }).catch(() => void 0);
-      return;
-    }
+  let localBrowserRunning = 0;
+  for (const key of queue.running) if (await taskGenerationMode(key) === "browser") localBrowserRunning += 1;
+  while (activeTeamWebJobs.size + localBrowserRunning < TEAM_WEB_MAX_CONCURRENCY) {
+    const claimed = await teamWebWorkerRequest("/claim", { method: "POST", body: JSON.stringify({ supportsBundle: true }) });
+    if (!claimed.job || activeTeamWebJobs.has(claimed.job.id)) break;
+    const expected = { job: claimed.job, startedAt: Date.now(), phase: "claimed" };
+    activeTeamWebJobs.set(expected.job.id, expected);
+    await saveActiveTeamWebJobs();
+    await startActiveTeamWebJob(expected).catch(async (error) => {
+      await failActiveTeamWebJob("start_error", error instanceof Error ? error.message : String(error), expected);
+    });
   }
-  const claimed = await teamWebWorkerRequest("/claim", { method: "POST", body: JSON.stringify({ supportsBundle: true }) });
-  if (!claimed.job) return;
-  activeTeamWebJob = { job: claimed.job, startedAt: Date.now(), phase: "claimed" };
-  await saveActiveTeamWebJob();
-  const expected = activeTeamWebJob;
-  await startActiveTeamWebJob().catch(async (error) => {
-    await failActiveTeamWebJob("start_error", error instanceof Error ? error.message : String(error), expected);
-  });
 }
 async function finalizeTeamGatewayJob(jobId, images) {
   try {
@@ -1061,7 +1065,7 @@ async function taskGenerationMode(key) {
 async function advanceQueueByMode() {
   let slots = Math.max(0, MAX_CONCURRENCY - queue.running.length);
   if (!slots || !queue.waiting.length) return;
-  let browserRunning = activeTeamWebJob ? 1 : 0;
+  let browserRunning = activeTeamWebJobs.size;
   for (const key of queue.running) {
     if (await taskGenerationMode(key) === "browser") browserRunning += 1;
   }
@@ -1113,7 +1117,7 @@ async function reconcileSchedulerSnapshot() {
   queue = reconcileQueue(queue, new Set(liveScopes.keys()));
   pendingScopes = new Map([...liveScopes].filter(([key]) => queue.waiting.includes(key) || queue.running.includes(key)));
   const liveTaskKeys = new Set(liveScopes.keys());
-  if (activeTeamWebJob) liveTaskKeys.add(createTaskScopeKey(TEAM_WEB_PROJECT_ID, activeTeamWebJob.job.id));
+  for (const active of activeTeamWebJobs.values()) liveTaskKeys.add(createTaskScopeKey(TEAM_WEB_PROJECT_ID, active.job.id));
   for (const key of [...browserTaskMessages.keys()]) if (!liveTaskKeys.has(key)) browserTaskMessages.delete(key);
   await saveBrowserTaskMessages();
   tabRegistry.pruneMappings(liveTaskKeys);
@@ -1335,9 +1339,10 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     tabRegistry.updateConversation(key, observedUrl);
     browserTaskMessages.set(key, resumedMessage);
     await saveBrowserTaskMessages();
-    if (activeTeamWebJob && key === activeTeamWebKey()) {
-      activeTeamWebJob.conversationUrl = observedUrl;
-      await saveActiveTeamWebJob();
+    const active = [...activeTeamWebJobs.values()].find(candidate => key === activeTeamWebKey(candidate));
+    if (active) {
+      active.conversationUrl = observedUrl;
+      await saveActiveTeamWebJobs();
     } else {
       await persistAndBroadcast({ type: "TASK_STATUS", projectId: message.projectId, taskId: message.taskId, status: "generating", conversationUrl: observedUrl });
     }

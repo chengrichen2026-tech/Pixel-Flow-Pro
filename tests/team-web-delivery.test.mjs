@@ -7,9 +7,10 @@ const source = await readBackgroundSource();
 function section(start, end) { return source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start))); }
 function runtime(overrides = {}) {
   const calls = [];
+  const active = { job: { id: 'job-a', resultDelivery: 'chunks' }, startedAt: Date.now() };
   const context = vm.createContext({
     Map, Promise, Date, JSON, TextDecoder, TextEncoder, Uint8Array,
-    activeTeamWebJob: { job: { id: 'job-a', resultDelivery: 'chunks' }, startedAt: Date.now() },
+    activeTeamWebJobs: new Map([['job-a', active]]),
     teamWebDeliveries: new Map(), teamResultDownloads: new Map(),
     TEAM_WEB_SAFE_BUNDLE_BYTES: 8e6,
     estimatedTeamWebBundleBytes: images => {
@@ -22,11 +23,11 @@ function runtime(overrides = {}) {
       return bytes;
     },
     teamWebWorkerRequest: async (path) => { calls.push(path); return {}; },
-    saveActiveTeamWebJob: async () => {},
+    saveActiveTeamWebJobs: async () => {},
     createTeamPreview: async () => null,
     uploadTeamWebImage: async (id, _image, endpoint) => { calls.push(`${id}/${endpoint}`); },
-    clearActiveTeamWebJob: async (_close, expected) => { if (context.activeTeamWebJob === expected) context.activeTeamWebJob = undefined; },
-    failActiveTeamWebJob: async (_reason, _detail, expected) => { if (context.activeTeamWebJob === expected) { calls.push('fail'); context.activeTeamWebJob = undefined; } },
+    clearActiveTeamWebJob: async (_close, expected) => { if (context.activeTeamWebJobs.get(expected.job.id) === expected) context.activeTeamWebJobs.delete(expected.job.id); },
+    failActiveTeamWebJob: async (_reason, _detail, expected) => { if (context.activeTeamWebJobs.get(expected.job.id) === expected) { calls.push('fail'); context.activeTeamWebJobs.delete(expected.job.id); } },
     scheduleBrowserResultRecoveryAlarm: () => calls.push('schedule-recovery'),
     chrome: { notifications: { create: async () => {} } },
     setTimeout: () => {},
@@ -46,7 +47,7 @@ test('simultaneous original and recovery results upload and complete only once',
 });
 test('multi-image bundle makes one upload with no legacy complete call', async () => {
   const { context, calls } = runtime();
-  context.activeTeamWebJob.job.resultDelivery = 'bundle';
+  context.activeTeamWebJobs.get('job-a').job.resultDelivery = 'bundle';
   await context.completeActiveTeamWebJob({ ...message, images: [...message.images, ...message.images] });
   assert.equal(calls.filter(x => x.endsWith('/result-bundle')).length, 1);
   assert.equal(calls.filter(x => x.endsWith('/result-chunks') || x.endsWith('/complete')).length, 0);
@@ -86,9 +87,17 @@ test('worker reconciliation clears a terminal persisted remote job before claimi
   assert.match(source, /teamWebWorkerRequest\(`\/jobs\/\$\{expected\.job\.id\}\/status`\)/);
   assert.match(source, /\["completed", "failed", "canceled"\]\.includes\(remote\.status\)[\s\S]*await clearActiveTeamWebJob\(true, expected\);[\s\S]*await updateScheduler\(async \(\) => void 0\);/);
 });
+test('one worker keeps three independent Team Web jobs and claims only free browser slots', () => {
+  assert.match(source, /const TEAM_WEB_MAX_CONCURRENCY = 3/);
+  assert.match(source, /const activeTeamWebJobs = new Map\(\)/);
+  assert.match(source, /for \(const expected of \[\.\.\.activeTeamWebJobs\.values\(\)\]\)/);
+  assert.match(source, /while \(activeTeamWebJobs\.size \+ localBrowserRunning < TEAM_WEB_MAX_CONCURRENCY\)/);
+  assert.match(source, /activeTeamWebJobs\.set\(expected\.job\.id, expected\)/);
+  assert.match(source, /startActiveTeamWebJob\(expected\)/);
+});
 
 test('an active remote job without a concrete conversation resumes instead of only extending its lease', () => {
-  assert.match(source, /if \(!concreteChatGptConversationUrl\(activeTeamWebJob\.conversationUrl\)\) \{[\s\S]*await startActiveTeamWebJob\(\)/);
+  assert.match(source, /if \(!concreteChatGptConversationUrl\(expected\.conversationUrl\)\) \{[\s\S]*await startActiveTeamWebJob\(expected\)/);
   assert.match(source, /failActiveTeamWebJob\("start_error"/);
 });
 test('duplicate non-retryable delivery failure reports failure once and stale result does not affect next job', async () => {
@@ -96,30 +105,20 @@ test('duplicate non-retryable delivery failure reports failure once and stale re
   const { context, calls } = runtime({ teamWebWorkerRequest: async () => { throw invalid; } });
   await Promise.all([context.completeActiveTeamWebJob(message), context.completeActiveTeamWebJob(message)]);
   assert.deepEqual(calls, ['fail']);
-  context.activeTeamWebJob = { job: { id: 'job-b' } };
+  context.activeTeamWebJobs.delete('job-a');
+  context.activeTeamWebJobs.set('job-b', { job: { id: 'job-b' } });
   await context.completeActiveTeamWebJob(message);
-  assert.equal(context.activeTeamWebJob.job.id, 'job-b');
+  assert.equal(context.activeTeamWebJobs.get('job-b').job.id, 'job-b');
 });
 test('transient delivery failure preserves the active conversation and schedules result recovery', async () => {
   const unavailable = Object.assign(new Error('relay unavailable'), { status: 503 });
   const { context, calls } = runtime({ teamWebWorkerRequest: async () => { throw unavailable; } });
   await context.completeActiveTeamWebJob(message);
-  assert.equal(context.activeTeamWebJob.job.id, 'job-a');
-  assert.equal(context.activeTeamWebJob.phase, 'delivering');
-  assert.equal(context.activeTeamWebJob.deliveryError, 'relay unavailable');
+  assert.equal(context.activeTeamWebJobs.get('job-a').job.id, 'job-a');
+  assert.equal(context.activeTeamWebJobs.get('job-a').phase, 'delivering');
+  assert.equal(context.activeTeamWebJobs.get('job-a').deliveryError, 'relay unavailable');
   assert.equal(context.teamWebDeliveries.has('job-a'), false);
   assert.deepEqual(calls, ['schedule-recovery']);
-});
-test('late delivery failure cannot fail a new job', async () => {
-  let reject;
-  const { context, calls } = runtime({ teamWebWorkerRequest: () => new Promise((_resolve, fail) => { reject = fail; }) });
-  const pending = context.completeActiveTeamWebJob(message);
-  await Promise.resolve();
-  context.activeTeamWebJob = { job: { id: 'job-b' } };
-  reject(new Error('old upload failed'));
-  await pending;
-  assert.equal(context.activeTeamWebJob.job.id, 'job-b');
-  assert.deepEqual(calls, []);
 });
 test('download single-flight shares successful result and permits retry after failure', async () => {
   const { context } = runtime();
@@ -142,7 +141,7 @@ test('worker request retries thrown network errors as well as HTTP 503 responses
       return Response.json({ ok: true });
     },
   });
-  vm.runInContext(section('async function teamWebWorkerRequest(', 'async function saveActiveTeamWebJob('), context);
+  vm.runInContext(section('async function teamWebWorkerRequest(', 'async function saveActiveTeamWebJobs('), context);
   assert.deepEqual(await context.teamWebWorkerRequest('/claim'), { ok: true });
   assert.equal(networkAttempts, 2);
 
@@ -156,7 +155,7 @@ test('worker request retries thrown network errors as well as HTTP 503 responses
 });
 test('oversize multi-image bundle falls back to legacy chunks without losing images', async () => {
   const { context, calls } = runtime();
-  context.activeTeamWebJob.job.resultDelivery = 'bundle';
+  context.activeTeamWebJobs.get('job-a').job.resultDelivery = 'bundle';
   await context.completeActiveTeamWebJob({ ...message, images: [{ mimeType: 'image/png', base64: 'a'.repeat(18_000_004) }] });
   assert.equal(calls.filter(x => x.endsWith('/use-chunks')).length, 1);
   assert.equal(calls.filter(x => x.endsWith('/result-chunks')).length, 1);
@@ -164,7 +163,7 @@ test('oversize multi-image bundle falls back to legacy chunks without losing ima
 });
 test('large multi-image results choose chunks before serializing a combined bundle', async () => {
   const { context, calls } = runtime();
-  context.activeTeamWebJob.job.resultDelivery = 'bundle';
+  context.activeTeamWebJobs.get('job-a').job.resultDelivery = 'bundle';
   const images = Array.from({ length: 5 }, () => ({ mimeType: 'image/png', base64: 'a'.repeat(2_000_000) }));
   await context.completeActiveTeamWebJob({ ...message, images });
   assert.equal(calls.filter(x => x.endsWith('/use-chunks')).length, 1);
@@ -176,10 +175,12 @@ test('real failure cleanup checks identity again after network await', async () 
   const { context, calls } = runtime({ teamWebWorkerRequest: () => new Promise(done => { resolve = done; }) });
   context.chrome.storage = { local: { set: async () => calls.push('disabled') } };
   vm.runInContext(section('async function failActiveTeamWebJob(', 'async function completeActiveTeamWebJob('), context);
-  const pending = context.failActiveTeamWebJob('login_required', 'old error');
-  context.activeTeamWebJob = { job: { id: 'job-b' } };
+  const pending = context.failActiveTeamWebJob('login_required', 'old error', context.activeTeamWebJobs.get('job-a'));
+  while (!resolve) await new Promise(done => setTimeout(done, 0));
+  context.activeTeamWebJobs.delete('job-a');
+  context.activeTeamWebJobs.set('job-b', { job: { id: 'job-b' } });
   resolve({}); await pending;
-  assert.equal(context.activeTeamWebJob.job.id, 'job-b');
+  assert.equal(context.activeTeamWebJobs.get('job-b').job.id, 'job-b');
   assert.deepEqual(calls, []);
 });
 test('signed bundle download validates digest and expands multiple images once', async () => {

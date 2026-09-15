@@ -68,7 +68,8 @@ test("structured commands can create team generation tasks", () => {
 
 test("remote team web jobs reuse the existing ChatGPT adapter and return chunks", () => {
   assert.match(background, /TEAM_WEB_PROJECT_ID = "pixel-flow-team-web-worker"/);
-  assert.match(background, /async function startActiveTeamWebJob\(\)/);
+  assert.match(background, /async function startActiveTeamWebJob\(active\)/);
+  assert.match(background, /TEAM_WEB_MAX_CONCURRENCY = 3/);
   assert.match(background, /sendWithCurrentChatGptAdapter\(chrome\.tabs, chrome\.scripting, mapped\.tabId, message\)/);
   assert.match(background, /async function handleTeamWebPageTaskMessage/);
   assert.match(background, /uploadTeamWebImage\(active\.job\.id, message\.images\[imageIndex\], "result-chunks"/);

@@ -22,8 +22,8 @@ test("container children keep five slots and stagger up to five ChatGPT Web laun
   assert.equal(MAX_CONCURRENCY, 5);
   assert.equal(MAX_BROWSER_CONCURRENCY, 5);
   assert.equal(BROWSER_LAUNCH_GAP_MS, 6_000);
-  assert.match(background, /let browserRunning = activeTeamWebJob \? 1 : 0/);
-  assert.doesNotMatch(background, /mode === "browser" && activeTeamWebJob/);
+  assert.match(background, /let browserRunning = activeTeamWebJobs\.size/);
+  assert.match(background, /const TEAM_WEB_MAX_CONCURRENCY = 3/);
   assert.match(background, /BROWSER_LAUNCH_GAP_MS - \(Date\.now\(\) - lastBrowserLaunchAt\)/);
   assert.match(background, /async function advanceQueueByMode\(\)/);
   assert.match(background, /mode === "browser" && browserRunning >= MAX_BROWSER_CONCURRENCY/);
