@@ -87,8 +87,8 @@ test('worker reconciliation clears a terminal persisted remote job before claimi
   assert.match(source, /teamWebWorkerRequest\(`\/jobs\/\$\{expected\.job\.id\}\/status`\)/);
   assert.match(source, /\["completed", "failed", "canceled"\]\.includes\(remote\.status\)[\s\S]*await clearActiveTeamWebJob\(true, expected\);[\s\S]*await updateScheduler\(async \(\) => void 0\);/);
 });
-test('one worker keeps three independent Team Web jobs and claims only free browser slots', () => {
-  assert.match(source, /const TEAM_WEB_MAX_CONCURRENCY = 3/);
+test('one worker keeps five independent Team Web jobs and claims only free browser slots', () => {
+  assert.match(source, /const TEAM_WEB_MAX_CONCURRENCY = 5/);
   assert.match(source, /const activeTeamWebJobs = new Map\(\)/);
   assert.match(source, /for \(const expected of \[\.\.\.activeTeamWebJobs\.values\(\)\]\)/);
   assert.match(source, /while \(activeTeamWebJobs\.size \+ localBrowserRunning < TEAM_WEB_MAX_CONCURRENCY\)/);
