@@ -192,6 +192,19 @@ test('signed bundle download validates digest and expands multiple images once',
   assert.equal(a.length, 2); assert.equal(a, b); assert.equal(requests, 1);
   await assert.rejects(context.downloadTeamGatewayImages({ ...job, id: 'bad', images: [{ ...job.images[0], sha256: 'tampered' }] }), /完整性/);
 });
+test('signed v2 bundle downloads each staged image and validates every checksum', async () => {
+  const manifest = { version: 2, images: [{ mimeType: 'image/png', downloadUrl: 'https://relay.example/results/a/0', byteLength: 5, sha256: 'image-ok' }] };
+  const { context } = runtime({
+    fetch: async url => String(url).endsWith('/manifest') ? new Response(JSON.stringify(manifest)) : new Response('hello', { headers: { 'Content-Type': 'image/png' } }),
+    sha256Hex: async value => value.byteLength === 5 ? 'image-ok' : 'manifest-ok',
+    bytesToBase64: () => 'aGVsbG8=',
+  });
+  vm.runInContext(section('async function downloadTeamGatewayImages(', 'async function createTeamPreview('), context);
+  const images = await context.downloadTeamGatewayImages({ id: 'v2', images: [{ mimeType: 'application/vnd.pixel-flow.images+json', downloadUrl: 'https://relay.example/manifest', sha256: 'manifest-ok' }] });
+  assert.equal(images.length, 1);
+  assert.equal(images[0].mimeType, 'image/png');
+  assert.equal(images[0].base64, 'aGVsbG8=');
+});
 
 test('signed result prefers the authenticated taskbox proxy over the workers.dev URL', async () => {
   const bundle = { version: 1, images: [message.images[0]] };

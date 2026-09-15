@@ -414,8 +414,18 @@ async function downloadTeamGatewayImagesOnce(job) {
       }
       if (image.mimeType === "application/vnd.pixel-flow.images+json") {
         const bundle = JSON.parse(new TextDecoder().decode(buffer));
-        if (bundle.version !== 1 || !Array.isArray(bundle.images) || bundle.images.length < 1 || bundle.images.length > 10 || bundle.images.some(item => !/^image\/(png|jpeg|webp)$/.test(item.mimeType) || typeof item.base64 !== "string" || !/^[A-Za-z0-9+/]+={0,2}$/.test(item.base64))) throw new Error("团队结果包格式无效");
-        return bundle.images;
+        if (!Array.isArray(bundle.images) || bundle.images.length < 1 || bundle.images.length > 10) throw new Error("团队结果包格式无效");
+        if (bundle.version === 1 && bundle.images.every(item => /^image\/(png|jpeg|webp)$/.test(item.mimeType) && typeof item.base64 === "string" && /^[A-Za-z0-9+/]+={0,2}$/.test(item.base64))) return bundle.images;
+        if (bundle.version === 2 && bundle.images.every(item => /^image\/(png|jpeg|webp)$/.test(item.mimeType) && typeof item.downloadUrl === "string" && item.downloadUrl.startsWith("https://") && Number.isInteger(item.byteLength) && typeof item.sha256 === "string")) {
+          return Promise.all(bundle.images.map(async item => {
+            const response = await fetch(item.downloadUrl, { cache: "no-store" });
+            if (!response.ok) throw new Error(`团队生图图片下载返回 HTTP ${response.status}`);
+            const imageBuffer = await response.arrayBuffer();
+            if (imageBuffer.byteLength !== item.byteLength || await sha256Hex(imageBuffer) !== item.sha256) throw new Error("团队生图图片完整性校验失败");
+            return { base64: bytesToBase64(imageBuffer), mimeType: item.mimeType };
+          }));
+        }
+        throw new Error("团队结果包格式无效");
       }
       return [{ base64: bytesToBase64(buffer), mimeType: image.mimeType || response.headers.get("Content-Type") || "image/png" }];
     }
