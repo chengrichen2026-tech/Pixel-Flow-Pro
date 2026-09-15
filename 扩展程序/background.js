@@ -5431,6 +5431,18 @@ async function uploadTeamWebImage(jobId, image, endpoint, imageIndex, name) {
 		if (chunkIndex + 1 < totalChunks) await new Promise((resolveWait) => setTimeout(resolveWait, TEAM_GATEWAY_CHUNK_PACE_MS));
 	}
 }
+async function uploadTeamWebResultImage(jobId, image, imageIndex, resultCount) {
+	const mimeType = image.mimeType || "image/png";
+	if (!/^image\/(png|jpeg|webp)$/.test(mimeType)) throw new Error("网页生图结果格式无效");
+	await teamWebWorkerRequest(`/jobs/${jobId}/result-images/${imageIndex}`, {
+		method: "POST",
+		headers: {
+			"Content-Type": mimeType,
+			"X-Pixel-Result-Count": String(resultCount)
+		},
+		body: base64ToBytes(image.base64)
+	});
+}
 async function clearActiveTeamWebJob(closeTab = true, expected) {
 	if (!expected || activeTeamWebJobs.get(expected.job.id) !== expected) return;
 	const key = activeTeamWebKey(expected);
@@ -5499,15 +5511,7 @@ async function deliverTeamWebJob(message, active) {
 	active.phase = "delivering";
 	await saveActiveTeamWebJobs();
 	const shouldUseBundle = active.job.resultDelivery === "bundle" && estimatedTeamWebBundleBytes(message.images) <= TEAM_WEB_SAFE_BUNDLE_BYTES;
-	if (active.job.resultDelivery === "bundle" && !shouldUseBundle) {
-		await teamWebWorkerRequest(`/jobs/${active.job.id}/use-chunks`, {
-			method: "POST",
-			body: "{}"
-		});
-		active.job.resultDelivery = "chunks";
-		await saveActiveTeamWebJobs();
-	}
-	if (active.job.resultDelivery === "bundle") {
+	if (active.job.resultDelivery === "bundle" && shouldUseBundle) {
 		const bundleBody = JSON.stringify({
 			version: 1,
 			images: message.images
@@ -5516,8 +5520,14 @@ async function deliverTeamWebJob(message, active) {
 			method: "POST",
 			body: bundleBody
 		});
+	} else if (active.job.resultDelivery === "bundle") {
+		await Promise.all(message.images.map((image, imageIndex) => uploadTeamWebResultImage(active.job.id, image, imageIndex, message.images.length)));
+		await teamWebWorkerRequest(`/jobs/${active.job.id}/result-images/complete`, {
+			method: "POST",
+			body: JSON.stringify({ resultCount: message.images.length })
+		});
 	} else for (let imageIndex = 0; imageIndex < message.images.length; imageIndex += 1) await uploadTeamWebImage(active.job.id, message.images[imageIndex], "result-chunks", imageIndex, `result-${imageIndex + 1}.png`);
-	if (active.job.resultDelivery !== "bundle") await teamWebWorkerRequest(`/jobs/${active.job.id}/complete`, {
+	if (active.job.resultDelivery === "chunks") await teamWebWorkerRequest(`/jobs/${active.job.id}/complete`, {
 		method: "POST",
 		body: JSON.stringify({ resultCount: message.images.length })
 	});

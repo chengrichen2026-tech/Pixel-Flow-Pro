@@ -23,6 +23,7 @@ function runtime(overrides = {}) {
       return bytes;
     },
     teamWebWorkerRequest: async (path) => { calls.push(path); return {}; },
+    base64ToBytes: () => new Uint8Array([1]),
     saveActiveTeamWebJobs: async () => {},
     createTeamPreview: async () => null,
     uploadTeamWebImage: async (id, _image, endpoint) => { calls.push(`${id}/${endpoint}`); },
@@ -34,6 +35,7 @@ function runtime(overrides = {}) {
     ...overrides,
   });
   vm.runInContext(section('function singleFlight(', 'var teamWebWorkerReady'), context);
+  vm.runInContext(section('async function uploadTeamWebResultImage(', 'async function clearActiveTeamWebJob('), context);
   vm.runInContext(section('async function completeActiveTeamWebJob(', 'async function handleTeamWebPageTaskMessage('), context);
   return { context, calls };
 }
@@ -165,22 +167,24 @@ test('worker request retries thrown network errors as well as HTTP 503 responses
   await assert.rejects(context.teamWebWorkerRequest('/claim'), error => error.status === 503);
   assert.equal(unavailableAttempts, 5);
 });
-test('oversize multi-image bundle falls back to legacy chunks without losing images', async () => {
+test('oversize bundle uploads a whole image instead of falling back to chunks', async () => {
   const { context, calls } = runtime();
   context.activeTeamWebJobs.get('job-a').job.resultDelivery = 'bundle';
   await context.completeActiveTeamWebJob({ ...message, images: [{ mimeType: 'image/png', base64: 'a'.repeat(18_000_004) }] });
-  assert.equal(calls.filter(x => x.endsWith('/use-chunks')).length, 1);
-  assert.equal(calls.filter(x => x.endsWith('/result-chunks')).length, 1);
+  assert.equal(calls.filter(x => /\/result-images\/\d+$/.test(x)).length, 1);
+  assert.equal(calls.filter(x => x.endsWith('/result-images/complete')).length, 1);
+  assert.equal(calls.filter(x => x.endsWith('/result-chunks')).length, 0);
   assert.equal(calls.filter(x => x.endsWith('/result-bundle')).length, 0);
 });
-test('large multi-image results choose chunks before serializing a combined bundle', async () => {
+test('large multi-image results upload every image whole before publishing a signed manifest', async () => {
   const { context, calls } = runtime();
   context.activeTeamWebJobs.get('job-a').job.resultDelivery = 'bundle';
   const images = Array.from({ length: 5 }, () => ({ mimeType: 'image/png', base64: 'a'.repeat(2_000_000) }));
   await context.completeActiveTeamWebJob({ ...message, images });
-  assert.equal(calls.filter(x => x.endsWith('/use-chunks')).length, 1);
+  assert.equal(calls.filter(x => /\/result-images\/\d+$/.test(x)).length, 5);
+  assert.equal(calls.filter(x => x.endsWith('/result-images/complete')).length, 1);
   assert.equal(calls.filter(x => x.endsWith('/result-bundle')).length, 0);
-  assert.equal(calls.filter(x => x.endsWith('/result-chunks')).length, 5);
+  assert.equal(calls.filter(x => x.endsWith('/result-chunks')).length, 0);
 });
 test('real failure cleanup checks identity again after network await', async () => {
   let resolve;
