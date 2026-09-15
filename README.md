@@ -8,7 +8,7 @@ Pixel Flow 是一个运行在 Chrome / Edge 中的本地 AI 创意任务画布�
 
 ## 当前版本
 
-当前版本为 **v0.3.14**。任务卡恢复紧凑的单一“生图模式”入口，只显示三个主模式：
+当前版本为 **v0.3.15**。任务卡恢复紧凑的单一“生图模式”入口，只显示三个主模式：
 
 | 主模式 | 二级选择 | 底层兼容值 |
 | --- | --- | --- |
@@ -49,8 +49,8 @@ GPT Web 选择“团队”即原 Team Web 链路。已有画布继续读取 `api
 
 - **API**：通过本机 `127.0.0.1:43129` API Worker 调用 `aihub.rbmanon.cn`，模型固定为 `gpt-image-2`、质量 `medium`。纯文字走 `generations`，参考图走 JSON Base64 `edits`。
 - **GPT Web · 本机**：使用当前浏览器已登录的 ChatGPT，新建或恢复真实对话，上传参考图、发送提示词并把结果写回画布。
-- **GPT Web · 团队**：任务进入妙搭任务箱，由已配对且登录 ChatGPT 的远端 Pixel Flow 执行机领取。协议 v6 优先使用带字节数与 SHA-256 校验的结果 bundle，超大结果回退分块；协议 v8 支持提交方取消。
-- **Team Cloud**：通过妙搭任务箱、Cloudflare Queue / Worker 和服务端 Codex OAuth 生图；可选 Flare / Sunburst，伙伴只保存平台访问 Key 和成员令牌。
+- **GPT Web · 团队**：成员任务进入妙搭任务箱，由团队中任意一台已配对且在线的远端 Pixel Flow 执行机领取；提交电脑本身无需配对。该模式不消耗 Team Cloud 每日额度。协议 v6 优先使用带字节数与 SHA-256 校验的结果 bundle，超大结果回退分块；协议 v8 支持提交方取消。
+- **Team Cloud**：通过妙搭任务箱、Cloudflare Queue / Worker 和服务端 Codex OAuth 生图；可选 Flare / Sunburst，成员浏览器只保存成员令牌，平台访问 Key 由中继托管。
 
 Team Web 的性能与验收记录见 [TEAM_WEB_PERFORMANCE.md](TEAM_WEB_PERFORMANCE.md)。旧本机 Team Gateway / Quick Tunnel 仍是兼容路径，不是新伙伴的推荐方案。
 
@@ -64,7 +64,7 @@ Team Web 的性能与验收记录见 [TEAM_WEB_PERFORMANCE.md](TEAM_WEB_PERFORMA
 6. 在任务卡选择 GPT Web、Team Cloud 或 API；再按模式选择 GPT Web 的本机/团队或 Team Cloud 的 Flare/Sunburst，并设置比例与提示词。
 7. 点击“运行任务”，按任务卡状态等待结果写回。
 
-首次配置统一从顶部 **生图设置** 进入：个人 API、团队提交凭证和网页生图机配对分别保存，凭证只保存在当前浏览器本地。
+首次配置统一从顶部 **生图设置** 进入：个人 API、团队成员令牌和本机网页生图机配对分别保存，凭证只保存在当前浏览器本地。团队任务箱地址已内置，平台访问 Key 由安全中继托管；普通成员无需把本机配对成执行机。
 
 ## 备份与数据
 

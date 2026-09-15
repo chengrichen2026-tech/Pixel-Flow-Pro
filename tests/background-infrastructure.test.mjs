@@ -43,6 +43,16 @@ test("extension protocol rejects incomplete task messages", () => {
   assert.equal(isExtensionMessage({ type: "RUN_TASKS", projectId: "p", taskIds: [] }), false);
   assert.equal(isExtensionMessage({ type: "RUN_TASK", projectId: "p" }), false);
   assert.equal(isExtensionMessage({ type: "HIBERNATE_TASK_TABS", projectId: "p", taskIds: ["t"] }), true);
+  assert.equal(isExtensionMessage({ type: "TASK_RESULT", projectId: "p", taskId: "t", images: [] }), true);
+  assert.equal(isExtensionMessage({ type: "TASK_RESULT", projectId: "p", taskId: "t", images: [{ base64: "aGVsbG8=", mimeType: "image/png" }] }), true);
+  assert.equal(isExtensionMessage({ type: "TASK_RESULT", projectId: "p", taskId: "t", images: [{}] }), false);
+  assert.equal(isExtensionMessage({ type: "TASK_RESULT", projectId: "p", taskId: "t" }), false);
+  assert.equal(isExtensionMessage({ type: "TASK_STATUS", projectId: "p", taskId: "t", status: "generating" }), true);
+  assert.equal(isExtensionMessage({ type: "TASK_STATUS", projectId: "p", taskId: "t", status: "mystery" }), false);
+  assert.equal(isExtensionMessage({ type: "DOWNLOAD_ASSET", projectId: "p", taskId: "t", assetId: "a" }), true);
+  assert.equal(isExtensionMessage({ type: "DOWNLOAD_ASSET", projectId: "p", taskId: "t" }), false);
+  assert.equal(isExtensionMessage({ type: "SHOW_NOTIFICATION", projectId: "p", taskId: "t", title: "done", message: "ok" }), true);
+  assert.equal(isExtensionMessage({ type: "SHOW_NOTIFICATION", projectId: "p", taskId: "t", title: "done" }), false);
   assert.equal(isExtensionMessage({ type: "unknown", projectId: "p", taskId: "t" }), false);
 });
 

@@ -1,27 +1,31 @@
-type GatewaySettings = { baseUrl: string; token: string; memberToken: string };
+import { DEFAULT_TEAM_RELAY_URL } from "../team-settings";
+
+type GatewaySettings = { baseUrl: string; memberToken: string };
 type GatewayErrorPayload = { error?: string | { message?: string }; message?: string };
 
 export async function teamGatewaySettings(): Promise<GatewaySettings> {
-  const values = await chrome.storage.local.get(["pixelFlowTeamGatewayUrl", "pixelFlowTeamToken", "pixelFlowTeamMemberToken"]);
-  const baseUrl = typeof values.pixelFlowTeamGatewayUrl === "string" ? values.pixelFlowTeamGatewayUrl.trim().replace(/\/$/, "") : "";
-  const token = typeof values.pixelFlowTeamToken === "string" ? values.pixelFlowTeamToken.trim() : "";
+  const values = await chrome.storage.local.get("pixelFlowTeamMemberToken");
   const memberToken = typeof values.pixelFlowTeamMemberToken === "string" ? values.pixelFlowTeamMemberToken.trim() : "";
-  if (!/^https?:\/\//.test(baseUrl) || !token || !memberToken) throw new Error("请先在“生图设置”中保存团队网关地址、平台访问 Key 和成员令牌");
-  return { baseUrl, token, memberToken };
+  if (!/^pfm_[A-Za-z0-9_-]{32,64}$/.test(memberToken)) throw new Error("请先在“生图设置”中保存成员令牌");
+  return { baseUrl: DEFAULT_TEAM_RELAY_URL, memberToken };
+}
+
+function gatewayErrorMessage(payload: GatewayErrorPayload) {
+  return typeof payload.error === "string" ? payload.error : payload.error?.message || payload.message || "";
 }
 
 export async function teamGatewayRequest<T = Record<string, unknown>>(path: string, options: RequestInit = {}): Promise<T> {
-  const { baseUrl, token, memberToken } = await teamGatewaySettings();
+  const { baseUrl, memberToken } = await teamGatewaySettings();
   for (let attempt = 0; attempt < 7; attempt += 1) {
     let response: Response;
     try {
-      response = await fetch(`${baseUrl}${path}`, { ...options, headers: { Authorization: `Bearer ${token}`, "X-Pixel-Member-Token": memberToken, ...(options.headers || {}) } });
+      response = await fetch(`${baseUrl}/team${path}`, { ...options, headers: { "X-Pixel-Member-Token": memberToken, ...(options.headers || {}) } });
     } catch {
-      throw new Error("无法连接团队生图服务，请检查网关地址、网络和服务状态");
+      throw new Error("无法连接团队生图服务，请检查网络和服务状态");
     }
     const payload = await response.json().catch(() => ({})) as T & GatewayErrorPayload;
     if (response.ok) return payload;
-    const payloadMessage = typeof payload.error === "string" ? payload.error : payload.error?.message || payload.message || "";
+    const payloadMessage = gatewayErrorMessage(payload);
     if (response.status === 429 && /额度/.test(payloadMessage)) throw new Error(payloadMessage);
     if (response.status === 401) throw new Error(payloadMessage || "成员令牌无效、已停用或已重置");
     if (response.status === 429 && attempt < 6) {
@@ -41,17 +45,17 @@ export async function cancelTeamGatewayJob(jobId: string): Promise<unknown> {
       return await teamGatewayRequest(`/jobs/${jobId}/cancel`, { method: "POST" });
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
-      if (detail !== "无法连接团队生图服务，请检查网关地址、网络和服务状态" || attempt === 2) throw error;
+      if (detail !== "无法连接团队生图服务，请检查网络和服务状态" || attempt === 2) throw error;
       await new Promise(resolve => setTimeout(resolve, 500 * 2 ** attempt));
     }
   }
 }
 
 export async function teamGatewayResultRequest(path: string): Promise<Response> {
-  const { baseUrl, token, memberToken } = await teamGatewaySettings();
+  const { baseUrl, memberToken } = await teamGatewaySettings();
   let response: Response;
   try {
-    response = await fetch(`${baseUrl}${path}`, { cache: "no-store", headers: { Authorization: `Bearer ${token}`, "X-Pixel-Member-Token": memberToken } });
+    response = await fetch(`${baseUrl}/team${path}`, { cache: "no-store", headers: { "X-Pixel-Member-Token": memberToken } });
   } catch {
     throw new Error("无法通过团队任务箱下载结果");
   }

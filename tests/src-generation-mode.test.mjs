@@ -13,7 +13,7 @@ test("rebuilt tasks own generation mode instead of requiring DOM injection", asy
   assert.match(types, /export type TeamImageModel = "flare" \| "sunburst"/);
   assert.match(types, /teamImageModel\?: TeamImageModel/);
   assert.match(types, /apiJobId\?: string/);
-  assert.match(store, /generationMode:"api"/);
+  assert.match(store, /await hasTeamGateway\(\)\?"team_web":"api"/);
   assert.match(app, /aria-label="生图模式"/);
   assert.match(app, /<option value="gpt_web">GPT Web<\/option>/);
   assert.match(app, /<option value="team_cloud">Team Cloud<\/option>/);
@@ -63,7 +63,7 @@ test("rebuilt API settings use the same local storage contract", async () => {
   assert.match(app, /https:\/\/aihub\.rbmanon\.cn\/v1/);
 });
 
-test("team settings keep member credentials local and request only the configured origin", async () => {
+test("team settings keep only member identity locally and use the fixed shared relay", async () => {
   const settings = await readFile(new URL("src/team-settings.ts", root), "utf8");
   const manifest = await readFile(new URL("public/manifest.json", root), "utf8");
   const app = await readFile(new URL("src/App.tsx", root), "utf8");
@@ -71,12 +71,15 @@ test("team settings keep member credentials local and request only the configure
   assert.match(settings, /pixelFlowTeamToken/);
   assert.match(settings, /pixelFlowTeamMemberToken/);
   assert.match(settings, /pfm_/);
-  assert.match(settings, /settings\.url && settings\.token && settings\.memberToken/);
-  assert.match(settings, /chrome\.permissions\.contains\(permission\) \|\| await chrome\.permissions\.request\(permission\)/);
+  assert.match(settings, /DEFAULT_TEAM_RELAY_URL/);
+  assert.match(settings, /\/team\$\{path\}/);
+  assert.match(settings, /readTeamWebAvailability/);
   assert.match(settings, /chrome\.storage\.local\.set/);
-  assert.match(settings, /旧本机网关仅支持 127\.0\.0\.1:43130/);
+  assert.match(settings, /chrome\.storage\.local\.remove\(TEAM_TOKEN_STORAGE\)/);
   assert.match(manifest, /"optional_host_permissions": \["https:\/\/\*\/\*"\]/);
-  assert.match(app, /平台访问 Key/);
+  assert.doesNotMatch(app, /平台访问 Key/);
+  assert.match(app, /团队任务箱由系统自动连接/);
+  assert.match(app, /共享执行机在线/);
   assert.match(app, /成员令牌/);
 });
 

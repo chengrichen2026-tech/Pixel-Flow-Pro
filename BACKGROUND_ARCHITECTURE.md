@@ -30,9 +30,11 @@
 
 - 源码 33 个 TypeScript/TSX 文件、57 条相对导入；依赖检查未发现循环依赖。
 - Service Worker 由 2055 行降至 1419 行。
-- 抽出的模块全部接受严格 TypeScript 检查；全量 191 项测试、生产构建和真实扩展连接回读通过。
+- 抽出的模块全部接受严格 TypeScript 检查；全量 195 项测试与生产构建通过。Chrome 消息入口已从宽泛 `Record<string, unknown>` 收窄为可判别的 `ExtensionMessage` 联合，并对结果、下载和通知消息增加字段级运行时校验。
 - API、Browser、Team Cloud真实完成结果闭环；Team Web完成重载恢复和云端取消闭环。
 
 ## 剩余边界
 
-`service-worker.ts` 仍是唯一带 `@ts-nocheck` 的源码文件。画布结果应用错误簇已通过 `generation-projector.ts` 消除；剩余错误集中在 Team Web 执行机编排和 Chrome 消息分发。下一轮应继续建立输入输出类型；禁止用批量 `any` 或宽松 ambient 声明消除报错。
+`service-worker.ts` 仍是唯一带 `@ts-nocheck` 的源码文件。画布结果应用错误簇已通过 `generation-projector.ts` 消除；Chrome 消息协议边界已经类型化，剩余错误主要集中在 Team Web 执行机编排、任务箱 JSON 响应和组合根内部函数参数。下一轮应先为任务箱响应建立解析器，再移除组合根豁免；禁止用批量 `any` 或宽松 ambient 声明消除报错。
+
+前端生产构建已按 React、画布引擎、图标、状态存储和其余第三方依赖拆分稳定 chunk，同时保持单一入口 CSS，避免手工维护的扩展 HTML 漏载样式。主业务入口由 569.07 kB 降至 76.86 kB；依赖总体积没有被伪装成删除，收益主要是缓存复用、入口解析和后续按模块继续减重。

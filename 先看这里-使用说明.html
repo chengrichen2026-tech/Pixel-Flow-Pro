@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Pixel Flow v0.3.14 使用说明（2026-09-15 更新）</title>
+  <title>Pixel Flow v0.3.15 使用说明（2026-09-15 更新）</title>
   <link rel="icon" href="扩展程序/icon.svg">
   <style>
     :root {
@@ -210,7 +210,7 @@
       <h1>Pixel Flow<br>使用说明</h1>
       <p class="lead">把图片、文字、任务和生成结果放进一张无限画布。任务卡只保留 GPT Web、Team Cloud 和 API 三个主模式。</p>
       <div class="badges">
-        <span class="badge">版本 <strong>0.3.14</strong></span>
+        <span class="badge">版本 <strong>0.3.15</strong></span>
         <span class="badge">支持 Chrome / Edge</span>
         <span class="badge">图片容器与批量结果</span>
         <span class="badge">本地保存画布</span>
@@ -326,7 +326,7 @@
     <section id="generation">
       <h2>五、三个模式</h2>
       <div class="grid">
-        <div class="card"><h3>GPT Web</h3><p>选择“本机”时使用当前浏览器已登录的 ChatGPT；选择“团队”时由已配对且正在接单的远端网页生图机执行。</p></div>
+        <div class="card"><h3>GPT Web</h3><p>选择“本机”时使用当前浏览器已登录的 ChatGPT；选择“团队”时由团队中任意已配对且在线的网页生图机执行，提交电脑无需配对，也不消耗 Team Cloud 每日额度。</p></div>
         <div class="card"><h3>Team Cloud</h3><p>使用团队任务箱和服务端 Codex OAuth，可选择 Flare 或 Sunburst；伙伴不需要主账号登录态。</p></div>
         <div class="card"><h3>API</h3><p>模型固定为 gpt-image-2。通过本机 API Worker 提交持久任务；纯文字走 generations，参考图走 JSON Base64 edits。</p></div>
       </div>
@@ -350,7 +350,8 @@
     <section id="team">
       <h2>六、团队生图</h2>
       <div class="steps">
-        <div class="step"><b>配置提交凭证</b>在“生图设置 → 团队生图”填写任务箱地址、平台访问 Key 和成员令牌。</div>
+        <div class="step"><b>保存成员令牌</b>在“生图设置 → 团队成员”填写成员令牌。任务箱地址已内置，平台访问 Key 由安全中继托管。</div>
+        <div class="step"><b>使用共享执行机</b>团队中任意一台在线执行机都可接单，提交电脑无需配对；GPT Web 团队任务不消耗 Team Cloud 每日额度。</div>
         <div class="step"><b>使用 Team Cloud</b>任务卡主模式选择“Team Cloud”，再选择 Flare 或 Sunburst。</div>
         <div class="step"><b>使用团队 GPT Web</b>主模式选择“GPT Web”，位置选择“团队”；管理员需先在任务箱生成配对码，执行机在“网页生图执行机”中完成配对并保持接单。</div>
         <div class="step"><b>观察任务状态</b>等待上线、执行机忙、需要手动处理、正在生成和正在写回都会单独显示；任务可取消。</div>
@@ -395,9 +396,9 @@
       <ul>
         <li>工具使用你自己已经登录的 ChatGPT 网页账号，不读取或保存 ChatGPT 密码。</li>
         <li>画布、连线和图片保存在安装该扩展的浏览器本地数据库中。</li>
-        <li>ChatGPT Web 访问 <code>chatgpt.com</code>；API Key 模式访问配置的 API 网关；团队模式访问配置的任务箱和结果中继。</li>
+        <li>ChatGPT Web 本机模式访问 <code>chatgpt.com</code>；API Key 模式访问配置的 API 网关；团队模式访问内置的固定安全中继。</li>
         <li>API Key、团队凭证和网页生图机令牌只保存在当前浏览器本地。</li>
-        <li>Team Cloud / Team Web 会把提示词和参考图发送到配置的团队任务箱。</li>
+        <li>Team Cloud / Team Web 会把提示词和参考图经固定中继发送到团队任务箱；成员浏览器不保存平台访问 Key。</li>
         <li>工具不会绕过 ChatGPT 的登录、验证码、套餐限制或使用次数限制。</li>
         <li>ChatGPT 网页改版后，网页识别规则可能需要更新。</li>
       </ul>
@@ -410,7 +411,7 @@
       <div class="notice"><strong>安全边界：</strong>Bridge 只监听本机 <code>127.0.0.1:43128</code>。Codex 可读取画布、管理和执行任务、恢复团队结果、读取 TaskRun、导入资产库及下载图片；写操作必须带唯一 requestId 和最新 expectedRevision。详细命令见 <code>COMMAND_API.md</code>。</div>
     </section>
 
-    <footer>Pixel Flow · AI 创意任务画布 · v0.3.14 · 2026-09-15 · macOS / Windows</footer>
+    <footer>Pixel Flow · AI 创意任务画布 · v0.3.15 · 2026-09-15 · macOS / Windows</footer>
   </div>
 </body>
 </html>

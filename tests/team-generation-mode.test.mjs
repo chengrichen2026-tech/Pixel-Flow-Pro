@@ -10,11 +10,11 @@ const mcp = await readFile(new URL("tools/pixel-flow-mcp/server.mjs", root), "ut
 
 test("team mode sends authenticated jobs without exposing Codex OAuth to the extension", () => {
   assert.match(background, /async function teamGatewaySettings\(\)/);
-  assert.match(background, /pixelFlowTeamGatewayUrl/);
-  assert.match(background, /pixelFlowTeamToken/);
   assert.match(background, /pixelFlowTeamMemberToken/);
-  assert.match(background, /headers: \{ Authorization: `Bearer \$\{token\}`/);
   assert.match(background, /"X-Pixel-Member-Token": memberToken/);
+  assert.match(background, /DEFAULT_TEAM_RELAY_URL/);
+  assert.match(background, /`\$\{baseUrl\}\/team\$\{path\}`/);
+  assert.doesNotMatch(background, /Authorization: `Bearer \$\{token\}`/);
   assert.match(background, /async function executeTeamTask\(projectId, taskId, project, task\)/);
   assert.match(background, /requestId: `\$\{projectId\}:\$\{taskId\}:\$\{Date\.now\(\)\}`/);
   assert.match(background, /async function submitTeamGatewayJob\(input\)/);

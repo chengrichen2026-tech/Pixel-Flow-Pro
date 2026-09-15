@@ -4388,11 +4388,32 @@ var taskTypes = /* @__PURE__ */ new Set([
 	"EXECUTE_IN_CHATGPT_V2",
 	"EXECUTE_IN_CHATGPT_V3"
 ]);
+var taskStatuses = /* @__PURE__ */ new Set([
+	"idle",
+	"queued",
+	"waiting_page",
+	"uploading",
+	"sending",
+	"generating",
+	"completed",
+	"failed",
+	"manual_action"
+]);
+var isGenerationImage = (value) => {
+	if (!value || typeof value !== "object") return false;
+	const image = value;
+	return typeof image.base64 === "string" && (image.mimeType === void 0 || typeof image.mimeType === "string") && (image.name === void 0 || typeof image.name === "string");
+};
 function isExtensionMessage(value) {
 	if (!value || typeof value !== "object") return false;
 	const message = value;
 	if (message.type === "HIBERNATE_TASK_TABS") return typeof message.projectId === "string" && Array.isArray(message.taskIds) && message.taskIds.every((taskId) => typeof taskId === "string");
 	if (message.type === "RUN_TASKS") return typeof message.projectId === "string" && Array.isArray(message.taskIds) && message.taskIds.length > 0 && message.taskIds.every((taskId) => typeof taskId === "string");
+	if (message.type === "DOWNLOAD_ASSET") return typeof message.projectId === "string" && typeof message.taskId === "string" && typeof message.assetId === "string";
+	if (message.type === "SHOW_NOTIFICATION") return typeof message.projectId === "string" && typeof message.taskId === "string" && typeof message.title === "string" && typeof message.message === "string";
+	if (message.type === "TASK_RESULT") return typeof message.projectId === "string" && typeof message.taskId === "string" && Array.isArray(message.images) && message.images.every(isGenerationImage);
+	if (message.type === "TASK_STATUS") return typeof message.projectId === "string" && typeof message.taskId === "string" && taskStatuses.has(message.status);
+	if (message.type === "TASK_ERROR") return typeof message.projectId === "string" && typeof message.taskId === "string" && typeof message.reason === "string";
 	return typeof message.type === "string" && taskTypes.has(message.type) && typeof message.projectId === "string" && typeof message.taskId === "string";
 }
 //#endregion
@@ -4653,42 +4674,40 @@ async function waitForApiWorkerJob(jobId) {
 	}
 }
 //#endregion
+//#region src/team-settings.ts
+var DEFAULT_TEAM_RELAY_URL = "https://pixel-flow-codex-relay.pixel-flow-codex-relay.workers.dev";
+//#endregion
 //#region src/background/team-gateway-http.ts
 async function teamGatewaySettings() {
-	const values = await chrome.storage.local.get([
-		"pixelFlowTeamGatewayUrl",
-		"pixelFlowTeamToken",
-		"pixelFlowTeamMemberToken"
-	]);
-	const baseUrl = typeof values.pixelFlowTeamGatewayUrl === "string" ? values.pixelFlowTeamGatewayUrl.trim().replace(/\/$/, "") : "";
-	const token = typeof values.pixelFlowTeamToken === "string" ? values.pixelFlowTeamToken.trim() : "";
+	const values = await chrome.storage.local.get("pixelFlowTeamMemberToken");
 	const memberToken = typeof values.pixelFlowTeamMemberToken === "string" ? values.pixelFlowTeamMemberToken.trim() : "";
-	if (!/^https?:\/\//.test(baseUrl) || !token || !memberToken) throw new Error("请先在“生图设置”中保存团队网关地址、平台访问 Key 和成员令牌");
+	if (!/^pfm_[A-Za-z0-9_-]{32,64}$/.test(memberToken)) throw new Error("请先在“生图设置”中保存成员令牌");
 	return {
-		baseUrl,
-		token,
+		baseUrl: DEFAULT_TEAM_RELAY_URL,
 		memberToken
 	};
 }
+function gatewayErrorMessage(payload) {
+	return typeof payload.error === "string" ? payload.error : payload.error?.message || payload.message || "";
+}
 async function teamGatewayRequest(path, options = {}) {
-	const { baseUrl, token, memberToken } = await teamGatewaySettings();
+	const { baseUrl, memberToken } = await teamGatewaySettings();
 	for (let attempt = 0; attempt < 7; attempt += 1) {
 		let response;
 		try {
-			response = await fetch(`${baseUrl}${path}`, {
+			response = await fetch(`${baseUrl}/team${path}`, {
 				...options,
 				headers: {
-					Authorization: `Bearer ${token}`,
 					"X-Pixel-Member-Token": memberToken,
 					...options.headers || {}
 				}
 			});
 		} catch {
-			throw new Error("无法连接团队生图服务，请检查网关地址、网络和服务状态");
+			throw new Error("无法连接团队生图服务，请检查网络和服务状态");
 		}
 		const payload = await response.json().catch(() => ({}));
 		if (response.ok) return payload;
-		const payloadMessage = typeof payload.error === "string" ? payload.error : payload.error?.message || payload.message || "";
+		const payloadMessage = gatewayErrorMessage(payload);
 		if (response.status === 429 && /额度/.test(payloadMessage)) throw new Error(payloadMessage);
 		if (response.status === 401) throw new Error(payloadMessage || "成员令牌无效、已停用或已重置");
 		if (response.status === 429 && attempt < 6) {
@@ -4705,20 +4724,17 @@ async function cancelTeamGatewayJob(jobId) {
 	for (let attempt = 0; attempt < 3; attempt += 1) try {
 		return await teamGatewayRequest(`/jobs/${jobId}/cancel`, { method: "POST" });
 	} catch (error) {
-		if ((error instanceof Error ? error.message : String(error)) !== "无法连接团队生图服务，请检查网关地址、网络和服务状态" || attempt === 2) throw error;
+		if ((error instanceof Error ? error.message : String(error)) !== "无法连接团队生图服务，请检查网络和服务状态" || attempt === 2) throw error;
 		await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** attempt));
 	}
 }
 async function teamGatewayResultRequest(path) {
-	const { baseUrl, token, memberToken } = await teamGatewaySettings();
+	const { baseUrl, memberToken } = await teamGatewaySettings();
 	let response;
 	try {
-		response = await fetch(`${baseUrl}${path}`, {
+		response = await fetch(`${baseUrl}/team${path}`, {
 			cache: "no-store",
-			headers: {
-				Authorization: `Bearer ${token}`,
-				"X-Pixel-Member-Token": memberToken
-			}
+			headers: { "X-Pixel-Member-Token": memberToken }
 		});
 	} catch {
 		throw new Error("无法通过团队任务箱下载结果");

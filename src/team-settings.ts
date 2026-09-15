@@ -2,64 +2,68 @@ const TEAM_GATEWAY_URL_STORAGE = "pixelFlowTeamGatewayUrl";
 const TEAM_TOKEN_STORAGE = "pixelFlowTeamToken";
 const TEAM_MEMBER_TOKEN_STORAGE = "pixelFlowTeamMemberToken";
 
+export const DEFAULT_TEAM_RELAY_URL = "https://pixel-flow-codex-relay.pixel-flow-codex-relay.workers.dev";
+
 export type TeamGatewaySettings = { url: string; token: string; memberToken: string };
+export type TeamWebAvailability = { online: boolean; onlineCount: number };
 
-export function normalizeTeamGatewayUrl(value: string) {
-  const url = new URL(value.trim());
-  const legacyLoopback = url.protocol === "http:" && ["127.0.0.1", "localhost"].includes(url.hostname) && url.port === "43130";
-  if (url.protocol !== "https:" && !legacyLoopback) throw new Error("团队网关必须使用 HTTPS；旧本机网关仅支持 127.0.0.1:43130");
-  if (url.username || url.password || url.search || url.hash) throw new Error("团队网关地址不能包含账号、查询参数或锚点");
-  return url.href.replace(/\/$/, "");
-}
-
-export function teamGatewayOriginPattern(value: string) {
-  const url = new URL(normalizeTeamGatewayUrl(value));
-  return `${url.origin}/*`;
+function memberTokenPattern(value: string) {
+  return /^pfm_[A-Za-z0-9_-]{32,64}$/.test(value);
 }
 
 export async function readTeamGateway(): Promise<TeamGatewaySettings> {
   if (globalThis.chrome?.storage?.local) {
-    const value = await chrome.storage.local.get([TEAM_GATEWAY_URL_STORAGE, TEAM_TOKEN_STORAGE, TEAM_MEMBER_TOKEN_STORAGE]);
+    const value = await chrome.storage.local.get(TEAM_MEMBER_TOKEN_STORAGE);
     return {
-      url: typeof value[TEAM_GATEWAY_URL_STORAGE] === "string" ? value[TEAM_GATEWAY_URL_STORAGE].trim() : "",
-      token: typeof value[TEAM_TOKEN_STORAGE] === "string" ? value[TEAM_TOKEN_STORAGE].trim() : "",
+      url: DEFAULT_TEAM_RELAY_URL,
+      token: "",
       memberToken: typeof value[TEAM_MEMBER_TOKEN_STORAGE] === "string" ? value[TEAM_MEMBER_TOKEN_STORAGE].trim() : ""
     };
   }
   return {
-    url: localStorage.getItem(TEAM_GATEWAY_URL_STORAGE)?.trim() || "",
-    token: localStorage.getItem(TEAM_TOKEN_STORAGE)?.trim() || "",
+    url: DEFAULT_TEAM_RELAY_URL,
+    token: "",
     memberToken: localStorage.getItem(TEAM_MEMBER_TOKEN_STORAGE)?.trim() || ""
   };
 }
 
-export async function saveTeamGateway(urlValue: string, tokenValue: string, memberTokenValue: string) {
-  const url = normalizeTeamGatewayUrl(urlValue);
-  const token = tokenValue.trim();
-  const memberToken = memberTokenValue.trim();
-  if (!token) throw new Error("请输入团队平台访问 Key");
-  if (!/^pfm_[A-Za-z0-9_-]{32,64}$/.test(memberToken)) throw new Error("请输入有效的成员令牌");
-  if (globalThis.chrome?.runtime?.id) {
-    const permission = { origins: [teamGatewayOriginPattern(url)] };
-    const granted = await chrome.permissions.contains(permission) || await chrome.permissions.request(permission);
-    if (!granted) throw new Error("未授权 Pixel Flow 访问该团队网关");
+async function teamMemberRequest(path: string, memberToken: string) {
+  const response = await fetch(`${DEFAULT_TEAM_RELAY_URL}/team${path}`, {
+    cache: "no-store",
+    headers: { "X-Pixel-Member-Token": memberToken }
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message = typeof payload?.error === "string" ? payload.error : payload?.message;
+    throw new Error(message || (response.status === 401 ? "成员令牌无效、已停用或已重置" : `团队任务箱返回 HTTP ${response.status}`));
   }
+  return payload;
+}
+
+export async function saveTeamGateway(memberTokenValue: string) {
+  const memberToken = memberTokenValue.trim();
+  if (!memberTokenPattern(memberToken)) throw new Error("请输入有效的成员令牌");
+  await teamMemberRequest("/me", memberToken);
   if (globalThis.chrome?.storage?.local) {
-    await chrome.storage.local.set({ [TEAM_GATEWAY_URL_STORAGE]: url, [TEAM_TOKEN_STORAGE]: token, [TEAM_MEMBER_TOKEN_STORAGE]: memberToken });
+    await chrome.storage.local.set({
+      [TEAM_GATEWAY_URL_STORAGE]: DEFAULT_TEAM_RELAY_URL,
+      [TEAM_MEMBER_TOKEN_STORAGE]: memberToken
+    });
+    await chrome.storage.local.remove(TEAM_TOKEN_STORAGE);
     return;
   }
-  localStorage.setItem(TEAM_GATEWAY_URL_STORAGE, url);
-  localStorage.setItem(TEAM_TOKEN_STORAGE, token);
+  localStorage.setItem(TEAM_GATEWAY_URL_STORAGE, DEFAULT_TEAM_RELAY_URL);
   localStorage.setItem(TEAM_MEMBER_TOKEN_STORAGE, memberToken);
+  localStorage.removeItem(TEAM_TOKEN_STORAGE);
 }
 
 export async function clearTeamGateway() {
-  const current = await readTeamGateway();
   if (globalThis.chrome?.storage?.local) {
-    await chrome.storage.local.remove([TEAM_GATEWAY_URL_STORAGE, TEAM_TOKEN_STORAGE, TEAM_MEMBER_TOKEN_STORAGE]);
-    if (current.url) {
-      await chrome.permissions.remove({ origins: [teamGatewayOriginPattern(current.url)] }).catch(() => false);
-    }
+    await chrome.storage.local.remove([
+      TEAM_GATEWAY_URL_STORAGE,
+      TEAM_TOKEN_STORAGE,
+      TEAM_MEMBER_TOKEN_STORAGE
+    ]);
     return;
   }
   localStorage.removeItem(TEAM_GATEWAY_URL_STORAGE);
@@ -69,5 +73,15 @@ export async function clearTeamGateway() {
 
 export async function hasTeamGateway() {
   const settings = await readTeamGateway();
-  return Boolean(settings.url && settings.token && settings.memberToken);
+  return memberTokenPattern(settings.memberToken);
+}
+
+export async function readTeamWebAvailability(): Promise<TeamWebAvailability> {
+  const settings = await readTeamGateway();
+  if (!memberTokenPattern(settings.memberToken)) return { online: false, onlineCount: 0 };
+  const payload = await teamMemberRequest("/web-workers/availability", settings.memberToken);
+  return {
+    online: payload?.online === true,
+    onlineCount: Number.isInteger(payload?.onlineCount) ? payload.onlineCount : 0
+  };
 }
