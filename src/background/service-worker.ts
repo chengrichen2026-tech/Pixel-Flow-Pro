@@ -808,8 +808,9 @@ async function waitForTeamGatewayJob(jobId, onProgress) {
     }
     if (job.status === "failed") throw new Error(job.error || "团队生图失败");
     if (job.status === "canceled") throw new Error("团队任务已取消");
-    const detail = job.detail || (job.status === "queued" ? "等待团队执行机接单" : "团队执行机处理中");
-    const runStatus = job.status === "uploading" ? "uploading" : job.status === "queued" ? "submitted" : /回传|写回/.test(detail) ? "delivering" : "generating";
+    const generated = Boolean(job.generatedAt || job.generated_at);
+    const detail = job.detail || (job.status === "queued" ? "等待团队执行机接单" : generated ? "图片已生成，正在回传结果" : "团队执行机处理中");
+    const runStatus = job.status === "uploading" ? "uploading" : job.status === "queued" ? "submitted" : generated || /回传|写回/.test(detail) ? "delivering" : "generating";
     if (detail !== lastDetail) { lastDetail = detail; await onProgress?.(detail, runStatus); }
     await new Promise((resolve) => setTimeout(resolve, 2e3));
   }

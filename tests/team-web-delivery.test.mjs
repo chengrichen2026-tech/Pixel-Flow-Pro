@@ -78,6 +78,18 @@ test('team submitter keeps polling an existing job across a transient gateway ou
   assert.deepEqual(progress, ['团队服务暂时不可达，正在自动重连', '图片已生成，正在写回画布']);
   assert.equal(images[0].base64, 'done');
 });
+test('reloaded submitter keeps a generated remote job in delivering instead of regressing to submitted', async () => {
+  const progress = [];
+  const context = vm.createContext({
+    Promise,
+    setTimeout: callback => callback(),
+    teamGatewayRequest: async () => ({ status: 'running', generatedAt: '2026-09-15T20:00:00.000Z' }),
+  });
+  vm.runInContext(section('async function waitForTeamGatewayJob(', 'async function recoverTeamTaskResult('), context);
+  const pending = context.waitForTeamGatewayJob('job-a', (detail, status) => { progress.push([detail, status]); throw new Error('stop'); });
+  await assert.rejects(pending, /stop/);
+  assert.deepEqual(progress, [['图片已生成，正在回传结果', 'delivering']]);
+});
 
 test('finishing a remote web job immediately advances queued local browser work', () => {
   assert.match(source, /await clearActiveTeamWebJob\(true, active\);\s*await updateScheduler\(async \(\) => void 0\);/);
