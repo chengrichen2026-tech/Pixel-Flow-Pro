@@ -4674,8 +4674,10 @@ async function waitForApiWorkerJob(jobId) {
 	}
 }
 //#endregion
-//#region src/team-settings.ts
-var DEFAULT_TEAM_RELAY_URL = "https://pixel-flow-codex-relay.pixel-flow-codex-relay.workers.dev";
+//#region src/team-taskbox-config.ts
+var TEAM_TASKBOX_BASE_URL = "https://zvrtjlmg40.feishuapp.com/app/app_17dwr4z3jf2/openapi";
+var TEAM_TASKBOX_MEMBER_API_KEY = "W5Ysh99sKX67skczOYN_6eRJ5Yu3Nrpzl2AKEqac9M8";
+var TEAM_TASKBOX_WORKER_API_KEY = "9AZiXJ5bRiyhCP-S3HFXqloHdpnnRNpYpbWCxSs9AHw";
 //#endregion
 //#region src/background/team-gateway-http.ts
 async function teamGatewaySettings() {
@@ -4683,7 +4685,7 @@ async function teamGatewaySettings() {
 	const memberToken = typeof values.pixelFlowTeamMemberToken === "string" ? values.pixelFlowTeamMemberToken.trim() : "";
 	if (!/^pfm_[A-Za-z0-9_-]{32,64}$/.test(memberToken)) throw new Error("请先在“生图设置”中保存成员令牌");
 	return {
-		baseUrl: DEFAULT_TEAM_RELAY_URL,
+		baseUrl: TEAM_TASKBOX_BASE_URL,
 		memberToken
 	};
 }
@@ -4695,9 +4697,10 @@ async function teamGatewayRequest(path, options = {}) {
 	for (let attempt = 0; attempt < 7; attempt += 1) {
 		let response;
 		try {
-			response = await fetch(`${baseUrl}/team${path}`, {
+			response = await fetch(`${baseUrl}${path}`, {
 				...options,
 				headers: {
+					Authorization: `Bearer ${TEAM_TASKBOX_MEMBER_API_KEY}`,
 					"X-Pixel-Member-Token": memberToken,
 					...options.headers || {}
 				}
@@ -4742,9 +4745,12 @@ async function teamGatewayResultRequest(path) {
 	const { baseUrl, memberToken } = await teamGatewaySettings();
 	let response;
 	try {
-		response = await fetch(`${baseUrl}/team${path}`, {
+		response = await fetch(`${baseUrl}${path}`, {
 			cache: "no-store",
-			headers: { "X-Pixel-Member-Token": memberToken }
+			headers: {
+				Authorization: `Bearer ${TEAM_TASKBOX_MEMBER_API_KEY}`,
+				"X-Pixel-Member-Token": memberToken
+			}
 		});
 	} catch {
 		throw new Error("无法通过团队任务箱下载结果");
@@ -5208,18 +5214,6 @@ async function reconcileBrowserTaskResults() {
 }
 var TEAM_GATEWAY_CHUNK_CHARACTERS = 6e5;
 var TEAM_GATEWAY_CHUNK_PACE_MS = 250;
-var TEAM_WEB_SAFE_BUNDLE_BYTES = 8e6;
-function estimatedTeamWebBundleBytes(images) {
-	let bytes = 25;
-	for (let index = 0; index < images.length; index += 1) {
-		const image = images[index];
-		const mimeType = typeof image?.mimeType === "string" ? image.mimeType : "image/png";
-		const base64Length = typeof image?.base64 === "string" ? image.base64.length : 0;
-		bytes += 27 + mimeType.length + base64Length;
-		if (index > 0) bytes += 1;
-	}
-	return bytes;
-}
 async function submitTeamGatewayJob(input) {
 	const health = await teamGatewayRequest("/health");
 	if (Number(health.protocolVersion || 1) < 2) return teamGatewayRequest("/jobs", {
@@ -5238,7 +5232,7 @@ async function submitTeamGatewayJob(input) {
 			prompt: input.prompt,
 			ratio: input.ratio,
 			imageCount: images.length,
-			resultDelivery: input.provider === "chatgpt_web" && Number(health.protocolVersion) >= 6 ? "bundle" : "direct",
+			resultDelivery: input.provider === "chatgpt_web" && Number(health.protocolVersion) >= 10 ? "storage" : input.provider === "chatgpt_web" && Number(health.protocolVersion) >= 6 ? "bundle" : "direct",
 			imageModel: input.imageModel === "sunburst" ? "sunburst" : "flare",
 			provider: input.provider === "chatgpt_web" ? "chatgpt_web" : "codex_cloud"
 		})
@@ -5355,11 +5349,20 @@ async function teamWebWorkerSettings() {
 		"pixelFlowTeamWebWorkerEnabled"
 	]);
 	return {
-		relayUrl: typeof values.pixelFlowTeamWebWorkerRelayUrl === "string" ? values.pixelFlowTeamWebWorkerRelayUrl.trim().replace(/\/$/, "") : "",
+		relayUrl: TEAM_TASKBOX_BASE_URL,
 		deviceToken: typeof values.pixelFlowTeamWebWorkerDeviceToken === "string" ? values.pixelFlowTeamWebWorkerDeviceToken.trim() : "",
 		workerId: typeof values.pixelFlowTeamWebWorkerId === "string" ? values.pixelFlowTeamWebWorkerId.trim() : "",
 		enabled: values.pixelFlowTeamWebWorkerEnabled === true
 	};
+}
+function teamWebWorkerErrorMessage(payload, status) {
+	const message = typeof payload?.message === "string" ? payload.message.trim() : "";
+	if (message) return message;
+	const error = payload?.error;
+	if (typeof error === "string" && error.trim()) return error.trim();
+	if (error && typeof error.message === "string" && error.message.trim()) return error.message.trim();
+	if (error && typeof error.code === "string" && error.code.trim()) return error.code.trim();
+	return `网页生图任务箱返回 HTTP ${status}`;
 }
 async function teamWebWorkerRequest(path, options = {}) {
 	const settings = await teamWebWorkerSettings();
@@ -5369,14 +5372,15 @@ async function teamWebWorkerRequest(path, options = {}) {
 		const response = await fetch(`${settings.relayUrl}/web-worker${path}`, {
 			...options,
 			headers: {
-				Authorization: `Bearer ${settings.deviceToken}`,
+				Authorization: `Bearer ${TEAM_TASKBOX_WORKER_API_KEY}`,
+				"X-Pixel-Web-Worker-Token": settings.deviceToken,
 				...options.body ? { "Content-Type": "application/json" } : {},
 				...options.headers || {}
 			}
 		});
 		const payload = await response.json().catch(() => ({}));
 		if (response.ok) return payload;
-		const error = new Error(payload.message || payload.error || `网页生图任务中继返回 HTTP ${response.status}`);
+		const error = new Error(teamWebWorkerErrorMessage(payload, response.status));
 		error.status = response.status;
 		if (response.status !== 429 && response.status < 500) throw error;
 		lastError = error;
@@ -5389,7 +5393,7 @@ async function teamWebWorkerRequest(path, options = {}) {
 		if (attempt === 4) throw error;
 		await new Promise((resolveWait) => setTimeout(resolveWait, Math.min(16e3, 1e3 * 2 ** attempt)));
 	}
-	throw lastError ?? /* @__PURE__ */ new Error("网页生图任务中继持续不可用");
+	throw lastError ?? /* @__PURE__ */ new Error("网页生图任务箱持续不可用");
 }
 async function saveActiveTeamWebJobs() {
 	const jobs = [...activeTeamWebJobs.values()];
@@ -5431,16 +5435,34 @@ async function uploadTeamWebImage(jobId, image, endpoint, imageIndex, name) {
 		if (chunkIndex + 1 < totalChunks) await new Promise((resolveWait) => setTimeout(resolveWait, TEAM_GATEWAY_CHUNK_PACE_MS));
 	}
 }
-async function uploadTeamWebResultImage(jobId, image, imageIndex, resultCount) {
+async function uploadTeamWebStorageResult(jobId, image, imageIndex) {
 	const mimeType = image.mimeType || "image/png";
 	if (!/^image\/(png|jpeg|webp)$/.test(mimeType)) throw new Error("网页生图结果格式无效");
-	await teamWebWorkerRequest(`/jobs/${jobId}/result-images/${imageIndex}`, {
+	const bytes = base64ToBytes(image.base64);
+	const metadata = {
+		imageIndex,
+		fileName: `result-${imageIndex + 1}.${mimeType === "image/jpeg" ? "jpg" : mimeType.slice(6)}`,
+		mimeType,
+		byteLength: bytes.byteLength,
+		sha256: await sha256Hex(bytes.buffer)
+	};
+	const ticket = await teamWebWorkerRequest(`/jobs/${jobId}/result-storage-upload`, {
 		method: "POST",
-		headers: {
-			"Content-Type": mimeType,
-			"X-Pixel-Result-Count": String(resultCount)
-		},
-		body: base64ToBytes(image.base64)
+		body: JSON.stringify(metadata)
+	});
+	const upload = await fetch(ticket.uploadUrl, {
+		method: "PUT",
+		headers: { "Content-Type": mimeType },
+		body: bytes
+	});
+	if (!upload.ok) throw new Error(`对象存储上传返回 HTTP ${upload.status}`);
+	await teamWebWorkerRequest(`/jobs/${jobId}/result-storage-complete`, {
+		method: "POST",
+		body: JSON.stringify({
+			...metadata,
+			uploadId: ticket.uploadId,
+			eTag: upload.headers.get("Etag") || ""
+		})
 	});
 }
 async function clearActiveTeamWebJob(closeTab = true, expected) {
@@ -5510,19 +5532,16 @@ async function deliverTeamWebJob(message, active) {
 	});
 	active.phase = "delivering";
 	await saveActiveTeamWebJobs();
-	const shouldUseBundle = active.job.resultDelivery === "bundle" && estimatedTeamWebBundleBytes(message.images) <= TEAM_WEB_SAFE_BUNDLE_BYTES;
-	if (active.job.resultDelivery === "bundle" && shouldUseBundle) {
-		const bundleBody = JSON.stringify({
-			version: 1,
-			images: message.images
-		});
-		await teamWebWorkerRequest(`/jobs/${active.job.id}/result-bundle`, {
+	if (active.job.resultDelivery === "bundle") {
+		await teamWebWorkerRequest(`/jobs/${active.job.id}/use-storage`, { method: "POST" });
+		await Promise.all(message.images.map((image, imageIndex) => uploadTeamWebStorageResult(active.job.id, image, imageIndex)));
+		await teamWebWorkerRequest(`/jobs/${active.job.id}/result-storage-finalize`, {
 			method: "POST",
-			body: bundleBody
+			body: JSON.stringify({ resultCount: message.images.length })
 		});
-	} else if (active.job.resultDelivery === "bundle") {
-		await Promise.all(message.images.map((image, imageIndex) => uploadTeamWebResultImage(active.job.id, image, imageIndex, message.images.length)));
-		await teamWebWorkerRequest(`/jobs/${active.job.id}/result-images/complete`, {
+	} else if (active.job.resultDelivery === "storage") {
+		await Promise.all(message.images.map((image, imageIndex) => uploadTeamWebStorageResult(active.job.id, image, imageIndex)));
+		await teamWebWorkerRequest(`/jobs/${active.job.id}/result-storage-finalize`, {
 			method: "POST",
 			body: JSON.stringify({ resultCount: message.images.length })
 		});
@@ -5672,7 +5691,10 @@ async function teamWebWorkerTickOnce() {
 	while (activeTeamWebJobs.size + localBrowserRunning < TEAM_WEB_MAX_CONCURRENCY) {
 		const claimed = await teamWebWorkerRequest("/claim", {
 			method: "POST",
-			body: JSON.stringify({ supportsBundle: true })
+			body: JSON.stringify({
+				supportsBundle: true,
+				supportsStorage: true
+			})
 		});
 		if (!claimed.job || activeTeamWebJobs.has(claimed.job.id)) break;
 		const expected = {

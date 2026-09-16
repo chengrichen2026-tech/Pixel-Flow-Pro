@@ -14,7 +14,7 @@
 | 浏览器基础设施 | `src/background/tab-registry.ts` | 任务与ChatGPT标签所有权、复用、休眠和孤儿清理 |
 | 浏览器基础设施 | `task-tab-grouper.ts`、`chatgpt-url.ts`、`chatgpt-adapter-bridge.ts` | 标签分组、对话身份和页面适配器握手 |
 | provider I/O | `api-worker-client.ts` | 本机API Worker请求与轮询 |
-| provider I/O | `team-gateway-http.ts` | 团队网关鉴权、限流重试、取消和结果代理 |
+| provider I/O | `team-gateway-http.ts` | 妙搭任务箱鉴权、限流重试、取消和结果下载 |
 | 应用投影 | `generation-projector.ts` | 输入解析、结果节点、文字结果和批量父级投影 |
 | 通用基础设施 | `binary.ts`、`keyed-serial-queue.ts`、`protocol.ts` | 编解码、写入串行化和消息入口校验 |
 

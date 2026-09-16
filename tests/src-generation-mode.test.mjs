@@ -73,7 +73,7 @@ test("rebuilt API settings use the same local storage contract", async () => {
   assert.match(app, /https:\/\/aihub\.rbmanon\.cn\/v1/);
 });
 
-test("team settings keep only member identity locally and use the fixed shared relay", async () => {
+test("team settings keep only member identity locally and use the fixed taskbox", async () => {
   const settings = await readFile(new URL("src/team-settings.ts", root), "utf8");
   const manifest = await readFile(new URL("public/manifest.json", root), "utf8");
   const app = await readFile(new URL("src/App.tsx", root), "utf8");
@@ -81,12 +81,14 @@ test("team settings keep only member identity locally and use the fixed shared r
   assert.match(settings, /pixelFlowTeamToken/);
   assert.match(settings, /pixelFlowTeamMemberToken/);
   assert.match(settings, /pfm_/);
-  assert.match(settings, /DEFAULT_TEAM_RELAY_URL/);
-  assert.match(settings, /\/team\$\{path\}/);
+  assert.match(settings, /DEFAULT_TEAM_TASKBOX_URL/);
+  assert.match(settings, /Authorization: `Bearer \$\{TEAM_TASKBOX_MEMBER_API_KEY\}`/);
+  assert.match(settings, /DEFAULT_TEAM_TASKBOX_URL\}\$\{path\}/);
   assert.match(settings, /readTeamWebAvailability/);
   assert.match(settings, /chrome\.storage\.local\.set/);
   assert.match(settings, /chrome\.storage\.local\.remove\(TEAM_TOKEN_STORAGE\)/);
   assert.match(manifest, /"optional_host_permissions": \["https:\/\/\*\/\*"\]/);
+  assert.match(manifest, /https:\/\/\*\.feishuapp\.com\/\*/);
   assert.doesNotMatch(app, /平台访问 Key/);
   assert.match(app, /团队任务箱由系统自动连接/);
   assert.match(app, /共享执行机在线/);

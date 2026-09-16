@@ -15,6 +15,7 @@ const sourceFiles = [
   "src/background/task-tab-grouper.ts",
   "src/background/tab-registry.ts",
   "src/background/api-worker-client.ts",
+  "src/team-taskbox-config.ts",
   "src/background/team-gateway-http.ts",
   "src/background/generation-projector.ts",
   "src/storage/database.ts",

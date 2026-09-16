@@ -8,19 +8,19 @@ const background = await readBackgroundSource();
 const bridge = await readFile(new URL("src/codex-bridge.tsx", root), "utf8");
 const mcp = await readFile(new URL("tools/pixel-flow-mcp/server.mjs", root), "utf8");
 
-test("team mode sends authenticated jobs without exposing Codex OAuth to the extension", () => {
+test("team mode sends direct taskbox jobs without exposing Codex OAuth to the extension", () => {
   assert.match(background, /async function teamGatewaySettings\(\)/);
   assert.match(background, /pixelFlowTeamMemberToken/);
   assert.match(background, /"X-Pixel-Member-Token": memberToken/);
-  assert.match(background, /DEFAULT_TEAM_RELAY_URL/);
-  assert.match(background, /`\$\{baseUrl\}\/team\$\{path\}`/);
-  assert.doesNotMatch(background, /Authorization: `Bearer \$\{token\}`/);
+  assert.match(background, /TEAM_TASKBOX_MEMBER_API_KEY/);
+  assert.match(background, /`\$\{baseUrl\}\$\{path\}`/);
+  assert.match(background, /Authorization: `Bearer \$\{TEAM_TASKBOX_MEMBER_API_KEY\}`/);
   assert.match(background, /async function executeTeamTask\(projectId, taskId, project, task\)/);
   assert.match(background, /requestId: `\$\{projectId\}:\$\{taskId\}:\$\{Date\.now\(\)\}`/);
   assert.match(background, /async function submitTeamGatewayJob\(input\)/);
   assert.match(background, /protocolVersion/);
   assert.match(background, /Number\(health\.protocolVersion \|\| 1\) < 4/);
-  assert.match(background, /resultDelivery: input\.provider === "chatgpt_web"[\s\S]*\? "bundle" : "direct"/);
+  assert.match(background, /resultDelivery: input\.provider === "chatgpt_web"[\s\S]*\? "storage"/);
   assert.match(background, /imageModel: input\.imageModel === "sunburst" \? "sunburst" : "flare"/);
   assert.match(background, /imageModel: task\.teamImageModel === "sunburst" \? "sunburst" : "flare"/);
   assert.match(background, /image\.downloadUrl/);
@@ -81,13 +81,14 @@ test("structured commands can create team generation tasks", () => {
   assert.match(mcp, /teamImageModel:\{type:"string",enum:\["flare","sunburst"\]\}/);
 });
 
-test("remote team web jobs reuse the existing ChatGPT adapter and return chunks", () => {
+test("remote team web jobs reuse the existing ChatGPT adapter and upload to taskbox storage", () => {
   assert.match(background, /TEAM_WEB_PROJECT_ID = "pixel-flow-team-web-worker"/);
   assert.match(background, /async function startActiveTeamWebJob\(active\)/);
   assert.match(background, /TEAM_WEB_MAX_CONCURRENCY = 5/);
   assert.match(background, /sendWithCurrentChatGptAdapter\(chrome\.tabs, chrome\.scripting, mapped\.tabId, message\)/);
   assert.match(background, /async function handleTeamWebPageTaskMessage/);
-  assert.match(background, /uploadTeamWebImage\(active\.job\.id, message\.images\[imageIndex\], "result-chunks"/);
+  assert.match(background, /uploadTeamWebStorageResult\(active\.job\.id, image, imageIndex\)/);
+  assert.match(background, /result-storage-finalize/);
   assert.match(background, /pixelFlowTeamWebWorkerEnabled: false/);
   assert.match(background, /TEAM_WEB_WORKER_ALARM/);
   assert.match(background, /\["completed", "failed", "canceled"\]\.includes\(remote\.status\)/);
@@ -98,18 +99,6 @@ test("remote team web jobs reuse the existing ChatGPT adapter and return chunks"
       < background.indexOf("void teamWebWorkerReady.then"),
     "team web worker startup must run after its readiness promise is assigned",
   );
-});
-
-test("macOS team gateway service scripts are present", async () => {
-  const install = await readFile(new URL("team-gateway/install.sh", root), "utf8");
-  const uninstall = await readFile(new URL("team-gateway/uninstall.sh", root), "utf8");
-  assert.match(install, /com\.pixel-flow\.team-gateway/);
-  assert.doesNotMatch(install, /<key>WorkingDirectory<\/key>/);
-  assert.match(install, /--noproxy 127\.0\.0\.1/);
-  assert.match(install, /--retry-connrefused/);
-  assert.match(install, /Library\/Application Support\/Pixel Flow Team Gateway/);
-  assert.match(install, /127\.0\.0\.1:43130\/health/);
-  assert.match(uninstall, /launchctl bootout/);
 });
 
 

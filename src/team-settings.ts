@@ -2,7 +2,9 @@ const TEAM_GATEWAY_URL_STORAGE = "pixelFlowTeamGatewayUrl";
 const TEAM_TOKEN_STORAGE = "pixelFlowTeamToken";
 const TEAM_MEMBER_TOKEN_STORAGE = "pixelFlowTeamMemberToken";
 
-export const DEFAULT_TEAM_RELAY_URL = "https://pixel-flow-codex-relay.pixel-flow-codex-relay.workers.dev";
+import { TEAM_TASKBOX_BASE_URL, TEAM_TASKBOX_MEMBER_API_KEY } from "./team-taskbox-config";
+
+export const DEFAULT_TEAM_TASKBOX_URL = TEAM_TASKBOX_BASE_URL;
 
 export type TeamGatewaySettings = { url: string; token: string; memberToken: string };
 export type TeamWebAvailability = { online: boolean; onlineCount: number };
@@ -15,22 +17,22 @@ export async function readTeamGateway(): Promise<TeamGatewaySettings> {
   if (globalThis.chrome?.storage?.local) {
     const value = await chrome.storage.local.get(TEAM_MEMBER_TOKEN_STORAGE);
     return {
-      url: DEFAULT_TEAM_RELAY_URL,
+      url: DEFAULT_TEAM_TASKBOX_URL,
       token: "",
       memberToken: typeof value[TEAM_MEMBER_TOKEN_STORAGE] === "string" ? value[TEAM_MEMBER_TOKEN_STORAGE].trim() : ""
     };
   }
   return {
-    url: DEFAULT_TEAM_RELAY_URL,
+    url: DEFAULT_TEAM_TASKBOX_URL,
     token: "",
     memberToken: localStorage.getItem(TEAM_MEMBER_TOKEN_STORAGE)?.trim() || ""
   };
 }
 
 async function teamMemberRequest(path: string, memberToken: string) {
-  const response = await fetch(`${DEFAULT_TEAM_RELAY_URL}/team${path}`, {
+  const response = await fetch(`${DEFAULT_TEAM_TASKBOX_URL}${path}`, {
     cache: "no-store",
-    headers: { "X-Pixel-Member-Token": memberToken }
+    headers: { Authorization: `Bearer ${TEAM_TASKBOX_MEMBER_API_KEY}`, "X-Pixel-Member-Token": memberToken }
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -46,13 +48,13 @@ export async function saveTeamGateway(memberTokenValue: string) {
   await teamMemberRequest("/me", memberToken);
   if (globalThis.chrome?.storage?.local) {
     await chrome.storage.local.set({
-      [TEAM_GATEWAY_URL_STORAGE]: DEFAULT_TEAM_RELAY_URL,
+      [TEAM_GATEWAY_URL_STORAGE]: DEFAULT_TEAM_TASKBOX_URL,
       [TEAM_MEMBER_TOKEN_STORAGE]: memberToken
     });
     await chrome.storage.local.remove(TEAM_TOKEN_STORAGE);
     return;
   }
-  localStorage.setItem(TEAM_GATEWAY_URL_STORAGE, DEFAULT_TEAM_RELAY_URL);
+  localStorage.setItem(TEAM_GATEWAY_URL_STORAGE, DEFAULT_TEAM_TASKBOX_URL);
   localStorage.setItem(TEAM_MEMBER_TOKEN_STORAGE, memberToken);
   localStorage.removeItem(TEAM_TOKEN_STORAGE);
 }

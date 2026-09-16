@@ -3,6 +3,7 @@ const DEVICE_TOKEN_STORAGE = "pixelFlowTeamWebWorkerDeviceToken";
 const WORKER_ID_STORAGE = "pixelFlowTeamWebWorkerId";
 const DEVICE_NAME_STORAGE = "pixelFlowTeamWebWorkerName";
 const ENABLED_STORAGE = "pixelFlowTeamWebWorkerEnabled";
+import { TEAM_TASKBOX_BASE_URL, TEAM_TASKBOX_WORKER_API_KEY } from "./team-taskbox-config";
 
 export type TeamWebWorkerSettings = {
   relayUrl: string;
@@ -14,8 +15,8 @@ export type TeamWebWorkerSettings = {
 
 export function normalizeWebWorkerRelayUrl(value: string) {
   const url = new URL(value.trim());
-  if (url.protocol !== "https:") throw new Error("网页生图机中继地址必须使用 HTTPS");
-  if (url.username || url.password || url.search || url.hash) throw new Error("中继地址不能包含账号、查询参数或锚点");
+  if (url.protocol !== "https:") throw new Error("网页生图机任务箱地址必须使用 HTTPS");
+  if (url.username || url.password || url.search || url.hash) throw new Error("任务箱地址不能包含账号、查询参数或锚点");
   return url.href.replace(/\/$/, "");
 }
 
@@ -28,7 +29,7 @@ export async function readTeamWebWorker(): Promise<TeamWebWorkerSettings> {
     ENABLED_STORAGE
   ]);
   return {
-    relayUrl: typeof value[RELAY_URL_STORAGE] === "string" ? value[RELAY_URL_STORAGE].trim() : "",
+    relayUrl: TEAM_TASKBOX_BASE_URL,
     deviceToken: typeof value[DEVICE_TOKEN_STORAGE] === "string" ? value[DEVICE_TOKEN_STORAGE].trim() : "",
     workerId: typeof value[WORKER_ID_STORAGE] === "string" ? value[WORKER_ID_STORAGE].trim() : "",
     name: typeof value[DEVICE_NAME_STORAGE] === "string" ? value[DEVICE_NAME_STORAGE].trim() : "",
@@ -37,15 +38,15 @@ export async function readTeamWebWorker(): Promise<TeamWebWorkerSettings> {
 }
 
 export async function pairTeamWebWorker(relayValue: string, pairingValue: string) {
-  const relayUrl = normalizeWebWorkerRelayUrl(relayValue);
+  const relayUrl = normalizeWebWorkerRelayUrl(relayValue || TEAM_TASKBOX_BASE_URL);
   const pairingCode = pairingValue.replace(/\s/g, "");
   if (!/^\d{8}$/.test(pairingCode)) throw new Error("请输入 8 位一次性配对码");
   const permission = { origins: [`${new URL(relayUrl).origin}/*`] };
   const granted = await chrome.permissions.contains(permission) || await chrome.permissions.request(permission);
-  if (!granted) throw new Error("未授权 Pixel Flow 访问网页生图任务中继");
+  if (!granted) throw new Error("未授权 Pixel Flow 访问网页生图任务箱");
   const response = await fetch(`${relayUrl}/web-worker/pair`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { Authorization: `Bearer ${TEAM_TASKBOX_WORKER_API_KEY}`, "Content-Type": "application/json" },
     body: JSON.stringify({ pairingCode })
   });
   const payload = await response.json().catch(() => ({}));

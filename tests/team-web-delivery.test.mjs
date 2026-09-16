@@ -12,16 +12,6 @@ function runtime(overrides = {}) {
     Map, Promise, Date, JSON, TextDecoder, TextEncoder, Uint8Array,
     activeTeamWebJobs: new Map([['job-a', active]]),
     teamWebDeliveries: new Map(), teamResultDownloads: new Map(),
-    TEAM_WEB_SAFE_BUNDLE_BYTES: 8e6,
-    estimatedTeamWebBundleBytes: images => {
-      let bytes = '{"version":1,"images":['.length + 2;
-      for (let index = 0; index < images.length; index += 1) {
-        const image = images[index];
-        bytes += '{"mimeType":"","base64":""}'.length + (image.mimeType || 'image/png').length + image.base64.length;
-        if (index > 0) bytes += 1;
-      }
-      return bytes;
-    },
     teamWebWorkerRequest: async (path) => { calls.push(path); return {}; },
     base64ToBytes: () => new Uint8Array([1]),
     saveActiveTeamWebJobs: async () => {},
@@ -35,7 +25,7 @@ function runtime(overrides = {}) {
     ...overrides,
   });
   vm.runInContext(section('function singleFlight(', 'var teamWebWorkerReady'), context);
-  vm.runInContext(section('async function uploadTeamWebResultImage(', 'async function clearActiveTeamWebJob('), context);
+  vm.runInContext(section('async function uploadTeamWebStorageResult(', 'async function clearActiveTeamWebJob('), context);
   vm.runInContext(section('async function completeActiveTeamWebJob(', 'async function handleTeamWebPageTaskMessage('), context);
   return { context, calls };
 }
@@ -47,17 +37,47 @@ test('simultaneous original and recovery results upload and complete only once',
   assert.equal(calls.filter(x => x.endsWith('/result-chunks')).length, 1);
   assert.equal(calls.filter(x => x.endsWith('/complete')).length, 1);
 });
-test('multi-image bundle makes one upload with no legacy complete call', async () => {
-  const { context, calls } = runtime();
+test('legacy bundle always promotes to storage before its first direct upload', async () => {
+  const { context, calls } = runtime({
+    teamWebWorkerRequest: async (path) => {
+      calls.push(path);
+      return path.endsWith('/result-storage-upload') ? { uploadUrl: 'https://storage.example/upload', uploadId: `upload-${calls.length}` } : {};
+    },
+    fetch: async () => ({ ok: true, status: 200, headers: new Headers({ Etag: 'etag' }) }),
+    sha256Hex: async () => 'a'.repeat(64),
+  });
   context.activeTeamWebJobs.get('job-a').job.resultDelivery = 'bundle';
   await context.completeActiveTeamWebJob({ ...message, images: [...message.images, ...message.images] });
-  assert.equal(calls.filter(x => x.endsWith('/result-bundle')).length, 1);
-  assert.equal(calls.filter(x => x.endsWith('/result-chunks') || x.endsWith('/complete')).length, 0);
+  assert.equal(calls.filter(x => x.endsWith('/use-storage')).length, 1);
+  assert.equal(calls.filter(x => x.endsWith('/result-storage-upload')).length, 2);
+  assert.equal(calls.filter(x => x.endsWith('/result-storage-finalize')).length, 1);
+  assert.equal(calls.filter(x => /\/result-(bundle|images)\//.test(x)).length, 0);
+});
+
+test('storage delivery uploads every image directly and finalizes once', async () => {
+  const { context, calls } = runtime({
+    teamWebWorkerRequest: async (path) => {
+      calls.push(path);
+      return path.endsWith('/result-storage-upload') ? { uploadUrl: 'https://storage.example/upload', uploadId: `upload-${calls.length}` } : {};
+    },
+    fetch: async (_url, options) => {
+      calls.push(`put:${options.method}`);
+      return { ok: true, status: 200, headers: new Headers({ Etag: 'etag' }) };
+    },
+    sha256Hex: async () => 'a'.repeat(64),
+  });
+  context.activeTeamWebJobs.get('job-a').job.resultDelivery = 'storage';
+  await context.completeActiveTeamWebJob({ ...message, images: [...message.images, ...message.images] });
+  assert.equal(calls.filter(x => x.endsWith('/result-storage-upload')).length, 2);
+  assert.equal(calls.filter(x => x === 'put:PUT').length, 2);
+  assert.equal(calls.filter(x => x.endsWith('/result-storage-complete')).length, 2);
+  assert.equal(calls.filter(x => x.endsWith('/result-storage-finalize')).length, 1);
+  assert.equal(calls.filter(x => x.endsWith('/result-chunks') || x.endsWith('/result-bundle')).length, 0);
 });
 
 test('original result delivery completes before best-effort preview upload', () => {
   const deliver = source.slice(source.indexOf('async function deliverTeamWebJob'), source.indexOf('async function handleTeamWebPageTaskMessage'));
-  assert.ok(deliver.indexOf('/result-bundle') < deliver.indexOf('createTeamPreview'));
+  assert.ok(deliver.indexOf('/result-storage-finalize') < deliver.indexOf('createTeamPreview'));
   assert.match(deliver, /uploadTeamWebImage\(active\.job\.id, preview, "preview-chunks"[\s\S]*\.catch\(\(\) => void 0\)/);
 });
 
@@ -146,7 +166,7 @@ test('download single-flight shares successful result and permits retry after fa
 test('worker request retries thrown network errors as well as HTTP 503 responses', async () => {
   let networkAttempts = 0;
   const context = vm.createContext({
-    Error, Promise, Number, JSON, Response,
+    Error, Promise, Number, JSON, Response, TEAM_TASKBOX_WORKER_API_KEY: 'platform-key',
     setTimeout: callback => callback(),
     teamWebWorkerSettings: async () => ({ enabled: true, relayUrl: 'https://relay.example', deviceToken: 'pfw_token', workerId: 'web-a' }),
     fetch: async () => {
@@ -155,7 +175,7 @@ test('worker request retries thrown network errors as well as HTTP 503 responses
       return Response.json({ ok: true });
     },
   });
-  vm.runInContext(section('async function teamWebWorkerRequest(', 'async function saveActiveTeamWebJobs('), context);
+  vm.runInContext(section('function teamWebWorkerErrorMessage(', 'async function saveActiveTeamWebJobs('), context);
   assert.deepEqual(await context.teamWebWorkerRequest('/claim'), { ok: true });
   assert.equal(networkAttempts, 2);
 
@@ -167,22 +187,50 @@ test('worker request retries thrown network errors as well as HTTP 503 responses
   await assert.rejects(context.teamWebWorkerRequest('/claim'), error => error.status === 503);
   assert.equal(unavailableAttempts, 5);
 });
-test('oversize bundle uploads a whole image instead of falling back to chunks', async () => {
-  const { context, calls } = runtime();
+test('worker request extracts structured relay errors without object coercion', async () => {
+  const context = vm.createContext({
+    Error, Promise, Number, JSON, Response, TEAM_TASKBOX_WORKER_API_KEY: 'platform-key',
+    setTimeout: callback => callback(),
+    teamWebWorkerSettings: async () => ({ enabled: true, relayUrl: 'https://relay.example', deviceToken: 'pfw_token', workerId: 'web-a' }),
+    fetch: async () => Response.json({ error: { message: '任务已完成' } }, { status: 409 }),
+  });
+  vm.runInContext(section('function teamWebWorkerErrorMessage(', 'async function saveActiveTeamWebJobs('), context);
+  await assert.rejects(context.teamWebWorkerRequest('/claim'), error => error.status === 409 && error.message === '任务已完成');
+});
+test('oversize legacy bundle promotes to storage instead of calling the removed relay endpoint', async () => {
+  const { context, calls } = runtime({
+    teamWebWorkerRequest: async (path) => {
+      calls.push(path);
+      return path.endsWith('/result-storage-upload') ? { uploadUrl: 'https://storage.example/upload', uploadId: `upload-${calls.length}` } : {};
+    },
+    fetch: async () => ({ ok: true, status: 200, headers: new Headers({ Etag: 'etag' }) }),
+    sha256Hex: async () => 'a'.repeat(64),
+  });
   context.activeTeamWebJobs.get('job-a').job.resultDelivery = 'bundle';
   await context.completeActiveTeamWebJob({ ...message, images: [{ mimeType: 'image/png', base64: 'a'.repeat(18_000_004) }] });
-  assert.equal(calls.filter(x => /\/result-images\/\d+$/.test(x)).length, 1);
-  assert.equal(calls.filter(x => x.endsWith('/result-images/complete')).length, 1);
+  assert.equal(calls.filter(x => x.endsWith('/use-storage')).length, 1);
+  assert.equal(calls.filter(x => x.endsWith('/result-storage-upload')).length, 1);
+  assert.equal(calls.filter(x => x.endsWith('/result-storage-finalize')).length, 1);
+  assert.equal(calls.filter(x => /\/result-images\//.test(x)).length, 0);
   assert.equal(calls.filter(x => x.endsWith('/result-chunks')).length, 0);
   assert.equal(calls.filter(x => x.endsWith('/result-bundle')).length, 0);
 });
 test('large multi-image results upload every image whole before publishing a signed manifest', async () => {
-  const { context, calls } = runtime();
+  const { context, calls } = runtime({
+    teamWebWorkerRequest: async (path) => {
+      calls.push(path);
+      return path.endsWith('/result-storage-upload') ? { uploadUrl: 'https://storage.example/upload', uploadId: `upload-${calls.length}` } : {};
+    },
+    fetch: async () => ({ ok: true, status: 200, headers: new Headers({ Etag: 'etag' }) }),
+    sha256Hex: async () => 'a'.repeat(64),
+  });
   context.activeTeamWebJobs.get('job-a').job.resultDelivery = 'bundle';
   const images = Array.from({ length: 5 }, () => ({ mimeType: 'image/png', base64: 'a'.repeat(2_000_000) }));
   await context.completeActiveTeamWebJob({ ...message, images });
-  assert.equal(calls.filter(x => /\/result-images\/\d+$/.test(x)).length, 5);
-  assert.equal(calls.filter(x => x.endsWith('/result-images/complete')).length, 1);
+  assert.equal(calls.filter(x => x.endsWith('/use-storage')).length, 1);
+  assert.equal(calls.filter(x => x.endsWith('/result-storage-upload')).length, 5);
+  assert.equal(calls.filter(x => x.endsWith('/result-storage-finalize')).length, 1);
+  assert.equal(calls.filter(x => /\/result-images\//.test(x)).length, 0);
   assert.equal(calls.filter(x => x.endsWith('/result-bundle')).length, 0);
   assert.equal(calls.filter(x => x.endsWith('/result-chunks')).length, 0);
 });

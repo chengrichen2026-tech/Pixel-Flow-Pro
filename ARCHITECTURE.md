@@ -8,7 +8,7 @@
 
 `Team Cloud：同伴 React 画布 → background 携成员令牌访问固定 Cloudflare 中继 → 中继注入平台 Key → 妙搭任务箱 → Cloudflare Queue/Worker → Codex OAuth 生图 → 鉴权结果下载 → 同伴 IndexedDB → React 画布`
 
-`Team Web：同伴 React 画布携成员令牌 → 固定 Cloudflare 中继 → 妙搭任务箱(provider=chatgpt_web) → 团队任意已配对在线执行机 Pixel Flow background → ChatGPT contentScript → 结果 bundle（超大结果回退分块）→ 同伴 IndexedDB → React 画布`
+`Team Web：同伴 React 画布携成员令牌与内部任务箱 Key → 妙搭任务箱(provider=chatgpt_web) → 团队任意已配对在线执行机 Pixel Flow background → ChatGPT contentScript → 妙搭对象存储逐图直传 → 签名下载 → 同伴 IndexedDB → React 画布`
 
 ## 稳定边界
 
@@ -19,7 +19,6 @@
 - API 模式执行：`src/background/service-worker.ts` 复用现有任务队列、项目写入和结果节点逻辑，构建生成 `public/background.js`
 - API 持久执行：`api-worker/server.mjs`，任务文件位于 `runtime/api-jobs/`；macOS 使用动态生成的 LaunchAgent，Windows 使用当前用户启动文件夹与 PID 验证脚本
 - 正式团队任务箱客户端：`src/background/team-gateway-http.ts`；云端服务由妙搭任务箱与 Cloudflare Worker承接
-- 旧本机团队网关：`team-gateway/server.mjs`；成员令牌管理在 `team-gateway/cli.mjs`。它仍是已发布兼容路径，未取得真实用户迁移清单前不删除
 - Codex OAuth 只在服务端执行环境读取；扩展和网络接口都不返回 OAuth 凭证
 - 团队平台访问 Key 只保存在 Cloudflare Worker secret；成员浏览器只保存成员令牌。GPT Web 团队任务不增加 Team Cloud 每日额度
 - 画布迁移门禁与进度：`CANVAS_MIGRATION.md`

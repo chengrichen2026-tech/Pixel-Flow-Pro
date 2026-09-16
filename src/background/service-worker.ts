@@ -33,6 +33,7 @@ import { TaskTabGrouper } from "./task-tab-grouper";
 import { ConversationUnavailableError, TabRegistry } from "./tab-registry";
 import { apiWorkerRequest, waitForApiWorkerJob } from "./api-worker-client";
 import { cancelTeamGatewayJob, teamGatewayRequest, teamGatewayResultRequest, teamGatewaySettings } from "./team-gateway-http";
+import { TEAM_TASKBOX_BASE_URL, TEAM_TASKBOX_WORKER_API_KEY } from "../team-taskbox-config";
 import { applyTaskMessage, getTaskInputs } from "./generation-projector";
 
 var database = new NodeCanvasDatabase();
@@ -315,24 +316,6 @@ async function reconcileBrowserTaskResults() {
 }
 const TEAM_GATEWAY_CHUNK_CHARACTERS = 6e5;
 const TEAM_GATEWAY_CHUNK_PACE_MS = 250;
-// Keep well below the relay's 18 MB request ceiling.  The extension service
-// worker otherwise has to keep the original Base64 values, a JSON string and
-// a Uint8Array copy alive at once.  Large multi-image results must choose the
-// chunk path before constructing a combined JSON payload.
-const TEAM_WEB_SAFE_BUNDLE_BYTES = 8e6;
-function estimatedTeamWebBundleBytes(images) {
-  let bytes = '{"version":1,"images":['.length + 2;
-  for (let index = 0; index < images.length; index += 1) {
-    const image = images[index];
-    const mimeType = typeof image?.mimeType === "string" ? image.mimeType : "image/png";
-    const base64Length = typeof image?.base64 === "string" ? image.base64.length : 0;
-    // JSON punctuation plus the quoted MIME type and Base64 value.  Both are
-    // ASCII in the Team Web contract, so string length is byte length.
-    bytes += '{"mimeType":"","base64":""}'.length + mimeType.length + base64Length;
-    if (index > 0) bytes += 1;
-  }
-  return bytes;
-}
 async function submitTeamGatewayJob(input) {
   const health = await teamGatewayRequest("/health");
   if (Number(health.protocolVersion || 1) < 2) {
@@ -357,7 +340,7 @@ async function submitTeamGatewayJob(input) {
       prompt: input.prompt,
       ratio: input.ratio,
       imageCount: images.length,
-      resultDelivery: input.provider === "chatgpt_web" && Number(health.protocolVersion) >= 6 ? "bundle" : "direct",
+      resultDelivery: input.provider === "chatgpt_web" && Number(health.protocolVersion) >= 10 ? "storage" : input.provider === "chatgpt_web" && Number(health.protocolVersion) >= 6 ? "bundle" : "direct",
       imageModel: input.imageModel === "sunburst" ? "sunburst" : "flare",
       provider: input.provider === "chatgpt_web" ? "chatgpt_web" : "codex_cloud"
     })
@@ -474,10 +457,19 @@ async function teamWebWorkerSettings() {
     "pixelFlowTeamWebWorkerId",
     "pixelFlowTeamWebWorkerEnabled"
   ]);
-  const relayUrl = typeof values.pixelFlowTeamWebWorkerRelayUrl === "string" ? values.pixelFlowTeamWebWorkerRelayUrl.trim().replace(/\/$/, "") : "";
+  const relayUrl = TEAM_TASKBOX_BASE_URL;
   const deviceToken = typeof values.pixelFlowTeamWebWorkerDeviceToken === "string" ? values.pixelFlowTeamWebWorkerDeviceToken.trim() : "";
   const workerId = typeof values.pixelFlowTeamWebWorkerId === "string" ? values.pixelFlowTeamWebWorkerId.trim() : "";
   return { relayUrl, deviceToken, workerId, enabled: values.pixelFlowTeamWebWorkerEnabled === true };
+}
+function teamWebWorkerErrorMessage(payload, status) {
+  const message = typeof payload?.message === "string" ? payload.message.trim() : "";
+  if (message) return message;
+  const error = payload?.error;
+  if (typeof error === "string" && error.trim()) return error.trim();
+  if (error && typeof error.message === "string" && error.message.trim()) return error.message.trim();
+  if (error && typeof error.code === "string" && error.code.trim()) return error.code.trim();
+  return `网页生图任务箱返回 HTTP ${status}`;
 }
 async function teamWebWorkerRequest(path, options = {}) {
   const settings = await teamWebWorkerSettings();
@@ -488,14 +480,15 @@ async function teamWebWorkerRequest(path, options = {}) {
       const response = await fetch(`${settings.relayUrl}/web-worker${path}`, {
         ...options,
         headers: {
-          Authorization: `Bearer ${settings.deviceToken}`,
+          Authorization: `Bearer ${TEAM_TASKBOX_WORKER_API_KEY}`,
+          "X-Pixel-Web-Worker-Token": settings.deviceToken,
           ...(options.body ? { "Content-Type": "application/json" } : {}),
           ...(options.headers || {})
         }
       });
       const payload = await response.json().catch(() => ({}));
       if (response.ok) return payload;
-      const error = new Error(payload.message || payload.error || `网页生图任务中继返回 HTTP ${response.status}`);
+      const error = new Error(teamWebWorkerErrorMessage(payload, response.status));
       error.status = response.status;
       if (response.status !== 429 && response.status < 500) throw error;
       lastError = error;
@@ -509,7 +502,7 @@ async function teamWebWorkerRequest(path, options = {}) {
       await new Promise((resolveWait) => setTimeout(resolveWait, Math.min(16e3, 1e3 * 2 ** attempt)));
     }
   }
-  throw lastError ?? new Error("网页生图任务中继持续不可用");
+  throw lastError ?? new Error("网页生图任务箱持续不可用");
 }
 async function saveActiveTeamWebJobs() {
   const jobs = [...activeTeamWebJobs.values()];
@@ -551,16 +544,26 @@ async function uploadTeamWebImage(jobId, image, endpoint, imageIndex, name) {
     if (chunkIndex + 1 < totalChunks) await new Promise((resolveWait) => setTimeout(resolveWait, TEAM_GATEWAY_CHUNK_PACE_MS));
   }
 }
-async function uploadTeamWebResultImage(jobId, image, imageIndex, resultCount) {
+async function uploadTeamWebStorageResult(jobId, image, imageIndex) {
   const mimeType = image.mimeType || "image/png";
   if (!/^image\/(png|jpeg|webp)$/.test(mimeType)) throw new Error("网页生图结果格式无效");
-  await teamWebWorkerRequest(`/jobs/${jobId}/result-images/${imageIndex}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": mimeType,
-      "X-Pixel-Result-Count": String(resultCount)
-    },
-    body: base64ToBytes(image.base64)
+  const bytes = base64ToBytes(image.base64);
+  const metadata = {
+    imageIndex,
+    fileName: `result-${imageIndex + 1}.${mimeType === "image/jpeg" ? "jpg" : mimeType.slice(6)}`,
+    mimeType,
+    byteLength: bytes.byteLength,
+    sha256: await sha256Hex(bytes.buffer)
+  };
+  const ticket = await teamWebWorkerRequest(`/jobs/${jobId}/result-storage-upload`, {
+    method: "POST", body: JSON.stringify(metadata)
+  });
+  const upload = await fetch(ticket.uploadUrl, {
+    method: "PUT", headers: { "Content-Type": mimeType }, body: bytes
+  });
+  if (!upload.ok) throw new Error(`对象存储上传返回 HTTP ${upload.status}`);
+  await teamWebWorkerRequest(`/jobs/${jobId}/result-storage-complete`, {
+    method: "POST", body: JSON.stringify({ ...metadata, uploadId: ticket.uploadId, eTag: upload.headers.get("Etag") || "" })
   });
 }
 async function clearActiveTeamWebJob(closeTab = true, expected) {
@@ -625,22 +628,20 @@ async function deliverTeamWebJob(message, active) {
   });
   active.phase = "delivering";
   await saveActiveTeamWebJobs();
-  const shouldUseBundle = active.job.resultDelivery === "bundle" && estimatedTeamWebBundleBytes(message.images) <= TEAM_WEB_SAFE_BUNDLE_BYTES;
-  if (active.job.resultDelivery === "bundle" && shouldUseBundle) {
-    const bundleBody = JSON.stringify({ version: 1, images: message.images });
-    await teamWebWorkerRequest(`/jobs/${active.job.id}/result-bundle`, {
-      method: "POST", body: bundleBody
-    });
-  } else if (active.job.resultDelivery === "bundle") {
-    await Promise.all(message.images.map((image, imageIndex) => uploadTeamWebResultImage(
-      active.job.id,
-      image,
-      imageIndex,
-      message.images.length
-    )));
-    await teamWebWorkerRequest(`/jobs/${active.job.id}/result-images/complete`, {
+  if (active.job.resultDelivery === "bundle") {
+    // Both bundle endpoints belonged to the retired Cloudflare staging relay.
+    // Any legacy bundle task claimed by a direct worker must use taskbox
+    // storage, independent of the combined result size.
+    await teamWebWorkerRequest(`/jobs/${active.job.id}/use-storage`, { method: "POST" });
+    await Promise.all(message.images.map((image, imageIndex) => uploadTeamWebStorageResult(active.job.id, image, imageIndex)));
+    await teamWebWorkerRequest(`/jobs/${active.job.id}/result-storage-finalize`, {
       method: "POST",
       body: JSON.stringify({ resultCount: message.images.length })
+    });
+  } else if (active.job.resultDelivery === "storage") {
+    await Promise.all(message.images.map((image, imageIndex) => uploadTeamWebStorageResult(active.job.id, image, imageIndex)));
+    await teamWebWorkerRequest(`/jobs/${active.job.id}/result-storage-finalize`, {
+      method: "POST", body: JSON.stringify({ resultCount: message.images.length })
     });
   } else {
     for (let imageIndex = 0; imageIndex < message.images.length; imageIndex += 1) {
@@ -769,7 +770,7 @@ async function teamWebWorkerTickOnce() {
   let localBrowserRunning = 0;
   for (const key of queue.running) if (await taskGenerationMode(key) === "browser") localBrowserRunning += 1;
   while (activeTeamWebJobs.size + localBrowserRunning < TEAM_WEB_MAX_CONCURRENCY) {
-    const claimed = await teamWebWorkerRequest("/claim", { method: "POST", body: JSON.stringify({ supportsBundle: true }) });
+    const claimed = await teamWebWorkerRequest("/claim", { method: "POST", body: JSON.stringify({ supportsBundle: true, supportsStorage: true }) });
     if (!claimed.job || activeTeamWebJobs.has(claimed.job.id)) break;
     const expected = { job: claimed.job, startedAt: Date.now(), phase: "claimed" };
     activeTeamWebJobs.set(expected.job.id, expected);

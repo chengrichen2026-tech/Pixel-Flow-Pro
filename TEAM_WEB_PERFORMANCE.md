@@ -1,6 +1,13 @@
 # Team Web 性能诊断（2026-09-14）
 
-状态：v0.3.12 已完成代码、本地验证、云端部署、GitHub 更新、执行机更新和真实双任务闭环验收。
+状态：v0.3.12 的历史性能记录保留如下。2026-09-16 已切换 Team Web 的实时传输路径：成员和执行机直连妙搭任务箱，执行机逐图直传任务箱对象存储，Cloudflare 仅继续承载 Team Cloud。任务箱协议 v10、发布和真实执行机闭环已验收。
+
+## 2026-09-16 直连任务箱与对象存储验收
+
+- 成员端和执行机端已移除 Team Web 的 Cloudflare 请求转发；任务箱 API Key 内置于内部扩展构建，成员令牌和网页执行机令牌仍分别用于任务归属与设备租约。
+- 真实重载扩展回读共享执行机在线 1 台、本机执行机 `正在接单`；创建的独立验收任务直接进入妙搭，状态依次为 `queued → running → completed`，交付类型为 `storage`。
+- 执行机通过 ChatGPT 生成 1 张结果后直传对象存储；提交方从签名地址下载 717,785 字节 PNG，SHA-256 校验一致，随后已签收。该验收没有写入用户现有画布。
+- 同日发现并修复旧 bundle 任务兼容缺口：直连执行机不再调用仅属于 Cloudflare 的 `result-bundle` 或 `result-images`；无论结果大小，旧 bundle 均先切换为 storage。旧执行机也不会领取 storage 任务。真实 5 图失败任务重试后完成，线上 Trace 依次回读 `use-storage`、逐图 `result-storage-upload/complete`、`result-storage-finalize` 和预览上传。
 
 ## 线上证据
 

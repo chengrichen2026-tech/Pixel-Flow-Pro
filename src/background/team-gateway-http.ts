@@ -1,4 +1,4 @@
-import { DEFAULT_TEAM_RELAY_URL } from "../team-settings";
+import { TEAM_TASKBOX_BASE_URL, TEAM_TASKBOX_MEMBER_API_KEY } from "../team-taskbox-config";
 
 type GatewaySettings = { baseUrl: string; memberToken: string };
 type GatewayErrorPayload = { error?: string | { message?: string }; message?: string };
@@ -7,7 +7,7 @@ export async function teamGatewaySettings(): Promise<GatewaySettings> {
   const values = await chrome.storage.local.get("pixelFlowTeamMemberToken");
   const memberToken = typeof values.pixelFlowTeamMemberToken === "string" ? values.pixelFlowTeamMemberToken.trim() : "";
   if (!/^pfm_[A-Za-z0-9_-]{32,64}$/.test(memberToken)) throw new Error("请先在“生图设置”中保存成员令牌");
-  return { baseUrl: DEFAULT_TEAM_RELAY_URL, memberToken };
+  return { baseUrl: TEAM_TASKBOX_BASE_URL, memberToken };
 }
 
 function gatewayErrorMessage(payload: GatewayErrorPayload) {
@@ -19,7 +19,7 @@ export async function teamGatewayRequest<T = Record<string, unknown>>(path: stri
   for (let attempt = 0; attempt < 7; attempt += 1) {
     let response: Response;
     try {
-      response = await fetch(`${baseUrl}/team${path}`, { ...options, headers: { "X-Pixel-Member-Token": memberToken, ...(options.headers || {}) } });
+      response = await fetch(`${baseUrl}${path}`, { ...options, headers: { Authorization: `Bearer ${TEAM_TASKBOX_MEMBER_API_KEY}`, "X-Pixel-Member-Token": memberToken, ...(options.headers || {}) } });
     } catch {
       if (attempt < 6) {
         await new Promise(resolve => setTimeout(resolve, Math.min(30_000, 1_000 * 2 ** attempt)));
@@ -59,7 +59,7 @@ export async function teamGatewayResultRequest(path: string): Promise<Response> 
   const { baseUrl, memberToken } = await teamGatewaySettings();
   let response: Response;
   try {
-    response = await fetch(`${baseUrl}/team${path}`, { cache: "no-store", headers: { "X-Pixel-Member-Token": memberToken } });
+    response = await fetch(`${baseUrl}${path}`, { cache: "no-store", headers: { Authorization: `Bearer ${TEAM_TASKBOX_MEMBER_API_KEY}`, "X-Pixel-Member-Token": memberToken } });
   } catch {
     throw new Error("无法通过团队任务箱下载结果");
   }
