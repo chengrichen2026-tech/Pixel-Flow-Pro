@@ -51,6 +51,16 @@ test("task cards expose explicit cancel, retry and cloud recovery actions", asyn
   assert.match(store, /type:"RECOVER_TEAM_RESULT",projectId:p\.id,taskId/);
 });
 
+test("deleting a task requires confirmed background cancellation", async () => {
+  const store = await readFile(new URL("src/store.ts", root), "utf8");
+  const deletion = store.slice(store.indexOf("async deleteSelected()"), store.indexOf("async restoreDeleted()"));
+  assert.match(deletion, /const response=await chrome\.runtime\.sendMessage\(\{type:"CANCEL_TASK"/);
+  assert.match(deletion, /if\(response\?\.accepted===false\)throw new Error/);
+  assert.match(deletion, /取消任务失败，未删除任务节点/);
+  assert.doesNotMatch(deletion, /\.catch\(\(\)=>\{\}\)/);
+  assert.ok(deletion.indexOf("response?.accepted===false") < deletion.indexOf("const project=await mutate"));
+});
+
 test("rebuilt API settings use the same local storage contract", async () => {
   const settings = await readFile(new URL("src/api-settings.ts", root), "utf8");
   const app = await readFile(new URL("src/App.tsx", root), "utf8");

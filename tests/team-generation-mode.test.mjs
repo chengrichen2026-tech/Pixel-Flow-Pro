@@ -59,6 +59,21 @@ test("team jobs recover through the persistent worker path", () => {
   assert.match(background, /job\.status === "canceled"/);
 });
 
+test("an existing team job resumes without regressing a delivering TaskRun", () => {
+  const executeTeamTask = background.slice(
+    background.indexOf("async function executeTeamTask("),
+    background.indexOf("async function executeTask("),
+  );
+  assert.match(
+    executeTeamTask,
+    /if \(!jobId\) \{[\s\S]*runStatus: "submitted"[\s\S]*\}\s*scheduleApiRecoveryAlarm\(\)/,
+  );
+  assert.doesNotMatch(
+    executeTeamTask,
+    /\}\s*await persistAndBroadcast\(\{ type: "TASK_STATUS"[^\n]+runStatus: "submitted"/,
+  );
+});
+
 test("structured commands can create team generation tasks", () => {
   assert.match(bridge, /command\.generationMode==="team"\?"team":command\.generationMode==="team_web"\?"team_web":"api"/);
   assert.match(bridge, /command\.teamImageModel==="sunburst"\?"sunburst":"flare"/);

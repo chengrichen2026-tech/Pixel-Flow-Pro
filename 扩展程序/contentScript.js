@@ -1,7 +1,7 @@
 "use strict";
 (() => {
   // src/shared/protocol.ts
-  var CHATGPT_ADAPTER_VERSION = 28;
+  var CHATGPT_ADAPTER_VERSION = 29;
   var taskTypes = /* @__PURE__ */ new Set([
     "RUN_TASK",
     "CANCEL_TASK",
@@ -315,6 +315,10 @@
     const text = normalizeTurnText(turn?.innerText || turn?.textContent || "");
     return /出了点问题/.test(text) && /重试/.test(text) || /something went wrong/i.test(text) && /try again/i.test(text);
   }
+  function isContentPolicyRefusal(turn) {
+    const text = normalizeTurnText(turn?.innerText || turn?.textContent || "");
+    return /(?:生成的)?图片.{0,24}(?:可能)?(?:违反|不符合).{0,16}(?:内容政策|政策)/.test(text) || /(?:image|request)[\s\S]{0,100}(?:violat(?:e|es|ed|ing)?|did not follow)[\s\S]{0,60}(?:content policy|policies)/i.test(text);
+  }
   function findTemporaryRetryButton() {
     return [...document.querySelectorAll("button")].find((button) => {
       const label = normalizeTurnText(button.innerText || button.textContent || button.getAttribute("aria-label") || "");
@@ -489,6 +493,9 @@
       const hasNewTurn = turns.length > previousTurnCount;
       const isGenerating = Boolean(document.querySelector(stopSelector));
       const hasMeaningfulResult = Boolean(result.responseText || result.images.length > 0);
+      if (hasNewTurn && !isGenerating && isContentPolicyRefusal(latest)) {
+        throw new AdapterError("content_policy", "ChatGPT 因内容政策拒绝生成图片");
+      }
       const retryButton = !isGenerating ? findTemporaryRetryButton() : void 0;
       if (retryButton) {
         if (automaticRetryCount >= 2) {

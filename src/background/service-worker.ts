@@ -954,8 +954,8 @@ async function executeTeamTask(projectId, taskId, project, task) {
         provider: task.generationMode === "team_web" ? "chatgpt_web" : "codex_cloud",
       });
       jobId = submitted.id;
+      await persistAndBroadcast({ type: "TASK_STATUS", projectId, taskId, status: "generating", runStatus: "submitted", detail: "任务已提交，等待执行机接单", apiJobId: jobId });
     }
-    await persistAndBroadcast({ type: "TASK_STATUS", projectId, taskId, status: "generating", runStatus: "submitted", detail: "任务已提交，等待执行机接单", apiJobId: jobId });
     scheduleApiRecoveryAlarm();
     const images = await waitForTeamGatewayJob(jobId, (detail, runStatus) => persistAndBroadcast({ type: "TASK_STATUS", projectId, taskId, status: "generating", runStatus, detail, apiJobId: jobId }));
     const handled = await updateScheduler(async () => {

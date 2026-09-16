@@ -58,6 +58,15 @@ test("ChatGPT temporary generation errors retry automatically with a hard limit"
   assert.match(source, /retryButton\.click\(\)/);
 });
 
+test("ChatGPT content-policy refusals terminate instead of staying in recovery", async () => {
+  const source = await readFile(new URL("public/contentScript.js", root), "utf8");
+  assert.match(source, /function isContentPolicyRefusal\(turn\)/);
+  assert.match(source, /图片\.\{0,24\}.*内容政策/);
+  assert.match(source, /content policy\|policies/);
+  assert.match(source, /hasNewTurn && !isGenerating && isContentPolicyRefusal\(latest\)/);
+  assert.match(source, /new AdapterError\("content_policy", "ChatGPT 因内容政策拒绝生成图片"\)/);
+});
+
 test("manual send keeps the task alive until the user submits and the result returns", async () => {
   const content = await readFile(new URL("public/contentScript.js", root), "utf8");
   const background = await readBackgroundSource();
@@ -199,8 +208,8 @@ test("browser results preserve the original latest-assistant-turn writeback path
 test("reinjected ChatGPT adapter replaces a stale page listener after extension reload", async () => {
   const content = await readFile(new URL("public/contentScript.js", root), "utf8");
   const background = await readBackgroundSource();
-  assert.match(content, /CHATGPT_ADAPTER_VERSION = 28/);
-  assert.match(background, /CHATGPT_ADAPTER_VERSION = 28/);
+  assert.match(content, /CHATGPT_ADAPTER_VERSION = 29/);
+  assert.match(background, /CHATGPT_ADAPTER_VERSION = 29/);
   assert.match(content, /__gptNodeCanvasMessageListener/);
   assert.match(content, /removeListener\(previousMessageListener\)/);
   assert.match(content, /addListener\(currentMessageListener\)/);

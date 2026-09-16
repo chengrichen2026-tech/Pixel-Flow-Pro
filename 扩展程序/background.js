@@ -4440,7 +4440,7 @@ function resolveTaskConversationUrl(message, senderUrl) {
 }
 //#endregion
 //#region src/background/chatgpt-adapter-bridge.ts
-var isCurrentAdapter = (value) => Boolean(value && typeof value === "object" && value.adapterVersion === 28);
+var isCurrentAdapter = (value) => Boolean(value && typeof value === "object" && value.adapterVersion === 29);
 async function probeAdapter(tabs, tabId, message) {
 	try {
 		const state = await tabs.sendMessage(tabId, {
@@ -5900,16 +5900,16 @@ async function executeTeamTask(projectId, taskId, project, task) {
 				imageModel: task.teamImageModel === "sunburst" ? "sunburst" : "flare",
 				provider: task.generationMode === "team_web" ? "chatgpt_web" : "codex_cloud"
 			})).id;
+			await persistAndBroadcast({
+				type: "TASK_STATUS",
+				projectId,
+				taskId,
+				status: "generating",
+				runStatus: "submitted",
+				detail: "任务已提交，等待执行机接单",
+				apiJobId: jobId
+			});
 		}
-		await persistAndBroadcast({
-			type: "TASK_STATUS",
-			projectId,
-			taskId,
-			status: "generating",
-			runStatus: "submitted",
-			detail: "任务已提交，等待执行机接单",
-			apiJobId: jobId
-		});
 		scheduleApiRecoveryAlarm();
 		const images = await waitForTeamGatewayJob(jobId, (detail, runStatus) => persistAndBroadcast({
 			type: "TASK_STATUS",

@@ -23,3 +23,4 @@ import "./team-generation-mode.test.mjs";
 import "./miaoda-worker.test.mjs";
 
 import "./team-web-delivery.test.mjs";
+import "./team-web-worker-settings.test.mjs";

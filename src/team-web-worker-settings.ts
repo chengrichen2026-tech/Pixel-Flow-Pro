@@ -36,23 +36,24 @@ export async function readTeamWebWorker(): Promise<TeamWebWorkerSettings> {
   };
 }
 
-export async function pairTeamWebWorker(relayValue: string, pairingValue: string, nameValue: string) {
+export async function pairTeamWebWorker(relayValue: string, pairingValue: string) {
   const relayUrl = normalizeWebWorkerRelayUrl(relayValue);
   const pairingCode = pairingValue.replace(/\s/g, "");
-  const name = nameValue.trim();
   if (!/^\d{8}$/.test(pairingCode)) throw new Error("请输入 8 位一次性配对码");
-  if (!name) throw new Error("请输入网页生图机名称");
   const permission = { origins: [`${new URL(relayUrl).origin}/*`] };
   const granted = await chrome.permissions.contains(permission) || await chrome.permissions.request(permission);
   if (!granted) throw new Error("未授权 Pixel Flow 访问网页生图任务中继");
   const response = await fetch(`${relayUrl}/web-worker/pair`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ pairingCode, deviceName: name })
+    body: JSON.stringify({ pairingCode })
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.message || payload.error || `配对失败（HTTP ${response.status}）`);
   if (!/^pfw_[A-Za-z0-9_-]{32,64}$/.test(payload.deviceToken || "") || !payload.workerId) throw new Error("任务箱没有返回有效的设备凭证");
+  const name = typeof payload.device?.name === "string" && payload.device.name.trim()
+    ? payload.device.name.trim()
+    : "网页生图机";
   await chrome.storage.local.set({
     [RELAY_URL_STORAGE]: relayUrl,
     [DEVICE_TOKEN_STORAGE]: payload.deviceToken,
