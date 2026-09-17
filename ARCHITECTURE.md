@@ -20,7 +20,7 @@
 - API 持久执行：`api-worker/server.mjs`，任务文件位于 `runtime/api-jobs/`；macOS 使用动态生成的 LaunchAgent，Windows 使用当前用户启动文件夹与 PID 验证脚本
 - 正式团队任务箱客户端：`src/background/team-gateway-http.ts`；云端服务由妙搭任务箱与 Cloudflare Worker承接
 - Codex OAuth 只在服务端执行环境读取；扩展和网络接口都不返回 OAuth 凭证
-- 团队平台访问 Key 只保存在 Cloudflare Worker secret；成员浏览器只保存成员令牌。GPT Web 团队任务不增加 Team Cloud 每日额度
+- 团队平台访问 Key 只保存在 Cloudflare Worker secret；成员浏览器只保存成员令牌。GPT Web 团队与 Team Cloud 任务统一计入成员每日团队生图用量与额度
 - 画布迁移门禁与进度：`CANVAS_MIGRATION.md`
 - 扩展权限和产品信息：`public/manifest.json`
 - 后台调度源码：`src/background/service-worker.ts` 及其 `src/background/`、`src/domain/` 模块

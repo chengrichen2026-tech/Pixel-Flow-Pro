@@ -748,7 +748,17 @@ async function teamWebWorkerTickOnce() {
   }
   scheduleTeamWebWorkerAlarm();
   for (const expected of [...activeTeamWebJobs.values()]) {
-    const remote = await teamWebWorkerRequest(`/jobs/${expected.job.id}/status`).catch(() => undefined);
+    let remote;
+    try {
+      remote = await teamWebWorkerRequest(`/jobs/${expected.job.id}/status`);
+    } catch (error) {
+      const status = Number(error?.status);
+      if (status === 404 || status === 410) {
+        await clearActiveTeamWebJob(true, expected);
+        await updateScheduler(async () => void 0);
+        return;
+      }
+    }
     if (remote && ["completed", "failed", "canceled"].includes(remote.status)) {
       await clearActiveTeamWebJob(true, expected);
       await updateScheduler(async () => void 0);

@@ -49,7 +49,7 @@ GPT Web 选择“团队”即原 Team Web 链路。已有画布继续读取 `api
 
 - **API**：通过本机 `127.0.0.1:43129` API Worker 调用 `aihub.rbmanon.cn`，模型固定为 `gpt-image-2`、质量 `medium`。纯文字走 `generations`，参考图走 JSON Base64 `edits`。
 - **GPT Web · 本机**：使用当前浏览器已登录的 ChatGPT，新建或恢复真实对话，上传参考图、发送提示词并把结果写回画布。
-- **GPT Web · 团队**：成员任务直接进入妙搭任务箱，由团队中任意一台已配对且在线的远端 Pixel Flow 执行机领取；提交电脑本身无需配对。该模式不消耗 Team Cloud 每日额度。协议 v10 使用对象存储逐图直传：执行机取得上传地址后并行上传原图，任务箱只保存结果清单，提交方从签名地址并行下载并校验 SHA-256；旧 bundle / chunks 任务保持兼容，协议 v8 取消仍可用。
+- **GPT Web · 团队**：成员任务直接进入妙搭任务箱，由团队中任意一台已配对且在线的远端 Pixel Flow 执行机领取；提交电脑本身无需配对。该模式与 Team Cloud 统一计入成员每日团队生图用量与额度。协议 v10 使用对象存储逐图直传：执行机取得上传地址后并行上传原图，任务箱只保存结果清单，提交方从签名地址并行下载并校验 SHA-256；旧 bundle / chunks 任务保持兼容，协议 v8 取消仍可用。
 - **Team Cloud**：通过妙搭任务箱、Cloudflare Queue / Worker 和服务端 Codex OAuth 生图；可选 Flare / Sunburst，成员浏览器只保存成员令牌，平台访问 Key 由中继托管。
 
 Team Web 的性能与验收记录见 [TEAM_WEB_PERFORMANCE.md](TEAM_WEB_PERFORMANCE.md)。旧本机 Team Gateway / Quick Tunnel 仍是兼容路径，不是新伙伴的推荐方案。
