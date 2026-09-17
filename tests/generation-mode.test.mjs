@@ -312,15 +312,26 @@ test("ChatGPT waits for every reference image to finish a stable upload before s
   assert.doesNotMatch(content, /naturalWidth > 0/);
   assert.match(content, /if \(removeButtons\.length > 0\) return removeButtons\.length/);
   assert.match(content, /return removeButtons\.map\(\(button\) => button\.getAttribute\("aria-label"\)/);
-  assert.match(content, /findUploadInput\(\) \?\? resolvedInput/);
+  assert.match(content, /const uploadInputs = findUploadInputs\(\)/);
   assert.match(content, /任务开始前已有附件/);
 });
 
 test("ChatGPT upload selects the file input belonging to the active composer", async () => {
   const content = await readFile(new URL("public/contentScript.js", root), "utf8");
+  assert.match(content, /function findUploadInputs\(\)/);
+  assert.match(content, /\[data-testid="upload-photos-input"\][\s\S]*?#upload-files[\s\S]*?\[data-testid="upload-media-input"\]/);
   assert.match(content, /const region = findComposerRegion\(\);[\s\S]*?region\.querySelector\(selector\)/);
   assert.match(content, /document\.querySelectorAll\(selector\)/);
   assert.match(content, /candidates\.at\(-1\)/);
+});
+
+test("ChatGPT upload falls back across active composer file inputs when one ignores a synthetic change", async () => {
+  const content = await readFile(new URL("public/contentScript.js", root), "utf8");
+  assert.match(content, /const uploadInputs = findUploadInputs\(\)/);
+  assert.match(content, /const dispatchImage = \(input\) =>/);
+  assert.match(content, /Date\.now\(\) - lastDispatchAt > 5e3/);
+  assert.match(content, /inputIndex \+ 1 < uploadInputs\.length/);
+  assert.match(content, /dispatchImage\(uploadInputs\[inputIndex\]\)/);
 });
 
 test("browser tasks keep reference upload and prompt submission in one adapter transaction", async () => {

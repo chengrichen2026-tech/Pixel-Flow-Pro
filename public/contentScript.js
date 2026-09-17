@@ -73,34 +73,31 @@
     return composer?.closest('form, [data-testid="composer"], [data-type="unified-composer"]') ?? composer?.parentElement;
   }
   function findUploadInput() {
+    return findUploadInputs()[0];
+  }
+  function findUploadInputs() {
     const region = findComposerRegion();
     const knownSelectors = [
+      '[data-testid="upload-photos-input"]',
       "#upload-files",
-      '[data-testid="upload-photos-input"]'
+      '[data-testid="upload-media-input"]',
+      "#upload-media-files"
     ];
+    const inputs = [];
+    const addInput = (input) => {
+      if (input && !input.disabled && !input.hasAttribute("capture") && !inputs.includes(input)) inputs.push(input);
+    };
     if (region) {
       for (const selector of knownSelectors) {
-        const input = region.querySelector(selector);
-        if (input && !input.disabled) return input;
+        addInput(region.querySelector(selector));
       }
-      const regionalFallback = region.querySelector('input[type="file"][accept*="image"]:not([capture]), input[type="file"]:not([capture])');
-      if (regionalFallback && !regionalFallback.disabled) return regionalFallback;
+      for (const input of region.querySelectorAll('input[type="file"][accept*="image"]:not([capture]), input[type="file"]:not([capture])')) addInput(input);
     }
     for (const selector of knownSelectors) {
       const candidates = [...document.querySelectorAll(selector)];
-      const input = candidates.find((candidate) => candidate.closest('form, [data-testid="composer"], [data-type="unified-composer"]')) ?? candidates.at(-1);
-      if (input && !input.disabled) return input;
+      addInput(candidates.find((candidate) => candidate.closest('form, [data-testid="composer"], [data-type="unified-composer"]')) ?? candidates.at(-1));
     }
-    if (!region) return void 0;
-    const fallbackSelectors = [
-      'input[type="file"][accept*="image"]:not([capture])',
-      'input[type="file"]:not([capture])'
-    ];
-    for (const selector of fallbackSelectors) {
-      const input = region.querySelector(selector);
-      if (input && !input.disabled) return input;
-    }
-    return void 0;
+    return inputs;
   }
   function findAttachmentButton() {
     const direct = document.querySelector(
@@ -448,18 +445,29 @@
       throw new AdapterError("upload_failed", "ChatGPT 输入区在任务开始前已有附件，已停止发送以避免混入上一次参考图");
     }
     for (const [index, image] of images.entries()) {
-      resolvedInput = findUploadInput() ?? resolvedInput;
-      const transfer = new DataTransfer();
-      transfer.items.add(decodeImage(image));
-      resolvedInput.files = transfer.files;
-      resolvedInput.dispatchEvent(new Event("input", { bubbles: true }));
-      resolvedInput.dispatchEvent(new Event("change", { bubbles: true }));
       expectedAttachmentCount += 1;
       const uploadStartedAt = Date.now();
       let lastBackgroundWake = 0;
+      const uploadInputs = findUploadInputs();
+      if (resolvedInput && !uploadInputs.includes(resolvedInput)) uploadInputs.push(resolvedInput);
+      let inputIndex = 0;
+      const dispatchImage = (input) => {
+        const transfer = new DataTransfer();
+        transfer.items.add(decodeImage(image));
+        input.files = transfer.files;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      };
+      dispatchImage(uploadInputs[inputIndex]);
+      let lastDispatchAt = Date.now();
       while (countComposerAttachments() < expectedAttachmentCount || composerIsUploading()) {
         if (Date.now() - uploadStartedAt > 6e4) {
           throw new AdapterError("upload_failed", `\u7B2C ${index + 1} \u5F20\u53C2\u8003\u56FE\u6CA1\u6709\u51FA\u73B0\u5728 ChatGPT \u8F93\u5165\u533A`);
+        }
+        if (countComposerAttachments() < expectedAttachmentCount && Date.now() - lastDispatchAt > 5e3 && inputIndex + 1 < uploadInputs.length) {
+          inputIndex += 1;
+          dispatchImage(uploadInputs[inputIndex]);
+          lastDispatchAt = Date.now();
         }
         if (document.hidden && Date.now() - lastBackgroundWake > 1500) {
           lastBackgroundWake = Date.now();
@@ -467,6 +475,7 @@
         }
         await waitForPageChange(200);
       }
+      resolvedInput = uploadInputs[inputIndex] ?? resolvedInput;
       await waitForStableComposerAttachments(expectedAttachmentCount, index + 1);
     }
   }

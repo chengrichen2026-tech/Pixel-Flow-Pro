@@ -24,7 +24,8 @@ test("user-facing documentation matches the packaged version and task model", as
   for (const term of ["TaskRun", "取消", "重试", "恢复结果"]) assert.match(usage, new RegExp(term));
   assert.match(commandApi, /task\.recoverTeamResult/);
   assert.match(partnerGuide, /“Team Cloud”，或选择“GPT Web → 团队”/);
-  assert.match(partnerGuide, /GPT Web 团队模式不消耗该额度/);
+  assert.match(partnerGuide, /Team Cloud 与 GPT Web 团队模式共用同一个成员每日额度池/);
+  assert.match(partnerGuide, /切换模式不会获得额外次数/);
   assert.doesNotMatch(partnerGuide, /左侧“生图设置”/);
 });
 
@@ -38,8 +39,8 @@ test("HTML guide navigation and local images resolve", async () => {
   for (const match of html.matchAll(/<img[^>]+src="([^"]+)"/g)) {
     await access(new URL(match[1], new URL("先看这里-使用说明.html", root)));
   }
-  assert.match(html, new RegExp(`<title>Pixel Flow v${packageJson.version.replaceAll(".", "\\.")} 使用说明（2026-09-15 更新）<\\/title>`));
-  assert.match(html, new RegExp(`<footer>Pixel Flow · AI 创意任务画布 · v${packageJson.version.replaceAll(".", "\\.")} · 2026-09-15`));
+  assert.match(html, new RegExp(`<title>Pixel Flow v${packageJson.version.replaceAll(".", "\\.")} 使用说明（2026-09-17 更新）<\\/title>`));
+  assert.match(html, new RegExp(`<footer>Pixel Flow · AI 创意任务画布 · v${packageJson.version.replaceAll(".", "\\.")} · 2026-09-17`));
   assert.match(html, /<img src="扩展程序\/icon-128\.png" alt="Pixel Flow PF 图标">/);
   assert.doesNotMatch(html, /说明图片\/brand-logo\.png/);
 });
