@@ -14,7 +14,7 @@ Pixel Flow 是 Chrome / Edge 本地扩展，用无限画布组织图片、文字
    - 本机使用当前浏览器已登录的 chatgpt.com，不需要 API Key 或 API Worker。
    - 团队即原 Team Web：由已配对、已登录 ChatGPT 且正在接单的网页生图机执行。
    - 团队中任意一台在线执行机都可接单，提交电脑不需要配对成执行机。
-   - GPT Web 团队任务不消耗 Team Cloud 每日额度。
+   - GPT Web 团队与 Team Cloud 共用同一个成员每日额度池。
    - 没有在线执行机时，团队任务会保留并显示“等待上线”。
 
 2. Team Cloud
@@ -26,6 +26,12 @@ Pixel Flow 是 Chrome / Edge 本地扩展，用无限画布组织图片、文字
    - 模型：gpt-image-2。
    - 需要 aihub.rbmanon.cn 的 API Key、Node.js 20+ 和 Pixel Flow API Worker。
    - 不需要登录 ChatGPT 网页。
+
+使用前按模式准备：
+- GPT Web · 本机：当前电脑需登录可正常使用的 ChatGPT 账号。
+- GPT Web · 团队：提交电脑只需成员令牌；团队内至少一台已配对、已登录 ChatGPT 且正在接单的网页生图机。
+- Team Cloud：只需成员令牌，不需要成员登录 ChatGPT、安装 Node.js 或运行 API Worker。
+- API：需要 API Key、Node.js 20+ 和 Pixel Flow API Worker。
 
 二、安装或更新扩展
 ------------------

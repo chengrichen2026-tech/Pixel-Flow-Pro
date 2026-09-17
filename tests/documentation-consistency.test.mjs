@@ -22,6 +22,14 @@ test("user-facing documentation matches the packaged version and task model", as
   }
   assert.match(readme, /GPT Web[\s\S]+本机 \/ 团队[\s\S]+Team Cloud[\s\S]+Flare \/ Sunburst[\s\S]+API/);
   for (const term of ["TaskRun", "取消", "重试", "恢复结果"]) assert.match(usage, new RegExp(term));
+  for (const mode of ["GPT Web · 本机", "GPT Web · 团队", "Team Cloud", "API"]) {
+    assert.match(usage, new RegExp(mode));
+    assert.match(html, new RegExp(`<h3>${mode}</h3>`));
+  }
+  assert.match(html, /GPT Web · 团队[\s\S]*成员令牌[\s\S]*网页生图机/);
+  assert.match(html, /Team Cloud[\s\S]*Flare 或 Sunburst[\s\S]*不需要登录 ChatGPT/);
+  assert.doesNotMatch(usage, /GPT Web 团队任务不消耗 Team Cloud/);
+  assert.doesNotMatch(html, /不消耗 Team Cloud 每日额度/);
   assert.match(commandApi, /task\.recoverTeamResult/);
   assert.match(partnerGuide, /“Team Cloud”，或选择“GPT Web → 团队”/);
   assert.match(partnerGuide, /Team Cloud 与 GPT Web 团队模式共用同一个成员每日额度池/);
