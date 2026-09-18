@@ -1131,6 +1131,7 @@ async function reconcileSchedulerSnapshot() {
   await schedulerReady;
   const liveScopes = new Map();
   const interruptedBrowserTasks = [];
+  const retryBrowserTasks = [];
   for (const project of await projectRepository.listProjects()) {
     const latestRuns = await taskRunRepository.latestByProject(project.id);
     for (const task of project.graph.nodes) {
@@ -1138,7 +1139,16 @@ async function reconcileSchedulerSnapshot() {
       const runtime = resolveTaskRuntime(task, latestRuns.get(task.id));
       if (!runtime.active) continue;
       if (task.generationMode === "browser" && runtime.status !== "queued" && !concreteChatGptConversationUrl(runtime.conversationUrl)) {
-        interruptedBrowserTasks.push({ projectId: project.id, taskId: task.id });
+        const key = createTaskScopeKey(project.id, task.id);
+        // Match the legacy local GPT Web behavior: a browser task without a
+        // concrete conversation is still recoverable work, not a terminal
+        // failure. A restart can happen before ChatGPT reports its URL.
+        if (browserTaskMessages.has(key)) {
+          liveScopes.set(key, { projectId: project.id, taskId: task.id });
+        } else {
+          liveScopes.set(key, { projectId: project.id, taskId: task.id });
+          retryBrowserTasks.push(key);
+        }
         continue;
       }
       liveScopes.set(createTaskScopeKey(project.id, task.id), { projectId: project.id, taskId: task.id });
@@ -1158,6 +1168,10 @@ async function reconcileSchedulerSnapshot() {
   const activeTaskTabs = (Array.isArray(state.activeTaskTabs) ? state.activeTaskTabs : []).filter((entry) => Array.isArray(entry) && runningKeys.has(entry[0]));
   await chrome.storage.session.set({ activeTaskScopes, activeTaskTabs });
   await saveScheduler();
+  if (retryBrowserTasks.length) {
+    queue = enqueue(retryBrowserTasks.reduce((snapshot, key) => cancelTask(snapshot, key), queue), retryBrowserTasks);
+    await saveScheduler();
+  }
   for (const task of interruptedBrowserTasks) {
     await persistAndBroadcast({
       type: "TASK_ERROR",

@@ -6128,6 +6128,7 @@ async function reconcileSchedulerSnapshot() {
 	await schedulerReady;
 	const liveScopes = /* @__PURE__ */ new Map();
 	const interruptedBrowserTasks = [];
+	const retryBrowserTasks = [];
 	for (const project of await projectRepository.listProjects()) {
 		const latestRuns = await taskRunRepository.latestByProject(project.id);
 		for (const task of project.graph.nodes) {
@@ -6135,10 +6136,18 @@ async function reconcileSchedulerSnapshot() {
 			const runtime = resolveTaskRuntime(task, latestRuns.get(task.id));
 			if (!runtime.active) continue;
 			if (task.generationMode === "browser" && runtime.status !== "queued" && !concreteChatGptConversationUrl(runtime.conversationUrl)) {
-				interruptedBrowserTasks.push({
+				const key = createTaskScopeKey(project.id, task.id);
+				if (browserTaskMessages.has(key)) liveScopes.set(key, {
 					projectId: project.id,
 					taskId: task.id
 				});
+				else {
+					liveScopes.set(key, {
+						projectId: project.id,
+						taskId: task.id
+					});
+					retryBrowserTasks.push(key);
+				}
 				continue;
 			}
 			liveScopes.set(createTaskScopeKey(project.id, task.id), {
@@ -6164,6 +6173,10 @@ async function reconcileSchedulerSnapshot() {
 		activeTaskTabs
 	});
 	await saveScheduler();
+	if (retryBrowserTasks.length) {
+		queue = enqueue(retryBrowserTasks.reduce((snapshot, key) => cancelTask(snapshot, key), queue), retryBrowserTasks);
+		await saveScheduler();
+	}
 	for (const task of interruptedBrowserTasks) await persistAndBroadcast({
 		type: "TASK_ERROR",
 		...task,
