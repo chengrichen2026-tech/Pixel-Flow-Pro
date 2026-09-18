@@ -40,6 +40,7 @@ test("task run transitions cover local API, local browser and remote delivery pa
   const paths = [
     ["queued", "preparing", "sending", "submitted", "generating", "completed"],
     ["queued", "preparing", "uploading", "sending", "submitted", "generating", "completed"],
+    ["queued", "preparing", "sending", "uploading", "submitted", "generating", "completed"],
     ["queued", "preparing", "sending", "submitted", "generating", "delivering", "completed"],
     ["queued", "preparing", "needs_action", "submitted", "generating", "completed"]
   ];

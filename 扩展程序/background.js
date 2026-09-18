@@ -186,11 +186,13 @@ var transitions = {
 	],
 	uploading: [
 		"sending",
+		"submitted",
 		"failed",
 		"needs_action",
 		"canceled"
 	],
 	sending: [
+		"uploading",
 		"submitted",
 		"generating",
 		"failed",
@@ -5214,17 +5216,21 @@ async function reconcileBrowserTaskResults() {
 }
 var TEAM_GATEWAY_CHUNK_CHARACTERS = 6e5;
 var TEAM_GATEWAY_CHUNK_PACE_MS = 250;
-async function submitTeamGatewayJob(input) {
+async function submitTeamGatewayJob(input, existingJobId, onJobCreated) {
 	const health = await teamGatewayRequest("/health");
-	if (Number(health.protocolVersion || 1) < 2) return teamGatewayRequest("/jobs", {
-		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify(input)
-	});
+	if (Number(health.protocolVersion || 1) < 2) {
+		const submitted = await teamGatewayRequest("/jobs", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify(input)
+		});
+		await onJobCreated?.(submitted.id);
+		return submitted;
+	}
 	if (Number(health.protocolVersion || 1) < 4) throw new Error("团队任务箱版本过旧，暂不支持 Flare / Sunburst 模型选择");
 	if (input.provider === "chatgpt_web" && Number(health.protocolVersion || 1) < 5) throw new Error("团队任务箱版本过旧，暂不支持 Team Web");
 	const images = Array.isArray(input.images) ? input.images : [];
-	const submitted = await teamGatewayRequest("/jobs", {
+	const submitted = existingJobId ? { id: existingJobId } : await teamGatewayRequest("/jobs", {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({
@@ -5237,6 +5243,7 @@ async function submitTeamGatewayJob(input) {
 			provider: input.provider === "chatgpt_web" ? "chatgpt_web" : "codex_cloud"
 		})
 	});
+	await onJobCreated?.(submitted.id);
 	try {
 		for (let imageIndex = 0; imageIndex < images.length; imageIndex += 1) {
 			const image = images[imageIndex];
@@ -5749,19 +5756,13 @@ async function finalizeTeamGatewayJob(jobId, images) {
 async function waitForTeamGatewayJob(jobId, onProgress) {
 	let lastDetail;
 	while (true) {
-		let job;
-		try {
-			job = await teamGatewayRequest(`/jobs/${jobId}`);
-		} catch (error) {
-			if ((error instanceof Error ? error.message : String(error)) !== "无法连接团队生图服务，请检查网关地址、网络和服务状态") throw error;
+		const job = await readTeamGatewayJob(jobId, async () => {
 			const reconnectDetail = "团队服务暂时不可达，正在自动重连";
 			if (reconnectDetail !== lastDetail) {
 				lastDetail = reconnectDetail;
 				await onProgress?.(reconnectDetail, "submitted");
 			}
-			await new Promise((resolve) => setTimeout(resolve, 2e3));
-			continue;
-		}
+		});
 		if (job.status === "completed") {
 			await onProgress?.("图片已生成，正在写回画布", "delivering");
 			return downloadTeamGatewayImages(job);
@@ -5775,6 +5776,15 @@ async function waitForTeamGatewayJob(jobId, onProgress) {
 			lastDetail = detail;
 			await onProgress?.(detail, runStatus);
 		}
+		await new Promise((resolve) => setTimeout(resolve, 2e3));
+	}
+}
+async function readTeamGatewayJob(jobId, onReconnect) {
+	while (true) try {
+		return await teamGatewayRequest(`/jobs/${jobId}`);
+	} catch (error) {
+		if ((error instanceof Error ? error.message : String(error)) !== "无法连接团队生图服务，请检查网关地址、网络和服务状态") throw error;
+		await onReconnect?.(error);
 		await new Promise((resolve) => setTimeout(resolve, 2e3));
 	}
 }
@@ -5917,9 +5927,27 @@ async function executeTeamTask(projectId, taskId, project, task) {
 	try {
 		await teamGatewaySettings();
 		const request = await prepareTaskRequest(project, taskId, task);
+		const runs = await taskRunRepository.list(projectId, taskId);
+		const run = runs.at(-1);
+		if (!run || isTerminalRunStatus(run.status)) throw new Error("找不到可恢复的团队任务运行");
+		const previousRun = runs.at(-2);
+		const submissionRunId = previousRun?.detail === "Invalid task run transition: sending -> uploading" ? previousRun.id : run.id;
 		let jobId = task.apiJobId;
-		if (!jobId) {
-			await persistAndBroadcast({
+		let resumeUpload = false;
+		if (jobId && run.status === "uploading") {
+			resumeUpload = (await readTeamGatewayJob(jobId)).status === "uploading";
+			if (!resumeUpload) await persistAndBroadcast({
+				type: "TASK_STATUS",
+				projectId,
+				taskId,
+				status: "generating",
+				runStatus: "submitted",
+				detail: "云端任务已提交，正在恢复进度",
+				apiJobId: jobId
+			});
+		}
+		if (!jobId || resumeUpload) {
+			if (!jobId) await persistAndBroadcast({
 				type: "TASK_STATUS",
 				projectId,
 				taskId,
@@ -5927,10 +5955,21 @@ async function executeTeamTask(projectId, taskId, project, task) {
 				detail: void 0
 			});
 			jobId = (await submitTeamGatewayJob({
-				requestId: `${projectId}:${taskId}:${Date.now()}`,
+				requestId: `${projectId}:${taskId}:${submissionRunId}`,
 				...request,
 				imageModel: task.teamImageModel === "sunburst" ? "sunburst" : "flare",
 				provider: task.generationMode === "team_web" ? "chatgpt_web" : "codex_cloud"
+			}, jobId, async (createdJobId) => {
+				jobId = createdJobId;
+				await persistAndBroadcast({
+					type: "TASK_STATUS",
+					projectId,
+					taskId,
+					status: "uploading",
+					runStatus: "uploading",
+					detail: "云端任务已创建，正在上传输入",
+					apiJobId: createdJobId
+				});
 			})).id;
 			await persistAndBroadcast({
 				type: "TASK_STATUS",
@@ -6238,7 +6277,7 @@ async function recoverInterruptedApiTasks() {
 				pendingScopes.delete(item.key);
 				continue;
 			}
-			if (runtime.providerJobId) {
+			if (runtime.providerJobId || task?.generationMode === "team" || task?.generationMode === "team_web") {
 				pendingScopes.set(item.key, {
 					projectId: item.projectId,
 					taskId: item.taskId

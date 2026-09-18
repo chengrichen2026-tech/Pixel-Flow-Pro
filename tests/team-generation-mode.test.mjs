@@ -16,8 +16,8 @@ test("team mode sends direct taskbox jobs without exposing Codex OAuth to the ex
   assert.match(background, /`\$\{baseUrl\}\$\{path\}`/);
   assert.match(background, /Authorization: `Bearer \$\{TEAM_TASKBOX_MEMBER_API_KEY\}`/);
   assert.match(background, /async function executeTeamTask\(projectId, taskId, project, task\)/);
-  assert.match(background, /requestId: `\$\{projectId\}:\$\{taskId\}:\$\{Date\.now\(\)\}`/);
-  assert.match(background, /async function submitTeamGatewayJob\(input\)/);
+  assert.match(background, /requestId: `\$\{projectId\}:\$\{taskId\}:\$\{submissionRunId\}`/);
+  assert.match(background, /async function submitTeamGatewayJob\(input, existingJobId, onJobCreated\)/);
   assert.match(background, /protocolVersion/);
   assert.match(background, /Number\(health\.protocolVersion \|\| 1\) < 4/);
   assert.match(background, /resultDelivery: input\.provider === "chatgpt_web"[\s\S]*\? "storage"/);
@@ -57,20 +57,28 @@ test("team jobs recover through the persistent worker path", () => {
   assert.match(background, /teamGatewayRequest\(`\/jobs\/\$\{jobId\}\/cancel`, \{ method: "POST" \}\)/);
   assert.match(background, /const providerJobId = run\?\.providerJobId \|\| task\?\.apiJobId;[\s\S]*cancelTeamGatewayJob\(providerJobId\)/);
   assert.match(background, /job\.status === "canceled"/);
+  assert.match(background, /runtime\.providerJobId \|\| task\?\.generationMode === "team" \|\| task\?\.generationMode === "team_web"/);
 });
 
-test("an existing team job resumes without regressing a delivering TaskRun", () => {
+test("team submission persists its job before input upload and resumes the same attempt after reload", () => {
   const executeTeamTask = background.slice(
     background.indexOf("async function executeTeamTask("),
     background.indexOf("async function executeTask("),
   );
-  assert.match(
-    executeTeamTask,
-    /if \(!jobId\) \{[\s\S]*runStatus: "submitted"[\s\S]*\}\s*scheduleApiRecoveryAlarm\(\)/,
-  );
-  assert.doesNotMatch(
-    executeTeamTask,
-    /\}\s*await persistAndBroadcast\(\{ type: "TASK_STATUS"[^\n]+runStatus: "submitted"/,
+  assert.match(executeTeamTask, /if \(jobId && run\.status === "uploading"\)/);
+  assert.match(executeTeamTask, /const previousRun = runs\.at\(-2\)/);
+  assert.match(executeTeamTask, /previousRun\?\.detail === "Invalid task run transition: sending -> uploading" \? previousRun\.id : run\.id/);
+  assert.match(executeTeamTask, /const remoteJob = await readTeamGatewayJob\(jobId\)/);
+  assert.match(executeTeamTask, /resumeUpload = remoteJob\.status === "uploading"/);
+  assert.match(executeTeamTask, /if \(!resumeUpload\)[\s\S]*detail: "云端任务已提交，正在恢复进度"/);
+  assert.match(executeTeamTask, /if \(!jobId \|\| resumeUpload\)/);
+  assert.match(executeTeamTask, /if \(!jobId\) await persistAndBroadcast/);
+  assert.match(executeTeamTask, /runStatus: "uploading"[\s\S]*apiJobId: createdJobId/);
+  assert.match(executeTeamTask, /requestId: `\$\{projectId\}:\$\{taskId\}:\$\{submissionRunId\}`/);
+  assert.ok(
+    executeTeamTask.indexOf('detail: "云端任务已创建，正在上传输入"')
+      < executeTeamTask.indexOf('detail: "任务已提交，等待执行机接单"'),
+    "the provider job must be persisted before input upload completes",
   );
 });
 

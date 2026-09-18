@@ -19,8 +19,8 @@ export const terminalRunStatuses = ["completed", "failed", "canceled"] as const 
 const transitions: Readonly<Record<RunStatus, readonly RunStatus[]>> = {
   queued: ["preparing", "failed", "canceled"],
   preparing: ["uploading", "sending", "submitted", "failed", "needs_action", "canceled"],
-  uploading: ["sending", "failed", "needs_action", "canceled"],
-  sending: ["submitted", "generating", "failed", "needs_action", "canceled"],
+  uploading: ["sending", "submitted", "failed", "needs_action", "canceled"],
+  sending: ["uploading", "submitted", "generating", "failed", "needs_action", "canceled"],
   submitted: ["generating", "delivering", "completed", "failed", "needs_action", "canceled"],
   generating: ["delivering", "completed", "failed", "needs_action", "canceled"],
   needs_action: ["submitted", "generating", "delivering", "completed", "failed", "canceled"],
