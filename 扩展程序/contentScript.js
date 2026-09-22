@@ -364,6 +364,14 @@
     const normalized = normalizeTurnText(text);
     return /^(?:正在思考|正在生成|正在创建|请稍等)/.test(normalized) || /^(?:thinking|generating|creating|please wait)/i.test(normalized);
   }
+  function expectsGeneratedImages(prompt) {
+    const normalized = normalizeTurnText(prompt || "");
+    return /(?:生图|生成(?:一张|图片|图像)|画一张|绘制|image|photo|picture|illustrat|render|visual)/i.test(normalized);
+  }
+  function responseIndicatesGeneratedImage(text) {
+    const normalized = normalizeTurnText(text || "");
+    return /(?:已生成|生成了|生成图片|生成图像|图片已|图像已|created|generated|here(?:'s| is) the image)/i.test(normalized);
+  }
   function extractLatestResult() {
     const turns = assistantTurns();
     const latest = turns.at(-1);
@@ -479,7 +487,7 @@
       await waitForStableComposerAttachments(expectedAttachmentCount, index + 1);
     }
   }
-  async function waitForCompletion(previousTurnCount, assertConversation, timeoutMs = 10 * 6e4) {
+  async function waitForCompletion(previousTurnCount, assertConversation, prompt = "", timeoutMs = 10 * 6e4) {
     const started = Date.now();
     let previousSignature = "";
     let stableChecks = 0;
@@ -502,6 +510,8 @@
       const hasNewTurn = turns.length > previousTurnCount;
       const isGenerating = Boolean(document.querySelector(stopSelector));
       const hasMeaningfulResult = Boolean(result.responseText || result.images.length > 0);
+      const imageExpected = expectsGeneratedImages(prompt);
+      const imageClaimed = responseIndicatesGeneratedImage(result.responseText);
       if (hasNewTurn && !isGenerating && isContentPolicyRefusal(latest)) {
         throw new AdapterError("content_policy", "ChatGPT 因内容政策拒绝生成图片");
       }
@@ -517,7 +527,8 @@
         await new Promise((resolve) => setTimeout(resolve, 1e3));
         continue;
       }
-      if (hasNewTurn && !isGenerating && !isTemporaryRetryError(latest) && hasMeaningfulResult) {
+      const imageReady = !imageExpected || result.images.length > 0 || (!imageClaimed && Date.now() - started > 20e3);
+      if (hasNewTurn && !isGenerating && !isTemporaryRetryError(latest) && hasMeaningfulResult && imageReady) {
         stableChecks = signature === previousSignature ? stableChecks + 1 : 0;
         if (stableChecks >= 3) return;
       } else {
@@ -597,7 +608,7 @@
       previousUserTurnCount,
       input.prompt
     );
-    await waitForCompletion(previousTurnCount, assertCompletionConversation);
+    await waitForCompletion(previousTurnCount, assertCompletionConversation, input.prompt);
     if (!assertCompletionConversation()) {
       throw new AdapterError("conversation_unavailable", "\u7B49\u5F85\u671F\u95F4\u6807\u7B7E\u9875\u5207\u6362\u5230\u4E86\u5176\u4ED6 ChatGPT \u5BF9\u8BDD");
     }
@@ -614,7 +625,7 @@
       new AdapterError("conversation_unavailable", "ChatGPT 对话已打开，但没有找到已发送的任务消息")
     );
     const assertCompletionConversation = createCompletionConversationCheck(void 0, 0, input.prompt);
-    await waitForCompletion(0, assertCompletionConversation);
+    await waitForCompletion(0, assertCompletionConversation, input.prompt);
     const result = extractLatestResult();
     return {
       images: await Promise.all(result.images.map(imageUrlToBase64)),

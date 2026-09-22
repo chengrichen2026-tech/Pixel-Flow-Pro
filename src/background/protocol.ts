@@ -13,6 +13,7 @@ export type PageTaskMessage = TaskAddress & (
 );
 
 export type ExtensionMessage =
+  | { type: "GET_API_CAPABILITIES" }
   | (TaskAddress & { type: "RUN_TASK" | "CANCEL_TASK" | "OPEN_TASK_TAB" | "CLOSE_TASK_TAB" })
   | { type: "RUN_TASKS"; projectId: string; taskIds: string[] }
   | { type: "HIBERNATE_TASK_TABS"; projectId: string; taskIds: string[] }
@@ -40,6 +41,7 @@ const isGenerationImage = (value: unknown): value is GenerationImage => {
 export function isExtensionMessage(value: unknown): value is ExtensionMessage {
   if (!value || typeof value !== "object") return false;
   const message = value as Record<string, unknown>;
+  if (message.type === "GET_API_CAPABILITIES") return true;
   if (message.type === "HIBERNATE_TASK_TABS") {
     return typeof message.projectId === "string"
       && Array.isArray(message.taskIds)

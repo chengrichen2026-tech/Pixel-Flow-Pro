@@ -112,6 +112,6 @@ test("remote team web jobs reuse the existing ChatGPT adapter and upload to task
 
 test("Team Web waiting details are visible during active tasks", async () => {
   const app = await readFile(new URL("src/App.tsx", root), "utf8");
-  assert.match(app, /n\.statusDetail&&<p className=\{`status-detail/);
-  assert.match(app, /role="status">\{n.statusDetail\}/);
+  assert.match(app, /\(configurationError\|\|n\.statusDetail\)&&<p className=\{`status-detail/);
+  assert.match(app, /role="status">\{configurationError\|\|n\.statusDetail\}/);
 });

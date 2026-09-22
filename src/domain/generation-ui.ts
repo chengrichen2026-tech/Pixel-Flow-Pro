@@ -1,5 +1,5 @@
 import { legacyTaskStatusToRunStatus, type RunStatus } from "./task-run.ts";
-import type { GenerationMode, TeamImageModel } from "../types.ts";
+import type { ApiImageModel, GenerationMode, TeamImageModel } from "../types.ts";
 
 export type GenerationProvider = "gpt_web" | "team_cloud" | "api";
 export type GptWebLocation = "local" | "team";
@@ -18,8 +18,8 @@ export function generationModeForProvider(provider: GenerationProvider, location
   return provider === "team_cloud" ? "team" : "api";
 }
 
-export function generationModelLabel(mode: GenerationMode, teamImageModel: TeamImageModel): string {
-  if (mode === "api") return "gpt-image-2";
+export function generationModelLabel(mode: GenerationMode, teamImageModel: TeamImageModel, apiImageModel: ApiImageModel = "gpt-image-2"): string {
+  if (mode === "api") return apiImageModel;
   if (mode === "team") return teamImageModel === "sunburst" ? "Sunburst" : "Flare";
   return "ChatGPT Image";
 }

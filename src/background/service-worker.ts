@@ -27,7 +27,7 @@ import { ProjectRepository } from "../storage/project-repository";
 import { KeyedSerialQueue } from "./keyed-serial-queue";
 import { base64ToBytes, bytesToBase64, decodeBase64, sha256Hex } from "./binary";
 import { CHATGPT_ADAPTER_VERSION, isExtensionMessage } from "./protocol";
-import { concreteChatGptConversationUrl, resolveTaskConversationUrl } from "./chatgpt-url";
+import { concreteChatGptConversationUrl, expectedChatGptConversationMatches, resolveTaskConversationUrl } from "./chatgpt-url";
 import { probeAdapter, sendWithCurrentChatGptAdapter } from "./chatgpt-adapter-bridge";
 import { TaskTabGrouper } from "./task-tab-grouper";
 import { ConversationUnavailableError, TabRegistry } from "./tab-registry";
@@ -903,9 +903,12 @@ async function prepareTaskRequest(project, taskId, task) {
 async function executeApiTask(projectId, taskId, project, task) {
   const key = createTaskScopeKey(projectId, taskId);
   try {
-    const { pixelFlowApiKey } = await chrome.storage.local.get("pixelFlowApiKey");
-    if (typeof pixelFlowApiKey !== "string" || !pixelFlowApiKey.trim()) {
-      throw new Error("请先点击顶部“API 设置”并保存 API Key");
+    const model = task.apiImageModel === "gpt-image-2.5-sunburst" ? "gpt-image-2.5-sunburst" : task.apiImageModel === "gpt-image-2.5-flare" ? "gpt-image-2.5-flare" : "gpt-image-2";
+    const storageKey = model === "gpt-image-2.5-sunburst" ? "pixelFlowSunburstApiKey" : model === "gpt-image-2.5-flare" ? "pixelFlowFlareApiKey" : "pixelFlowApiKey";
+    const storedKeys = await chrome.storage.local.get(storageKey);
+    const apiKey = storedKeys[storageKey];
+    if (typeof apiKey !== "string" || !apiKey.trim()) {
+      throw new Error(`请先点击顶部“API 设置”并保存 ${model} API Key`);
     }
     const request = await prepareTaskRequest(project, taskId, task);
     let jobId = task.apiJobId;
@@ -915,7 +918,8 @@ async function executeApiTask(projectId, taskId, project, task) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          apiKey: pixelFlowApiKey,
+          apiKey,
+          model,
           ...request
         })
       });
@@ -1334,13 +1338,32 @@ async function handlePageTaskMessage(message, senderTab) {
   if (message.projectId === TEAM_WEB_PROJECT_ID) return handleTeamWebPageTaskMessage(message, senderTab);
   await schedulerReady;
   const key = createTaskScopeKey(message.projectId, message.taskId);
-  if (!tabRegistry.ownsTab(key, senderTab?.id)) return false;
+  const ownsTab = tabRegistry.ownsTab(key, senderTab?.id);
+  if (!ownsTab) {
+    // After an extension reload, the in-memory tab mapping can be gone while
+    // the persisted run still points at the same ChatGPT conversation. Accept
+    // only a message from that exact conversation and restore the mapping.
+    const project = await projectRepository.loadProject(message.projectId);
+    const task = project?.graph.nodes.find((node) => node.id === message.taskId && node.kind === "task");
+    const run = task ? await taskRunRepository.latest(message.projectId, message.taskId) : void 0;
+    const expectedUrl = concreteChatGptConversationUrl(run?.conversationUrl ?? task?.conversationUrl);
+    if (!task || !run || isTerminalRunStatus(run.status) || !senderTab?.id || !expectedUrl || !expectedChatGptConversationMatches(senderTab.url, expectedUrl)) return false;
+    tabRegistry.map(key, senderTab.id, senderTab.url);
+  }
   const conversationUrl = resolveTaskConversationUrl(message, senderTab?.url);
   if (conversationUrl) {
     tabRegistry.updateConversation(key, conversationUrl);
   }
   const handled = await updateScheduler(async () => {
-    if (!queue.running.includes(key)) return false;
+    if (!queue.running.includes(key)) {
+      // A result can arrive after session queue state was lost on extension
+      // reload. Persist the terminal message once the run itself is verified;
+      // status updates still require a live scheduler slot to avoid duplicate
+      // submissions.
+      if (message.type !== "TASK_RESULT" && message.type !== "TASK_ERROR") return false;
+      const run = await taskRunRepository.latest(message.projectId, message.taskId);
+      if (!run || isTerminalRunStatus(run.status)) return false;
+    }
     const recoveryMessageState = browserTaskMessages.get(key);
     if (message.type === "TASK_ERROR" && recoveryMessageState?.phase === "submitted" && !message.recovery) {
       return true;
@@ -1436,6 +1459,10 @@ chrome.runtime.onMessage.addListener((raw, sender, sendResponse) => {
   }
   if (!isExtensionMessage(raw)) return false;
   const message = raw;
+  if (message.type === "GET_API_CAPABILITIES") {
+    sendResponse({ accepted: true, apiModels: ["gpt-image-2", "gpt-image-2.5-sunburst", "gpt-image-2.5-flare"] });
+    return false;
+  }
   if (message.type === "RECOVER_TEAM_RESULT") {
     void recoverTeamTaskResult(message.projectId, message.taskId, message.jobId).then(
       (result) => sendResponse({ accepted: true, ...result }),

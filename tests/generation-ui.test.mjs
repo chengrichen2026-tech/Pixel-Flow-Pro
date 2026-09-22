@@ -22,6 +22,7 @@ test("three visible providers preserve the four persisted generation modes", () 
   assert.equal(generationModeForProvider("team_cloud"), "team");
   assert.equal(generationModeForProvider("api"), "api");
   assert.equal(generationModelLabel("api", "flare"), "gpt-image-2");
+  assert.equal(generationModelLabel("api", "flare", "gpt-image-2.5-sunburst"), "gpt-image-2.5-sunburst");
   assert.equal(generationModelLabel("team", "sunburst"), "Sunburst");
 });
 

@@ -75,7 +75,7 @@ test("manual send keeps the task alive until the user submits and the result ret
   assert.match(content, /10 \* 6e4/);
   assert.match(background, /else if \(message\.type === "TASK_ERROR"\)/);
   assert.match(app, /taskRunStatus\(n\),active=isActiveTaskRun\(n\),statusText=taskStatusLabel\(n\)/);
-  assert.match(app, /role="status">\{n\.statusDetail\}/);
+  assert.match(app, /role="status">\{configurationError\|\|n\.statusDetail\}/);
 });
 
 test("ChatGPT send confirmation never falls back to native form submission", async () => {
@@ -238,6 +238,24 @@ test("browser results are recovered by a service-worker alarm without opening th
   assert.match(content, /activeResumeTasks\.has\(resumeKey\)/);
   assert.match(content, /type: "TASK_ERROR",\s*recovery: true/);
   assert.match(background, /message\.type === "TASK_ERROR" && recoveryMessageState\?\.phase === "submitted" && !message\.recovery/);
+});
+
+test("ChatGPT image responses wait for hydrated image DOM before completing", async () => {
+  const source = await readFile(new URL("public/contentScript.js", root), "utf8");
+  assert.match(source, /function expectsGeneratedImages\(prompt\)/);
+  assert.match(source, /function responseIndicatesGeneratedImage\(text\)/);
+  assert.match(source, /const imageReady = !imageExpected \|\| result\.images\.length > 0/);
+  assert.match(source, /waitForCompletion\(previousTurnCount, assertCompletionConversation, input\.prompt\)/);
+  assert.match(source, /waitForCompletion\(0, assertCompletionConversation, input\.prompt\)/);
+});
+
+test("browser results survive a lost tab mapping after extension reload", async () => {
+  const background = await readBackgroundSource();
+  assert.match(background, /if \(!ownsTab\) \{[\s\S]*taskRunRepository\.latest\(message\.projectId, message\.taskId\)/);
+  assert.match(background, /expectedChatGptConversationMatches\(senderTab\.url, expectedUrl\)/);
+  assert.match(background, /tabRegistry\.map\(key, senderTab\.id, senderTab\.url\)/);
+  assert.match(background, /if \(message\.type !== "TASK_RESULT" && message\.type !== "TASK_ERROR"\) return false/);
+  assert.match(background, /if \(!run \|\| isTerminalRunStatus\(run\.status\)\) return false/);
 });
 
 test("extension reload reconstructs recovery state for persisted generating browser tasks", async () => {

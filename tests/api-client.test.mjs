@@ -13,6 +13,12 @@ test("API worker recreates its disposable jobs directory before atomic writes", 
   );
 });
 
+test("API worker logs the selected model and only a masked key suffix", () => {
+  assert.match(worker, /model=\$\{input\.model \|\| "gpt-image-2"\}/);
+  assert.match(worker, /key=\*\*\*\$\{String\(input\.apiKey\)\.slice\(-4\)\}/);
+  assert.doesNotMatch(worker, /key=\$\{input\.apiKey\}/);
+});
+
 test("maps canvas ratios to supported API sizes", () => {
   assert.equal(sizeForRatio("1:1"), "1024x1024");
   assert.equal(sizeForRatio("9:16"), "720x1280");
@@ -62,6 +68,29 @@ test("uses edits JSON request with Base64 Data URL images", async () => {
   assert.equal(body.output_format, "png");
   assert.equal(body.n, 1);
   assert.equal(images.length, 2);
+});
+
+test("passes each selected API image model through generations and edits", async () => {
+  for (const model of ["gpt-image-2.5-sunburst", "gpt-image-2.5-flare"]) {
+    for (const imageBlobs of [[], [{ blob: new Blob(["a"], { type: "image/png" }), name: "a.png" }]]) {
+      let body;
+      await requestApiImages({
+        apiKey: "test-key",
+        model,
+        prompt: "model test",
+        imageBlobs,
+        fetchImpl: async (_url, options) => {
+          body = JSON.parse(options.body);
+          return new Response(JSON.stringify({ data: [{ b64_json: onePixel }] }), { status: 200, headers: { "Content-Type": "application/json" } });
+        }
+      });
+      assert.equal(body.model, model);
+    }
+  }
+});
+
+test("rejects unsupported API image models before calling the provider", async () => {
+  await assert.rejects(requestApiImages({ apiKey: "test-key", model: "unknown", prompt: "test" }), /不支持的 API 生图模型/);
 });
 
 test("surfaces compatible API error messages", async () => {

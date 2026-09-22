@@ -18,3 +18,14 @@ test("API recovery persists terminal worker results before completing scheduler 
   assert.match(background, /job\.status === "failed"[\s\S]*type: "TASK_ERROR"/);
   assert.match(background, /await removeActiveScope\(key\)/);
 });
+
+test("API submission selects the model-specific local key and passes the model to the worker", () => {
+  assert.match(background, /pixelFlowSunburstApiKey/);
+  assert.match(background, /pixelFlowFlareApiKey/);
+  assert.match(background, /body: JSON\.stringify\(\{[\s\S]*apiKey,[\s\S]*model,[\s\S]*\.\.\.request/);
+});
+
+test("API capability handshake exposes every model supported by the background", () => {
+  assert.match(background, /message\.type === "GET_API_CAPABILITIES"/);
+  assert.match(background, /apiModels: \["gpt-image-2", "gpt-image-2\.5-sunburst", "gpt-image-2\.5-flare"\]/);
+});

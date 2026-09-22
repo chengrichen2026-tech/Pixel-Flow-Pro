@@ -39,6 +39,7 @@ test("ChatGPT URL helpers preserve only concrete matching conversations", () => 
 
 test("extension protocol rejects incomplete task messages", () => {
   assert.equal(isExtensionMessage({ type: "RUN_TASK", projectId: "p", taskId: "t" }), true);
+  assert.equal(isExtensionMessage({ type: "GET_API_CAPABILITIES" }), true);
   assert.equal(isExtensionMessage({ type: "RUN_TASKS", projectId: "p", taskIds: ["a", "b"] }), true);
   assert.equal(isExtensionMessage({ type: "RUN_TASKS", projectId: "p", taskIds: [] }), false);
   assert.equal(isExtensionMessage({ type: "RUN_TASK", projectId: "p" }), false);

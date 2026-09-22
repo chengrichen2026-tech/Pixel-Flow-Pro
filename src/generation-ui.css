@@ -151,6 +151,12 @@
   background: #f7f8fa;
 }
 
+.task-segmented-toggle.is-model button {
+  height: 22px;
+  padding: 0 7px;
+  font-size: 9px;
+}
+
 .task-segmented-toggle button {
   width: auto;
   height: 24px;

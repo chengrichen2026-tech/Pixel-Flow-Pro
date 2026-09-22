@@ -1,5 +1,6 @@
 export const PIXEL_FLOW_API_BASE_URL = "https://aihub.rbmanon.cn/v1";
 export const PIXEL_FLOW_API_MODEL = "gpt-image-2";
+export const PIXEL_FLOW_API_MODELS = [PIXEL_FLOW_API_MODEL, "gpt-image-2.5-sunburst", "gpt-image-2.5-flare"];
 export const PIXEL_FLOW_API_QUALITY = "medium";
 
 export function sizeForRatio(ratio) {
@@ -51,6 +52,7 @@ async function readError(response) {
 
 export async function requestApiImages({
   apiKey,
+  model = PIXEL_FLOW_API_MODEL,
   prompt,
   ratio = "auto",
   imageBlobs = [],
@@ -60,6 +62,7 @@ export async function requestApiImages({
 }) {
   if (!apiKey?.trim()) throw new Error("请先保存 API Key");
   if (!prompt?.trim()) throw new Error("任务没有可发送的文字或提示词");
+  if (!PIXEL_FLOW_API_MODELS.includes(model)) throw new Error(`不支持的 API 生图模型：${model}`);
   const size = sizeForRatio(ratio);
   const headers = { Authorization: `Bearer ${apiKey.trim()}` };
   const controller = new AbortController();
@@ -73,14 +76,14 @@ export async function requestApiImages({
       response = await fetchImpl(`${baseUrl}/images/edits`, {
         method: "POST",
         headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify({ model: PIXEL_FLOW_API_MODEL, prompt, images, size, quality: PIXEL_FLOW_API_QUALITY, output_format: "png", n: 1 }),
+        body: JSON.stringify({ model, prompt, images, size, quality: PIXEL_FLOW_API_QUALITY, output_format: "png", n: 1 }),
         signal: controller.signal
       });
     } else {
       response = await fetchImpl(`${baseUrl}/images/generations`, {
         method: "POST",
         headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify({ model: PIXEL_FLOW_API_MODEL, prompt, size, quality: PIXEL_FLOW_API_QUALITY, output_format: "png", n: 1 }),
+        body: JSON.stringify({ model, prompt, size, quality: PIXEL_FLOW_API_QUALITY, output_format: "png", n: 1 }),
         signal: controller.signal
       });
     }

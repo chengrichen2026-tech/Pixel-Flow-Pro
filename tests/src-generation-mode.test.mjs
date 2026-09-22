@@ -12,6 +12,8 @@ test("rebuilt tasks own generation mode instead of requiring DOM injection", asy
   assert.match(types, /generationMode\?: GenerationMode/);
   assert.match(types, /export type TeamImageModel = "flare" \| "sunburst"/);
   assert.match(types, /teamImageModel\?: TeamImageModel/);
+  assert.match(types, /export type ApiImageModel = "gpt-image-2" \| "gpt-image-2\.5-sunburst" \| "gpt-image-2\.5-flare"/);
+  assert.match(types, /apiImageModel\?: ApiImageModel/);
   assert.match(types, /apiJobId\?: string/);
   assert.match(store, /await hasTeamGateway\(\)\?"team_web":"api"/);
   assert.match(app, /aria-label="生图模式"/);
@@ -25,18 +27,24 @@ test("rebuilt tasks own generation mode instead of requiring DOM injection", asy
   assert.match(app, /className="task-segmented-toggle"/);
   assert.match(app, /value==='flare'\?'Flare':'Sunburst'/);
   assert.match(app, /aria-label="Team Cloud 模型"/);
+  assert.match(app, /aria-label="API 模型"/);
+  assert.match(app, /changeApiImageModel/);
+  assert.equal(app.match(/className="task-segmented-toggle is-model"/g)?.length, 2);
+  assert.match(app, /apiModelTaskLabel/);
 });
 
 test("rebuilt mode switching preserves production safety rules", async () => {
   const app = await readFile(new URL("src/App.tsx", root), "utf8");
   assert.match(app, /\['queued','waiting_page','uploading','sending','generating','manual_action'\]\.includes\(status\)/);
   assert.match(app, /generationMode:next,teamImageModel:next==='team'/);
-  assert.match(app, /currentMode==='api'&&!await readApiKey\(\)/);
+  assert.match(app, /currentMode==='api'&&!await readApiKey\(currentApiModel\)/);
+  assert.match(app, /currentMode==='api'&&!await apiBackgroundSupports\(currentApiModel\)/);
+  assert.match(app, /扩展后台仍是旧版本/);
   assert.match(app, /\(currentMode==='team'\|\|currentMode==='team_web'\)&&!await hasTeamGateway\(\)/);
   assert.match(app, /pixel-flow:open-api-settings/);
   assert.match(app, /const pendingSettingsSave=useRef<Promise<void>>\(Promise\.resolve\(\)\)/);
   assert.match(app, /pendingSettingsSave\.current=saving;await saving/);
-  assert.match(app, /const run=async\(\)=>\{await pendingSettingsSave\.current/);
+  assert.match(app, /const run=async\(\)=>\{setConfigurationError\(''\);await pendingSettingsSave\.current/);
   assert.match(app, /const currentTask=useStore\.getState\(\)\.project/);
   assert.match(app, /currentTask\?\.generationMode==='team'\?'team':currentTask\?\.generationMode==='team_web'\?'team_web':'browser'/);
 });
@@ -64,13 +72,18 @@ test("deleting a task requires confirmed background cancellation", async () => {
 test("rebuilt API settings use the same local storage contract", async () => {
   const settings = await readFile(new URL("src/api-settings.ts", root), "utf8");
   const app = await readFile(new URL("src/App.tsx", root), "utf8");
-  assert.match(settings, /const API_KEY_STORAGE = "pixelFlowApiKey"/);
+  assert.match(settings, /"gpt-image-2": "pixelFlowApiKey"/);
+  assert.match(settings, /"gpt-image-2\.5-sunburst": "pixelFlowSunburstApiKey"/);
+  assert.match(settings, /"gpt-image-2\.5-flare": "pixelFlowFlareApiKey"/);
   assert.match(settings, /chrome\.storage\.local\.get/);
   assert.match(settings, /chrome\.storage\.local\.set/);
   assert.match(settings, /chrome\.storage\.local\.remove/);
   assert.match(settings, /localStorage\.getItem/);
+  assert.match(settings, /GET_API_CAPABILITIES/);
   assert.match(app, /个人 API/);
   assert.match(app, /https:\/\/aihub\.rbmanon\.cn\/v1/);
+  assert.match(app, /Sunburst 2\.5/);
+  assert.match(app, /Flare 2\.5/);
 });
 
 test("team settings keep only member identity locally and use the fixed taskbox", async () => {

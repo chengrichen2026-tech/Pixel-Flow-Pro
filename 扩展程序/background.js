@@ -4409,6 +4409,7 @@ var isGenerationImage = (value) => {
 function isExtensionMessage(value) {
 	if (!value || typeof value !== "object") return false;
 	const message = value;
+	if (message.type === "GET_API_CAPABILITIES") return true;
 	if (message.type === "HIBERNATE_TASK_TABS") return typeof message.projectId === "string" && Array.isArray(message.taskIds) && message.taskIds.every((taskId) => typeof taskId === "string");
 	if (message.type === "RUN_TASKS") return typeof message.projectId === "string" && Array.isArray(message.taskIds) && message.taskIds.length > 0 && message.taskIds.every((taskId) => typeof taskId === "string");
 	if (message.type === "DOWNLOAD_ASSET") return typeof message.projectId === "string" && typeof message.taskId === "string" && typeof message.assetId === "string";
@@ -5853,8 +5854,10 @@ async function prepareTaskRequest(project, taskId, task) {
 async function executeApiTask(projectId, taskId, project, task) {
 	const key = createTaskScopeKey(projectId, taskId);
 	try {
-		const { pixelFlowApiKey } = await chrome.storage.local.get("pixelFlowApiKey");
-		if (typeof pixelFlowApiKey !== "string" || !pixelFlowApiKey.trim()) throw new Error("请先点击顶部“API 设置”并保存 API Key");
+		const model = task.apiImageModel === "gpt-image-2.5-sunburst" ? "gpt-image-2.5-sunburst" : task.apiImageModel === "gpt-image-2.5-flare" ? "gpt-image-2.5-flare" : "gpt-image-2";
+		const storageKey = model === "gpt-image-2.5-sunburst" ? "pixelFlowSunburstApiKey" : model === "gpt-image-2.5-flare" ? "pixelFlowFlareApiKey" : "pixelFlowApiKey";
+		const apiKey = (await chrome.storage.local.get(storageKey))[storageKey];
+		if (typeof apiKey !== "string" || !apiKey.trim()) throw new Error(`请先点击顶部“API 设置”并保存 ${model} API Key`);
 		const request = await prepareTaskRequest(project, taskId, task);
 		let jobId = task.apiJobId;
 		if (!jobId) {
@@ -5869,7 +5872,8 @@ async function executeApiTask(projectId, taskId, project, task) {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
-					apiKey: pixelFlowApiKey,
+					apiKey,
+					model,
 					...request
 				})
 			})).id;
@@ -6368,11 +6372,21 @@ async function handlePageTaskMessage(message, senderTab) {
 	if (message.projectId === TEAM_WEB_PROJECT_ID) return handleTeamWebPageTaskMessage(message, senderTab);
 	await schedulerReady;
 	const key = createTaskScopeKey(message.projectId, message.taskId);
-	if (!tabRegistry.ownsTab(key, senderTab?.id)) return false;
+	if (!tabRegistry.ownsTab(key, senderTab?.id)) {
+		const task = (await projectRepository.loadProject(message.projectId))?.graph.nodes.find((node) => node.id === message.taskId && node.kind === "task");
+		const run = task ? await taskRunRepository.latest(message.projectId, message.taskId) : void 0;
+		const expectedUrl = concreteChatGptConversationUrl(run?.conversationUrl ?? task?.conversationUrl);
+		if (!task || !run || isTerminalRunStatus(run.status) || !senderTab?.id || !expectedUrl || !expectedChatGptConversationMatches(senderTab.url, expectedUrl)) return false;
+		tabRegistry.map(key, senderTab.id, senderTab.url);
+	}
 	const conversationUrl = resolveTaskConversationUrl(message, senderTab?.url);
 	if (conversationUrl) tabRegistry.updateConversation(key, conversationUrl);
 	if (!await updateScheduler(async () => {
-		if (!queue.running.includes(key)) return false;
+		if (!queue.running.includes(key)) {
+			if (message.type !== "TASK_RESULT" && message.type !== "TASK_ERROR") return false;
+			const run = await taskRunRepository.latest(message.projectId, message.taskId);
+			if (!run || isTerminalRunStatus(run.status)) return false;
+		}
 		const recoveryMessageState = browserTaskMessages.get(key);
 		if (message.type === "TASK_ERROR" && recoveryMessageState?.phase === "submitted" && !message.recovery) return true;
 		if (message.type === "TASK_STATUS") {
@@ -6478,6 +6492,17 @@ chrome.runtime.onMessage.addListener((raw, sender, sendResponse) => {
 	}
 	if (!isExtensionMessage(raw)) return false;
 	const message = raw;
+	if (message.type === "GET_API_CAPABILITIES") {
+		sendResponse({
+			accepted: true,
+			apiModels: [
+				"gpt-image-2",
+				"gpt-image-2.5-sunburst",
+				"gpt-image-2.5-flare"
+			]
+		});
+		return false;
+	}
 	if (message.type === "RECOVER_TEAM_RESULT") {
 		recoverTeamTaskResult(message.projectId, message.taskId, message.jobId).then((result) => sendResponse({
 			accepted: true,

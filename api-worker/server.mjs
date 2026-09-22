@@ -69,19 +69,23 @@ async function runJob(job, input) {
       blob: new Blob([Buffer.from(image.base64, "base64")], { type: image.mimeType || "image/png" }),
       name: image.name || `image-${index + 1}.png`
     }));
+    console.log(`[api-job] ${job.id} model=${input.model || "gpt-image-2"} references=${imageBlobs.length} key=***${String(input.apiKey).slice(-4)}`);
     const images = await requestApiImages({
       apiKey: input.apiKey,
+      model: input.model,
       prompt: input.prompt,
       ratio: input.ratio,
       imageBlobs
     });
     Object.assign(job, { status: "completed", images, updatedAt: Date.now() });
+    console.log(`[api-job] ${job.id} completed model=${input.model || "gpt-image-2"} images=${images.length}`);
   } catch (error) {
     Object.assign(job, {
       status: "failed",
       error: error instanceof Error ? error.message : "API 生图失败",
       updatedAt: Date.now()
     });
+    console.error(`[api-job] ${job.id} failed model=${input.model || "gpt-image-2"} error=${job.error}`);
   }
   await saveJob(job);
 }
