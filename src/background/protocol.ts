@@ -1,7 +1,7 @@
 import type { RunStatus } from "../domain/task-run.ts";
 import type { TaskStatus } from "../types.ts";
 
-export const CHATGPT_ADAPTER_VERSION = 29;
+export const CHATGPT_ADAPTER_VERSION = 32;
 
 export type GenerationImage = { base64: string; mimeType?: string; name?: string };
 

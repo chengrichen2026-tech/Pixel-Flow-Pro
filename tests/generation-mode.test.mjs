@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import vm from "node:vm";
 import { readBackgroundSource } from "./helpers/background-source.mjs";
 
 const root = new URL("../", import.meta.url);
@@ -65,6 +66,26 @@ test("ChatGPT content-policy refusals terminate instead of staying in recovery",
   assert.match(source, /content policy\|policies/);
   assert.match(source, /hasNewTurn && !isGenerating && isContentPolicyRefusal\(latest\)/);
   assert.match(source, /new AdapterError\("content_policy", "ChatGPT 因内容政策拒绝生成图片"\)/);
+});
+
+test("ChatGPT recognizes current heading-labeled user and assistant turns", async () => {
+  const content = await readFile(new URL("public/contentScript.js", root), "utf8");
+  const section = content.slice(content.indexOf("var assistantSelector"), content.indexOf("var AdapterError"));
+  const userTurn = { parentElement: null };
+  const assistantBlock = { parentElement: null, contains: () => false };
+  const userBlock = { contains: turn => turn === userTurn };
+  const headings = [
+    { innerText: "你说：", textContent: "你说：", parentElement: userBlock },
+    { innerText: "ChatGPT 说：", textContent: "ChatGPT 说：", parentElement: assistantBlock }
+  ];
+  const document = {
+    querySelectorAll: selector => selector === "h4" ? headings : selector.includes(':user') ? [userTurn] : []
+  };
+  const context = vm.createContext({ document });
+  vm.runInContext(`${section}\nthis.readUsers = userTurns; this.readAssistants = assistantTurns;`, context);
+  assert.equal(context.readUsers().length, 1);
+  assert.equal(context.readAssistants().length, 1);
+  assert.equal(context.readAssistants()[0], assistantBlock);
 });
 
 test("manual send keeps the task alive until the user submits and the result returns", async () => {
@@ -205,11 +226,21 @@ test("browser results preserve the original latest-assistant-turn writeback path
   assert.match(source, /\(\?:\\d\+\\s\*\(\?:s\|m\|h/);
 });
 
+test("ChatGPT image progress percentages are not completed as text results", async () => {
+  const source = await readFile(new URL("public/contentScript.js", root), "utf8");
+  const section = source.slice(source.indexOf("function normalizeTurnText("), source.indexOf("function extractLatestResult("));
+  const context = vm.createContext({});
+  vm.runInContext(`${section}\nthis.isTransient = isTransientResponseText;`, context);
+  assert.equal(context.isTransient("布置场景94%"), true);
+  assert.equal(context.isTransient("最后再微调一下… 95%"), true);
+  assert.equal(context.isTransient("图片已经生成完成"), false);
+});
+
 test("reinjected ChatGPT adapter replaces a stale page listener after extension reload", async () => {
   const content = await readFile(new URL("public/contentScript.js", root), "utf8");
   const background = await readBackgroundSource();
-  assert.match(content, /CHATGPT_ADAPTER_VERSION = 29/);
-  assert.match(background, /CHATGPT_ADAPTER_VERSION = 29/);
+  assert.match(content, /CHATGPT_ADAPTER_VERSION = 32/);
+  assert.match(background, /CHATGPT_ADAPTER_VERSION = 32/);
   assert.match(content, /__gptNodeCanvasMessageListener/);
   assert.match(content, /removeListener\(previousMessageListener\)/);
   assert.match(content, /addListener\(currentMessageListener\)/);
@@ -330,26 +361,76 @@ test("ChatGPT waits for every reference image to finish a stable upload before s
   assert.doesNotMatch(content, /naturalWidth > 0/);
   assert.match(content, /if \(removeButtons\.length > 0\) return removeButtons\.length/);
   assert.match(content, /return removeButtons\.map\(\(button\) => button\.getAttribute\("aria-label"\)/);
-  assert.match(content, /const uploadInputs = findUploadInputs\(\)/);
+  assert.match(content, /button\[aria-label\^="\\u79FB\\u9664\\u201C"\]/);
   assert.match(content, /任务开始前已有附件/);
+});
+
+test("ChatGPT counts the current remove-by-filename attachment controls exactly once", async () => {
+  const content = await readFile(new URL("public/contentScript.js", root), "utf8");
+  const section = content.slice(content.indexOf("function countComposerAttachments()"), content.indexOf("function inspectPage()"));
+  const labels = ["移除“产品图.jpeg”", "移除“参考图.jpeg”", "Remove “layout.png”"];
+  const nodes = labels.map(label => ({
+    getAttribute: name => name === "aria-label" ? label : "",
+    textContent: "",
+    querySelector: () => null
+  }));
+  const region = {
+    querySelector: () => null,
+    querySelectorAll: selector => {
+      const clauses = [...selector.matchAll(/aria-label([*^])="([^"]+)"/gi)];
+      return nodes.filter(node => clauses.some(([, operator, value]) => {
+        const label = node.getAttribute("aria-label");
+        return operator === "^" ? label.toLowerCase().startsWith(value.toLowerCase()) : label.toLowerCase().includes(value.toLowerCase());
+      }));
+    }
+  };
+  const context = vm.createContext({ findComposerRegion: () => region });
+  vm.runInContext(`${section}\nthis.readCount = countComposerAttachments; this.readSignature = composerAttachmentSignature;`, context);
+  assert.equal(context.readCount(), 3);
+  assert.equal(context.readSignature().split("||").length, 3);
 });
 
 test("ChatGPT upload selects the file input belonging to the active composer", async () => {
   const content = await readFile(new URL("public/contentScript.js", root), "utf8");
   assert.match(content, /function findUploadInputs\(\)/);
-  assert.match(content, /\[data-testid="upload-photos-input"\][\s\S]*?#upload-files[\s\S]*?\[data-testid="upload-media-input"\]/);
+  assert.match(content, /\[data-testid="upload-photos-input"\][\s\S]*?\[data-testid="upload-media-input"\][\s\S]*?#upload-files/);
   assert.match(content, /const region = findComposerRegion\(\);[\s\S]*?region\.querySelector\(selector\)/);
   assert.match(content, /document\.querySelectorAll\(selector\)/);
   assert.match(content, /candidates\.at\(-1\)/);
 });
 
-test("ChatGPT upload falls back across active composer file inputs when one ignores a synthetic change", async () => {
+test("ChatGPT upload fails closed instead of redispatching one image across file inputs", async () => {
   const content = await readFile(new URL("public/contentScript.js", root), "utf8");
-  assert.match(content, /const uploadInputs = findUploadInputs\(\)/);
-  assert.match(content, /const dispatchImage = \(input\) =>/);
-  assert.match(content, /Date\.now\(\) - lastDispatchAt > 5e3/);
-  assert.match(content, /inputIndex \+ 1 < uploadInputs\.length/);
-  assert.match(content, /dispatchImage\(uploadInputs\[inputIndex\]\)/);
+  const section = content.slice(content.indexOf("async function uploadImages("), content.indexOf("async function waitForCompletion("));
+  const dispatches = [0, 0, 0];
+  const inputs = dispatches.map((_value, index) => ({
+    files: [],
+    dispatchEvent: event => { if (event.type === "change") dispatches[index] += 1; }
+  }));
+  let now = 0;
+  const context = vm.createContext({
+    AdapterError: class AdapterError extends Error {
+      constructor(reason, message) { super(message); this.reason = reason; }
+    },
+    DataTransfer: class DataTransfer {
+      files = [];
+      items = { add: file => this.files.push(file) };
+    },
+    Date: { now: () => now += 10_000 },
+    Event: class Event { constructor(type) { this.type = type; } },
+    decodeImage: image => image,
+    findUploadInput: () => inputs[0],
+    findAttachmentButton: () => null,
+    countComposerAttachments: () => 0,
+    composerIsUploading: () => false,
+    waitForPageChange: async () => {},
+    waitForStableComposerAttachments: async () => {},
+    document: { hidden: false },
+    signalBackgroundPageActivity: () => {}
+  });
+  vm.runInContext(`${section}\nthis.runUpload = uploadImages;`, context);
+  await assert.rejects(context.runUpload(inputs[0], [{ name: "product.png" }]), /第 1 张参考图没有出现在 ChatGPT 输入区/);
+  assert.deepEqual(dispatches, [1, 0, 0]);
 });
 
 test("browser tasks keep reference upload and prompt submission in one adapter transaction", async () => {

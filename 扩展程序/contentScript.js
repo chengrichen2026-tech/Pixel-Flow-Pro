@@ -1,7 +1,7 @@
 "use strict";
 (() => {
   // src/shared/protocol.ts
-  var CHATGPT_ADAPTER_VERSION = 29;
+  var CHATGPT_ADAPTER_VERSION = 32;
   var taskTypes = /* @__PURE__ */ new Set([
     "RUN_TASK",
     "CANCEL_TASK",
@@ -42,11 +42,23 @@
   }
 
   // src/chatgpt/adapter.ts
-  var assistantSelector = '[data-message-author-role="assistant"], [data-turn="assistant"]';
-  var userSelector = '[data-message-author-role="user"], [data-turn="user"]';
+  var assistantSelector = '[data-message-author-role="assistant"], [data-turn="assistant"], [data-chatgpt-search-unit-key$=":assistant"]';
+  var userSelector = '[data-message-author-role="user"], [data-turn="user"], [data-chatgpt-search-unit-key$=":user"]';
   var stopSelector = '[data-testid="stop-button"], button[aria-label*="Stop" i], button[aria-label*="\u505C\u6B62"]';
+  function roleTurns(selector, headingPattern) {
+    const turns = [...document.querySelectorAll(selector)];
+    for (const heading of document.querySelectorAll("h4")) {
+      if (!headingPattern.test((heading.innerText || heading.textContent || "").trim())) continue;
+      const block = heading.parentElement;
+      if (block && !turns.some((turn) => block.contains(turn))) turns.push(block);
+    }
+    return turns.filter((turn, index) => turns.indexOf(turn) === index && !turn.parentElement?.closest(selector));
+  }
   function assistantTurns() {
-    return [...document.querySelectorAll(assistantSelector)].filter((turn) => !turn.parentElement?.closest(assistantSelector));
+    return roleTurns(assistantSelector, /^(?:ChatGPT\s*(?:\u8BF4)?|Assistant)(?:\uFF1A|:)?$/i);
+  }
+  function userTurns() {
+    return roleTurns(userSelector, /^(?:\u4F60\u8BF4|You said)(?:\uFF1A|:)?$/i);
   }
   var AdapterError = class extends Error {
     constructor(reason, message) {
@@ -79,8 +91,8 @@
     const region = findComposerRegion();
     const knownSelectors = [
       '[data-testid="upload-photos-input"]',
-      "#upload-files",
       '[data-testid="upload-media-input"]',
+      "#upload-files",
       "#upload-media-files"
     ];
     const inputs = [];
@@ -97,7 +109,16 @@
       const candidates = [...document.querySelectorAll(selector)];
       addInput(candidates.find((candidate) => candidate.closest('form, [data-testid="composer"], [data-type="unified-composer"]')) ?? candidates.at(-1));
     }
-    return inputs;
+    const priority = (input) => {
+      const testId = input.getAttribute("data-testid") || "";
+      const ariaLabel = input.getAttribute("aria-label") || "";
+      const accept = (input.getAttribute("accept") || "").toLowerCase().replace(/\s+/g, "");
+      if (testId === "upload-photos-input" || /添加照片|add photos?/i.test(ariaLabel)) return 0;
+      if (accept === "image/*") return 1;
+      if (accept.includes("image")) return 2;
+      return 3;
+    };
+    return inputs.map((input, index) => ({ input, index, priority: priority(input) })).sort((a, b) => a.priority - b.priority || a.index - b.index).map(({ input }) => input);
   }
   function findAttachmentButton() {
     const direct = document.querySelector(
@@ -117,7 +138,9 @@
       'button[aria-label*="\u79FB\u9664\u6587\u4EF6"]',
       'button[aria-label*="\u5220\u9664\u6587\u4EF6"]',
       'button[aria-label*="\u79FB\u9664\u9644\u4EF6"]',
-      'button[aria-label*="\u5220\u9664\u9644\u4EF6"]'
+      'button[aria-label*="\u5220\u9664\u9644\u4EF6"]',
+      'button[aria-label^="\u79FB\u9664\u201C"]',
+      'button[aria-label^="Remove \u201C" i]'
     ].join(","));
     if (removeButtons.length > 0) return removeButtons.length;
     const previews = region.querySelectorAll([
@@ -156,7 +179,9 @@
       'button[aria-label*="\u79FB\u9664\u6587\u4EF6"]',
       'button[aria-label*="\u5220\u9664\u6587\u4EF6"]',
       'button[aria-label*="\u79FB\u9664\u9644\u4EF6"]',
-      'button[aria-label*="\u5220\u9664\u9644\u4EF6"]'
+      'button[aria-label*="\u5220\u9664\u9644\u4EF6"]',
+      'button[aria-label^="\u79FB\u9664\u201C"]',
+      'button[aria-label^="Remove \u201C" i]'
     ].join(","))];
     if (removeButtons.length > 0) {
       return removeButtons.map((button) => button.getAttribute("aria-label") || button.textContent || "attachment").join("||");
@@ -239,7 +264,7 @@
     return normalizeComparableTurnText(text).replace(/[^\p{L}\p{N}]+/gu, "");
   }
   function submittedTurnIsStillVisible(previousUserTurnCount, prompt) {
-    const turns = [...document.querySelectorAll(userSelector)];
+    const turns = userTurns();
     if (turns.length <= previousUserTurnCount) return false;
     const submittedText = normalizeSemanticTurnText(prompt);
     if (!submittedText) return true;
@@ -362,7 +387,7 @@
   }
   function isTransientResponseText(text) {
     const normalized = normalizeTurnText(text);
-    return /^(?:正在思考|正在生成|正在创建|请稍等)/.test(normalized) || /^(?:thinking|generating|creating|please wait)/i.test(normalized);
+    return /^(?:正在思考|正在生成|正在创建|请稍等)/.test(normalized) || /^(?:thinking|generating|creating|please wait)/i.test(normalized) || /(?:100|[1-9]?\d)\s*%$/.test(normalized);
   }
   function expectsGeneratedImages(prompt) {
     const normalized = normalizeTurnText(prompt || "");
@@ -453,29 +478,18 @@
       throw new AdapterError("upload_failed", "ChatGPT 输入区在任务开始前已有附件，已停止发送以避免混入上一次参考图");
     }
     for (const [index, image] of images.entries()) {
+      resolvedInput = findUploadInput() ?? resolvedInput;
+      const transfer = new DataTransfer();
+      transfer.items.add(decodeImage(image));
+      resolvedInput.files = transfer.files;
+      resolvedInput.dispatchEvent(new Event("input", { bubbles: true }));
+      resolvedInput.dispatchEvent(new Event("change", { bubbles: true }));
       expectedAttachmentCount += 1;
       const uploadStartedAt = Date.now();
       let lastBackgroundWake = 0;
-      const uploadInputs = findUploadInputs();
-      if (resolvedInput && !uploadInputs.includes(resolvedInput)) uploadInputs.push(resolvedInput);
-      let inputIndex = 0;
-      const dispatchImage = (input) => {
-        const transfer = new DataTransfer();
-        transfer.items.add(decodeImage(image));
-        input.files = transfer.files;
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-        input.dispatchEvent(new Event("change", { bubbles: true }));
-      };
-      dispatchImage(uploadInputs[inputIndex]);
-      let lastDispatchAt = Date.now();
       while (countComposerAttachments() < expectedAttachmentCount || composerIsUploading()) {
         if (Date.now() - uploadStartedAt > 6e4) {
           throw new AdapterError("upload_failed", `\u7B2C ${index + 1} \u5F20\u53C2\u8003\u56FE\u6CA1\u6709\u51FA\u73B0\u5728 ChatGPT \u8F93\u5165\u533A`);
-        }
-        if (countComposerAttachments() < expectedAttachmentCount && Date.now() - lastDispatchAt > 5e3 && inputIndex + 1 < uploadInputs.length) {
-          inputIndex += 1;
-          dispatchImage(uploadInputs[inputIndex]);
-          lastDispatchAt = Date.now();
         }
         if (document.hidden && Date.now() - lastBackgroundWake > 1500) {
           lastBackgroundWake = Date.now();
@@ -483,7 +497,6 @@
         }
         await waitForPageChange(200);
       }
-      resolvedInput = uploadInputs[inputIndex] ?? resolvedInput;
       await waitForStableComposerAttachments(expectedAttachmentCount, index + 1);
     }
   }
@@ -556,7 +569,7 @@
     if (!input.prompt.trim() && input.images.length === 0) {
       throw new AdapterError("selector_missing", "\u4EFB\u52A1\u6CA1\u6709\u53EF\u53D1\u9001\u7684\u56FE\u7247\u6216\u6587\u5B57");
     }
-    const previousUserTurnCount = document.querySelectorAll(userSelector).length;
+    const previousUserTurnCount = userTurns().length;
     const previousTurnCount = assistantTurns().length;
     assertExpectedConversation(input.expectedConversationUrl);
     await input.onPhase?.("uploading");
@@ -580,7 +593,7 @@
     sendButton.click();
     try {
       await waitUntil(
-        () => document.querySelectorAll(userSelector).length > previousUserTurnCount,
+        () => userTurns().length > previousUserTurnCount,
         15e3,
         new Error("synthetic click was not accepted")
       );
@@ -589,14 +602,14 @@
       if (retrySendButton && !retrySendButton.disabled) retrySendButton.click();
       try {
         await waitUntil(
-          () => document.querySelectorAll(userSelector).length > previousUserTurnCount,
+          () => userTurns().length > previousUserTurnCount,
           15e3,
           new Error("second ChatGPT send click was not accepted")
         );
       } catch {
         await input.onManualAction?.();
         await waitUntil(
-          () => document.querySelectorAll(userSelector).length > previousUserTurnCount,
+          () => userTurns().length > previousUserTurnCount,
           10 * 6e4,
           new AdapterError("manual_action_timeout", "等待 10 分钟后仍未检测到手动发送，已停止任务")
         );
@@ -620,7 +633,7 @@
   }
   async function resumeTask(input) {
     await waitUntil(
-      () => document.querySelectorAll(userSelector).length > 0,
+      () => userTurns().length > 0,
       3e4,
       new AdapterError("conversation_unavailable", "ChatGPT 对话已打开，但没有找到已发送的任务消息")
     );

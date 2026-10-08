@@ -4443,7 +4443,7 @@ function resolveTaskConversationUrl(message, senderUrl) {
 }
 //#endregion
 //#region src/background/chatgpt-adapter-bridge.ts
-var isCurrentAdapter = (value) => Boolean(value && typeof value === "object" && value.adapterVersion === 29);
+var isCurrentAdapter = (value) => Boolean(value && typeof value === "object" && value.adapterVersion === 32);
 async function probeAdapter(tabs, tabId, message) {
 	try {
 		const state = await tabs.sendMessage(tabId, {
