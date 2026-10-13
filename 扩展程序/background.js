@@ -4935,6 +4935,7 @@ var browserTaskMessages = /* @__PURE__ */ new Map();
 var resumedBrowserUrls = /* @__PURE__ */ new Map();
 var browserRecoveryReloadedAt = /* @__PURE__ */ new Map();
 var lastBrowserLaunchAt = 0;
+var startupRecoveryReady = Promise.resolve();
 var schedulerReady = chrome.storage.session.get([
 	"schedulerState",
 	"activeTaskTabs",
@@ -6514,7 +6515,7 @@ chrome.runtime.onMessage.addListener((raw, sender, sendResponse) => {
 		return true;
 	}
 	if (message.type === "RUN_TASK" || message.type === "RUN_TASKS") {
-		updateScheduler(async () => {
+		startupRecoveryReady.then(() => updateScheduler(async () => {
 			const taskIds = message.type === "RUN_TASKS" ? [...new Set(message.taskIds)] : [message.taskId];
 			const keys = [];
 			for (const taskId of taskIds) {
@@ -6535,7 +6536,7 @@ chrome.runtime.onMessage.addListener((raw, sender, sendResponse) => {
 				keys.push(key);
 			}
 			queue = enqueue(queue, keys);
-		}).then(() => sendResponse({ accepted: true }), (error) => sendResponse({
+		})).then(() => sendResponse({ accepted: true }), (error) => sendResponse({
 			accepted: false,
 			error: String(error)
 		}));
@@ -6625,7 +6626,9 @@ chrome.runtime.onMessage.addListener((raw, sender, sendResponse) => {
 	});
 	return false;
 });
-reconcileSchedulerSnapshot().then(() => recoverInterruptedApiTasks()).then(() => updateScheduler(async () => void 0));
+startupRecoveryReady = reconcileSchedulerSnapshot().then(() => recoverInterruptedApiTasks()).then(() => updateScheduler(async () => void 0)).catch((error) => {
+	console.error("Pixel Flow startup recovery failed; allowing new tasks to start", error);
+});
 chrome.alarms.onAlarm.addListener((alarm) => {
 	if (alarm.name === API_RECOVERY_ALARM) reconcileCompletedApiTasks();
 	if (alarm.name === BROWSER_RESULT_RECOVERY_ALARM) reconcileBrowserTaskResults();

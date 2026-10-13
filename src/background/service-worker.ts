@@ -51,6 +51,9 @@ var browserTaskMessages = /* @__PURE__ */ new Map();
 var resumedBrowserUrls = /* @__PURE__ */ new Map();
 var browserRecoveryReloadedAt = /* @__PURE__ */ new Map();
 var lastBrowserLaunchAt = 0;
+// Do not start a new run while the first worker tick is reconciling persisted work.
+// Otherwise that run can be mistaken for a pre-existing interrupted submission.
+var startupRecoveryReady = Promise.resolve();
 var schedulerReady = chrome.storage.session.get(["schedulerState", "activeTaskTabs", "browserTaskMessages"]).then(async ({ schedulerState, activeTaskTabs, browserTaskMessages: storedBrowserTaskMessages }) => {
   const restored = restoreQueueSnapshot(schedulerState);
   queue = restored.queue;
@@ -1471,7 +1474,7 @@ chrome.runtime.onMessage.addListener((raw, sender, sendResponse) => {
     return true;
   }
   if (message.type === "RUN_TASK" || message.type === "RUN_TASKS") {
-    void updateScheduler(async () => {
+    void startupRecoveryReady.then(() => updateScheduler(async () => {
       const taskIds = message.type === "RUN_TASKS" ? [...new Set(message.taskIds)] : [message.taskId];
       const keys = [];
       for (const taskId of taskIds) {
@@ -1482,7 +1485,7 @@ chrome.runtime.onMessage.addListener((raw, sender, sendResponse) => {
         keys.push(key);
       }
       queue = enqueue(queue, keys);
-    }).then(() => sendResponse({ accepted: true }), (error) => sendResponse({ accepted: false, error: String(error) }));
+    })).then(() => sendResponse({ accepted: true }), (error) => sendResponse({ accepted: false, error: String(error) }));
     return true;
   }
   if (message.type === "CANCEL_TASK") {
@@ -1567,7 +1570,12 @@ chrome.runtime.onMessage.addListener((raw, sender, sendResponse) => {
   }
   return false;
 });
-void reconcileSchedulerSnapshot().then(() => recoverInterruptedApiTasks()).then(() => updateScheduler(async () => void 0));
+startupRecoveryReady = reconcileSchedulerSnapshot()
+  .then(() => recoverInterruptedApiTasks())
+  .then(() => updateScheduler(async () => void 0))
+  .catch((error) => {
+    console.error("Pixel Flow startup recovery failed; allowing new tasks to start", error);
+  });
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === API_RECOVERY_ALARM) void reconcileCompletedApiTasks();
   if (alarm.name === BROWSER_RESULT_RECOVERY_ALARM) void reconcileBrowserTaskResults();

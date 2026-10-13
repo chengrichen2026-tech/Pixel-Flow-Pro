@@ -29,6 +29,14 @@ test("a new run clears stale status detail before queueing", async () => {
   assert.match(source, /status: "queued",\s*detail: void 0/);
 });
 
+test("new runs wait for startup recovery before entering the scheduler", async () => {
+  const source = await readBackgroundSource();
+  assert.match(source, /var startupRecoveryReady = Promise\.resolve\(\)/);
+  assert.match(source, /void startupRecoveryReady\.then\(\(\) => updateScheduler\(async \(\) => \{/);
+  assert.ok(source.includes("startupRecoveryReady = reconcileSchedulerSnapshot()"));
+  assert.ok(source.includes("recoverInterruptedApiTasks()"));
+});
+
 test("manual-action errors prefer the concrete conversation URL reported by the page", async () => {
   const source = await readBackgroundSource();
   assert.match(source, /function resolveTaskConversationUrl/);
@@ -311,7 +319,8 @@ test("extension startup prunes stale scheduler slots before advancing live tasks
   assert.match(background, /if \(!runtime\.active\) continue/);
   assert.match(background, /queue = reconcileQueue\(queue, new Set\(liveScopes\.keys\(\)\)\)/);
   assert.match(background, /activeTaskScopes[\s\S]*runningKeys\.has\(entry\[0\]\)/);
-  assert.match(background, /reconcileSchedulerSnapshot\(\)\.then\(\(\) => recoverInterruptedApiTasks\(\)\)/);
+  assert.ok(background.includes("startupRecoveryReady = reconcileSchedulerSnapshot()"));
+  assert.ok(background.includes("recoverInterruptedApiTasks()"));
   assert.match(background, /task\.generationMode === "browser" && runtime\.status !== "queued" && !concreteChatGptConversationUrl\(runtime\.conversationUrl\)/);
   assert.match(background, /reason: "browser_interrupted"/);
   assert.match(background, /ChatGPT任务在建立可恢复对话前被中断，请重新运行/);
