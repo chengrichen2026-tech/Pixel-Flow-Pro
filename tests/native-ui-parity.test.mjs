@@ -137,5 +137,5 @@ test("task result edges stay animated and dashed after completion", async () => 
   assert.match(styles, /\.toolbar button:hover \.pf-art-icon,.native-library-rail button:hover \.pf-art-icon\{filter:brightness\(0\) invert\(1\)\}/);
   assert.match(styles, /\.toolbar button:hover \.pf-utility-icon,.native-library-rail button:hover \.pf-utility-icon\{color:#fff!important\}/);
   assert.match(app, /aria-label="生图模式"/);
-  assert.match(app, /\{mode==='browser'&&<button title="打开真实对话"/);
+  assert.match(app, /\{mode==='browser'&&!n\.upscale&&<button title="打开真实对话"/);
 });

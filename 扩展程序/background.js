@@ -4766,6 +4766,311 @@ async function teamGatewayResultRequest(path) {
 	return response;
 }
 //#endregion
+//#region src/domain/image-upscale.ts
+function planUpscale(width, height, scale) {
+	if (![
+		2,
+		4,
+		8
+	].includes(scale)) throw new Error("放大倍数只支持 2、4、8");
+	if (![width, height].every((n) => Number.isSafeInteger(n) && n > 0)) throw new Error("无法读取原图尺寸");
+	if (width * height * scale * scale > 64e6 || Math.max(width, height) * scale > 16384) throw new Error("目标图片过大，请降低放大倍数（最大6400万像素）");
+	const side = Math.floor(1024 / scale), overlap = Math.max(8, Math.floor(side * .08)), core = side - overlap * 2;
+	const tiles = [];
+	for (let y = 0, row = 0; y < height; y += core, row++) for (let x = 0, col = 0; x < width; x += core, col++) tiles.push({
+		id: `r${row + 1}_c${col + 1}`,
+		x: x - overlap,
+		y: y - overlap,
+		side
+	});
+	if (tiles.length > 256) throw new Error("分块数量超过256，请降低倍数");
+	return {
+		width,
+		height,
+		scale,
+		side,
+		overlap,
+		tiles
+	};
+}
+function upscalePrompt(tile, scale) {
+	const size = tile.side * scale;
+	return `本次是整图放大中的一个独立正方形分块，编号 ${tile.id}。只处理第一张分块图，保持1:1。期望像素尺寸 ${size}×${size}；实际尺寸由程序读取图片确认，不以文字或文件名为准。单次输出边长不超过2048像素，禁止输出横向4K或完整大图。不要补大后裁剪来冒充放大。\n若提供第二张整图，第二张仅作内容与色调参考，不得把整图重新画进分块。\n保留分块四周全部内容，不裁切、不扩图、不缩放主体、不移动物体，尤其不要改变边缘处跨块的线条与轮廓。保持产品形状、数量、角度、遮挡关系、文字和Logo的字形、位置及内容。不得增删文字或猜测小字。\n优先保持原图整体颜色与影调，只修复局部噪点和压缩污染，禁止对分块单独重新调色。进行高保真超分增强，让已有细节更清晰、干净，不能重新生成、重绘、风格化或创造不存在的结构。只返回一张处理后的分块图片。`;
+}
+function validateUpscaleTile(width, height, expected) {
+	if (width !== height) throw new Error(`分块必须为正方形，实际${width}×${height}`);
+	if (width < expected) throw new Error(`分块尺寸不足：实际${width}×${height}，至少需要${expected}×${expected}`);
+	if (width > 2048) throw new Error("分块超过2048像素，请返回2K以内的正方形图片");
+}
+//#endregion
+//#region src/background/upscale-images.ts
+async function cropUpscaleTile(source, tile) {
+	const canvas = new OffscreenCanvas(tile.side, tile.side), ctx = canvas.getContext("2d");
+	ctx.fillStyle = "#ffffff";
+	ctx.fillRect(0, 0, tile.side, tile.side);
+	const sx = Math.max(0, tile.x), sy = Math.max(0, tile.y), sw = Math.min(source.width, tile.x + tile.side) - sx, sh = Math.min(source.height, tile.y + tile.side) - sy;
+	if (sw > 0 && sh > 0) {
+		const dx = sx - tile.x, dy = sy - tile.y;
+		ctx.drawImage(source, sx, sy, sw, sh, dx, dy, sw, sh);
+		if (dx > 0) ctx.drawImage(source, sx, sy, 1, sh, 0, dy, dx, sh);
+		if (dy > 0) ctx.drawImage(canvas, 0, dy, tile.side, 1, 0, 0, tile.side, dy);
+		const right = dx + sw, bottom = dy + sh;
+		if (right < tile.side) ctx.drawImage(canvas, right - 1, 0, 1, tile.side, right, 0, tile.side - right, tile.side);
+		if (bottom < tile.side) ctx.drawImage(canvas, 0, bottom - 1, tile.side, 1, 0, bottom, tile.side, tile.side - bottom);
+	}
+	return canvas.convertToBlob({ type: "image/png" });
+}
+async function mergeUpscaleTiles(plan, source, load) {
+	const width = plan.width * plan.scale, height = plan.height * plan.scale;
+	const canvas = new OffscreenCanvas(width, height), ctx = canvas.getContext("2d");
+	const size = plan.side * plan.scale, fade = 2 * plan.overlap * plan.scale;
+	for (const tile of plan.tiles) {
+		const bitmap = await createImageBitmap(await load(tile));
+		try {
+			validateUpscaleTile(bitmap.width, bitmap.height, size);
+			const scratch = new OffscreenCanvas(size, size), s = scratch.getContext("2d");
+			s.drawImage(bitmap, 0, 0, size, size);
+			s.globalCompositeOperation = "destination-in";
+			if (tile.x + plan.overlap > 0) {
+				const gradient = s.createLinearGradient(0, 0, fade, 0);
+				gradient.addColorStop(0, "rgba(0,0,0,0)");
+				gradient.addColorStop(1, "rgba(0,0,0,1)");
+				s.fillStyle = gradient;
+				s.fillRect(0, 0, size, size);
+			}
+			if (tile.y + plan.overlap > 0) {
+				const gradient = s.createLinearGradient(0, 0, 0, fade);
+				gradient.addColorStop(0, "rgba(0,0,0,0)");
+				gradient.addColorStop(1, "rgba(0,0,0,1)");
+				s.fillStyle = gradient;
+				s.fillRect(0, 0, size, size);
+			}
+			ctx.drawImage(scratch, tile.x * plan.scale, tile.y * plan.scale);
+		} finally {
+			bitmap.close();
+		}
+	}
+	const original = await createImageBitmap(source);
+	try {
+		ctx.globalCompositeOperation = "destination-in";
+		ctx.drawImage(original, 0, 0, width, height);
+	} finally {
+		original.close();
+	}
+	return canvas.convertToBlob({ type: "image/png" });
+}
+//#endregion
+//#region src/background/upscale-controller.ts
+var makeId$1 = (prefix) => `${prefix}-${crypto.randomUUID()}`;
+var UpscaleController = class {
+	projects;
+	runs;
+	images;
+	notify;
+	constructor(projects, runs, images = {
+		crop: cropUpscaleTile,
+		merge: mergeUpscaleTiles
+	}, notify = async () => {}) {
+		this.projects = projects;
+		this.runs = runs;
+		this.images = images;
+		this.notify = notify;
+	}
+	async prepare(projectId, taskId) {
+		const project = await this.projects.loadProject(projectId), parent = project?.graph.nodes.find((n) => n.id === taskId && n.kind === "task");
+		if (!project || !parent?.upscale) throw new Error("找不到图片放大任务");
+		const sources = project.graph.edges.filter((e) => e.target === taskId && e.kind !== "output").map((e) => project.graph.nodes.find((n) => n.id === e.source));
+		if (sources.length !== 1 || !sources[0] || !["image", "result"].includes(sources[0].kind)) throw new Error("图片放大任务需要且只能连接一张图片");
+		const source = sources[0];
+		const config = parent.upscale;
+		let taskIds;
+		if (parent.status !== "completed" && config.plan && config.sourceAssetId === source.assetId && config.plan.scale === config.scale) taskIds = config.plan.tiles.filter((t) => !t.resultAssetId).map((t) => t.taskId);
+		else {
+			const blob = await this.projects.loadAsset(source.assetId);
+			if (!blob) throw new Error("原图资产不存在");
+			const bitmap = await createImageBitmap(blob), token = makeId$1("upscale");
+			const children = [], images = [], newEdges = [];
+			const crops = [];
+			let plan;
+			try {
+				plan = planUpscale(bitmap.width, bitmap.height, config.scale);
+				for (const tile of plan.tiles) {
+					const assetId = makeId$1("asset"), imageId = makeId$1("upscale-image"), childId = makeId$1("upscale-tile"), edgeId = makeId$1("edge");
+					crops.push({
+						id: assetId,
+						blob: await this.images.crop(bitmap, tile)
+					});
+					tile.taskId = childId;
+					images.push({
+						id: imageId,
+						kind: "image",
+						assetId,
+						title: tile.id,
+						hidden: true,
+						position: parent.position
+					});
+					newEdges.push({
+						id: edgeId,
+						source: imageId,
+						target: childId,
+						kind: "input"
+					});
+					children.push({
+						id: childId,
+						kind: "task",
+						name: `${parent.name} · ${tile.id}`,
+						prompt: upscalePrompt(tile, config.scale),
+						position: parent.position,
+						inputEdgeOrder: [edgeId],
+						runCount: 0,
+						status: "queued",
+						hidden: true,
+						aspectRatio: "1:1",
+						generationMode: parent.generationMode,
+						teamImageModel: parent.teamImageModel,
+						apiImageModel: parent.apiImageModel,
+						upscaleParentId: taskId,
+						upscaleToken: token
+					});
+				}
+			} finally {
+				bitmap.close();
+			}
+			await this.projects.mutateGenerationState(projectId, async (current) => {
+				for (const crop of crops) {
+					const saved = await this.projects.saveAsset(crop.blob);
+					const image = images.find((n) => n.kind === "image" && n.assetId === crop.id);
+					if (image?.kind === "image") image.assetId = saved;
+				}
+				return {
+					...current,
+					graph: {
+						nodes: current.graph.nodes.map((n) => n.id === taskId && n.kind === "task" ? {
+							...n,
+							upscale: {
+								scale: config.scale,
+								plan,
+								sourceAssetId: source.assetId,
+								token
+							}
+						} : n).concat(images, children),
+						edges: [...current.graph.edges, ...newEdges]
+					}
+				};
+			});
+			taskIds = children.map((c) => c.id);
+		}
+		const run = await this.runs.latest(projectId, taskId);
+		if (!run) throw new Error("放大运行记录不存在");
+		const next = await this.runs.advance(run.id, "generating", { detail: `已处理 ${config.plan?.tiles.filter((t) => t.resultAssetId).length ?? 0}/${taskIds.length + (config.plan?.tiles.filter((t) => t.resultAssetId).length ?? 0)} 块` });
+		await this.projects.mutateProject(projectId, (current) => ({
+			...current,
+			graph: {
+				...current.graph,
+				nodes: current.graph.nodes.map((n) => n.id === taskId ? {
+					...n,
+					...projectRunToLegacyTask(next)
+				} : n)
+			}
+		}));
+		return taskIds;
+	}
+	async finish(projectId, parentId) {
+		const project = await this.projects.loadProject(projectId), parent = project?.graph.nodes.find((n) => n.id === parentId && n.kind === "task");
+		const config = parent?.upscale, run = await this.runs.latest(projectId, parentId);
+		if (!project || !parent || !config?.plan || !run || isTerminalRunStatus(run.status)) return;
+		const plan = config.plan, done = plan.tiles.filter((t) => t.resultAssetId).length;
+		const pending = plan.tiles.map((t) => project.graph.nodes.find((n) => n.id === t.taskId && n.kind === "task")).some((c, i) => !plan.tiles[i].resultAssetId && c && ![
+			"failed",
+			"manual_action",
+			"completed"
+		].includes(c.status));
+		const detail = done === plan.tiles.length ? "正在拼合大图" : `已处理 ${done}/${plan.tiles.length} 块`;
+		if (pending || done !== plan.tiles.length) {
+			const next = await this.runs.advance(run.id, pending ? "generating" : "failed", { detail: pending ? detail : `${detail}，部分分块失败；点击重试保留成功分块` });
+			await this.projects.mutateProject(projectId, (current) => ({
+				...current,
+				graph: {
+					...current.graph,
+					nodes: current.graph.nodes.map((n) => n.id === parentId ? {
+						...n,
+						...projectRunToLegacyTask(next)
+					} : n)
+				}
+			}));
+			return;
+		}
+		try {
+			const source = await this.projects.loadAsset(config.sourceAssetId);
+			if (!source) throw new Error("原图资产不存在");
+			const delivering = await this.runs.advance(run.id, "delivering", { detail });
+			await this.projects.mutateProject(projectId, (current) => ({
+				...current,
+				graph: {
+					...current.graph,
+					nodes: current.graph.nodes.map((n) => n.id === parentId ? {
+						...n,
+						...projectRunToLegacyTask(delivering)
+					} : n)
+				}
+			}));
+			await this.notify(projectId);
+			const blob = await this.images.merge(plan, source, async (tile) => {
+				const result = await this.projects.loadAsset(tile.resultAssetId);
+				if (!result) throw new Error(`分块${tile.id}资产不存在`);
+				return result;
+			});
+			await this.projects.mutateGenerationState(projectId, async (current) => {
+				const latest = await this.runs.latest(projectId, parentId);
+				if (!latest || isTerminalRunStatus(latest.status)) return current;
+				if (current.graph.nodes.find((n) => n.id === parentId && n.kind === "task")?.upscale?.token !== config.token) return current;
+				const assetId = await this.projects.saveAsset(blob), resultId = makeId$1("result");
+				const next = await this.runs.advance(latest.id, "completed", { detail: `${plan.width * plan.scale}×${plan.height * plan.scale} · ${plan.tiles.length}块已拼合` });
+				return {
+					...current,
+					graph: {
+						nodes: current.graph.nodes.map((n) => n.id === parentId && n.kind === "task" ? {
+							...n,
+							...projectRunToLegacyTask(next),
+							runCount: n.runCount + 1
+						} : n).concat({
+							id: resultId,
+							kind: "result",
+							assetId,
+							taskId: parentId,
+							title: `放大结果 ${plan.scale}×`,
+							position: {
+								x: parent.position.x + 560,
+								y: parent.position.y
+							}
+						}),
+						edges: [...current.graph.edges, {
+							id: makeId$1("edge"),
+							source: parentId,
+							target: resultId,
+							kind: "output"
+						}]
+					}
+				};
+			});
+		} catch (error) {
+			const latest = await this.runs.latest(projectId, parentId);
+			if (!latest || isTerminalRunStatus(latest.status)) return;
+			const next = await this.runs.advance(latest.id, "failed", { detail: `拼合失败：${error instanceof Error ? error.message : String(error)}` });
+			await this.projects.mutateProject(projectId, (current) => ({
+				...current,
+				graph: {
+					...current.graph,
+					nodes: current.graph.nodes.map((n) => n.id === parentId ? {
+						...n,
+						...projectRunToLegacyTask(next)
+					} : n)
+				}
+			}));
+		}
+	}
+};
+//#endregion
 //#region src/background/generation-projector.ts
 var makeId = (prefix) => `${prefix}-${crypto.randomUUID()}`;
 var findNode = (graph, id) => {
@@ -4906,8 +5211,30 @@ async function applyTaskMessage(project, message, saveAsset, run) {
 		conversationUrl: projection.conversationUrl ?? task.conversationUrl
 	})), message.taskId, projection.status, projection.statusDetail);
 	let graph = project.graph;
-	for (const image of message.images) graph = appendResult(graph, message.taskId, await saveAsset(decodeBase64(image.base64, image.mimeType)));
-	if (message.responseText?.trim()) graph = appendTextResult(graph, message.taskId, message.responseText);
+	const child = graph.nodes.find((node) => node.id === message.taskId && node.kind === "task");
+	if (child?.upscaleParentId) {
+		if (message.images.length !== 1) throw new Error("分块必须返回一张图片");
+		const parent = graph.nodes.find((node) => node.id === child.upscaleParentId && node.kind === "task");
+		if (!parent?.upscale?.plan || parent.upscale.token !== child.upscaleToken || parent.runtimeStatus === "canceled") return project;
+		const assetId = await saveAsset(decodeBase64(message.images[0].base64, message.images[0].mimeType));
+		graph = {
+			...graph,
+			nodes: graph.nodes.map((node) => node.id === parent.id && node.kind === "task" ? {
+				...node,
+				upscale: {
+					...parent.upscale,
+					plan: {
+						...parent.upscale.plan,
+						tiles: parent.upscale.plan.tiles.map((tile) => tile.taskId === child.id ? {
+							...tile,
+							resultAssetId: assetId
+						} : tile)
+					}
+				}
+			} : node)
+		};
+	} else for (const image of message.images) graph = appendResult(graph, message.taskId, await saveAsset(decodeBase64(image.base64, image.mimeType)));
+	if (!child?.upscaleParentId && message.responseText?.trim()) graph = appendTextResult(graph, message.taskId, message.responseText);
 	return updateBatchParent(updateTask({
 		...project,
 		graph,
@@ -4925,6 +5252,11 @@ async function applyTaskMessage(project, message, saveAsset, run) {
 var database = new NodeCanvasDatabase();
 var projectRepository = new ProjectRepository(database);
 var taskRunRepository = new TaskRunRepository(database.runs);
+var upscaleController = new UpscaleController(projectRepository, taskRunRepository, void 0, async (projectId) => broadcast({
+	type: "TASK_STATUS",
+	projectId,
+	persisted: true
+}));
 var tabRegistry = new TabRegistry(chrome.tabs, new TaskTabGrouper(chrome.tabs, chrome.tabGroups));
 var projectWrites = new KeyedSerialQueue();
 var schedulerWrites = new KeyedSerialQueue();
@@ -5046,6 +5378,29 @@ async function broadcast(message) {
 	} catch {}
 }
 async function persistAndBroadcast(message) {
+	const loaded = await projectRepository.loadProject(message.projectId);
+	const tileTask = loaded?.graph.nodes.find((node) => node.id === message.taskId && node.kind === "task");
+	if (tileTask?.upscaleParentId && message.type === "TASK_RESULT") {
+		const parent = loaded.graph.nodes.find((node) => node.id === tileTask.upscaleParentId && node.kind === "task");
+		if (!parent || parent.runtimeStatus === "canceled" || parent.upscale?.token !== tileTask.upscaleToken) return;
+		try {
+			if (message.images?.length !== 1) throw new Error("分块必须返回一张图片");
+			const bitmap = await createImageBitmap(decodeBase64(message.images[0].base64, message.images[0].mimeType || "image/png"));
+			try {
+				validateUpscaleTile(bitmap.width, bitmap.height, parent.upscale.plan.side * parent.upscale.plan.scale);
+			} finally {
+				bitmap.close();
+			}
+		} catch (error) {
+			message = {
+				type: "TASK_ERROR",
+				projectId: message.projectId,
+				taskId: message.taskId,
+				reason: "invalid_upscale_tile",
+				detail: String(error)
+			};
+		}
+	}
 	let applied = false;
 	await projectWrites.run(message.projectId, async () => {
 		await projectRepository.mutateGenerationState(message.projectId, async (project) => {
@@ -5060,10 +5415,21 @@ async function persistAndBroadcast(message) {
 			return applyTaskMessage(project, message, (blob) => projectRepository.saveAsset(blob), run);
 		});
 	});
-	if (applied) await broadcast({
-		...message,
-		persisted: true
-	});
+	if (applied) {
+		if (tileTask?.upscaleParentId) {
+			await projectWrites.run(message.projectId, () => upscaleController.finish(message.projectId, tileTask.upscaleParentId));
+			await broadcast({
+				type: "TASK_STATUS",
+				projectId: message.projectId,
+				taskId: tileTask.upscaleParentId,
+				persisted: true
+			});
+		}
+		await broadcast({
+			...message,
+			persisted: true
+		});
+	}
 }
 async function reconcileTaskRunProjections() {
 	for (const project of await projectRepository.listProjects()) {
@@ -5674,7 +6040,11 @@ async function teamWebWorkerTickOnce() {
 			remote = await teamWebWorkerRequest(`/jobs/${expected.job.id}/status`);
 		} catch (error) {
 			const status = Number(error?.status);
-			if (status === 404 || status === 410) {
+			if ([
+				404,
+				409,
+				410
+			].includes(status)) {
 				await clearActiveTeamWebJob(true, expected);
 				await updateScheduler(async () => void 0);
 				return;
@@ -6172,26 +6542,17 @@ async function reconcileSchedulerSnapshot() {
 	await schedulerReady;
 	const liveScopes = /* @__PURE__ */ new Map();
 	const interruptedBrowserTasks = [];
-	const retryBrowserTasks = [];
 	for (const project of await projectRepository.listProjects()) {
 		const latestRuns = await taskRunRepository.latestByProject(project.id);
 		for (const task of project.graph.nodes) {
-			if (task.kind !== "task") continue;
+			if (task.kind !== "task" || task.upscale) continue;
 			const runtime = resolveTaskRuntime(task, latestRuns.get(task.id));
 			if (!runtime.active) continue;
 			if (task.generationMode === "browser" && runtime.status !== "queued" && !concreteChatGptConversationUrl(runtime.conversationUrl)) {
-				const key = createTaskScopeKey(project.id, task.id);
-				if (browserTaskMessages.has(key)) liveScopes.set(key, {
+				interruptedBrowserTasks.push({
 					projectId: project.id,
 					taskId: task.id
 				});
-				else {
-					liveScopes.set(key, {
-						projectId: project.id,
-						taskId: task.id
-					});
-					retryBrowserTasks.push(key);
-				}
 				continue;
 			}
 			liveScopes.set(createTaskScopeKey(project.id, task.id), {
@@ -6217,10 +6578,6 @@ async function reconcileSchedulerSnapshot() {
 		activeTaskTabs
 	});
 	await saveScheduler();
-	if (retryBrowserTasks.length) {
-		queue = enqueue(retryBrowserTasks.reduce((snapshot, key) => cancelTask(snapshot, key), queue), retryBrowserTasks);
-		await saveScheduler();
-	}
 	for (const task of interruptedBrowserTasks) await persistAndBroadcast({
 		type: "TASK_ERROR",
 		...task,
@@ -6255,7 +6612,7 @@ async function recoverInterruptedApiTasks() {
 	for (const project of await projectRepository.listProjects()) {
 		const latestRuns = await taskRunRepository.latestByProject(project.id);
 		for (const task of project.graph.nodes) {
-			if (task.kind !== "task" || ![
+			if (task.kind !== "task" || task.upscale || ![
 				"api",
 				"team",
 				"team_web"
@@ -6308,7 +6665,7 @@ async function reconcileCompletedApiTasks() {
 	for (const project of await projectRepository.listProjects()) {
 		const latestRuns = await taskRunRepository.latestByProject(project.id);
 		for (const task of project.graph.nodes) {
-			if (task.kind !== "task" || ![
+			if (task.kind !== "task" || task.upscale || ![
 				"api",
 				"team",
 				"team_web"
@@ -6496,6 +6853,7 @@ chrome.runtime.onMessage.addListener((raw, sender, sendResponse) => {
 	if (message.type === "GET_API_CAPABILITIES") {
 		sendResponse({
 			accepted: true,
+			upscaleVersion: 1,
 			apiModels: [
 				"gpt-image-2",
 				"gpt-image-2.5-sunburst",
@@ -6518,7 +6876,32 @@ chrome.runtime.onMessage.addListener((raw, sender, sendResponse) => {
 		startupRecoveryReady.then(() => updateScheduler(async () => {
 			const taskIds = message.type === "RUN_TASKS" ? [...new Set(message.taskIds)] : [message.taskId];
 			const keys = [];
-			for (const taskId of taskIds) {
+			const expanded = [];
+			for (const taskId of taskIds) if (((await projectRepository.loadProject(message.projectId))?.graph.nodes.find((node) => node.id === taskId && node.kind === "task"))?.upscale) {
+				const existing = await taskRunRepository.latest(message.projectId, taskId);
+				if (existing && !isTerminalRunStatus(existing.status)) continue;
+				await startTaskRun(message.projectId, taskId);
+				try {
+					expanded.push(...await projectWrites.run(message.projectId, () => upscaleController.prepare(message.projectId, taskId)));
+				} catch (error) {
+					await persistAndBroadcast({
+						type: "TASK_ERROR",
+						projectId: message.projectId,
+						taskId,
+						reason: "upscale_prepare",
+						detail: String(error)
+					});
+					throw error;
+				}
+				await projectWrites.run(message.projectId, () => upscaleController.finish(message.projectId, taskId));
+				await broadcast({
+					type: "TASK_STATUS",
+					projectId: message.projectId,
+					taskId,
+					persisted: true
+				});
+			} else expanded.push(taskId);
+			for (const taskId of expanded) {
 				const key = createTaskScopeKey(message.projectId, taskId);
 				await startTaskRun(message.projectId, taskId);
 				await persistAndBroadcast({
@@ -6544,32 +6927,37 @@ chrome.runtime.onMessage.addListener((raw, sender, sendResponse) => {
 	}
 	if (message.type === "CANCEL_TASK") {
 		updateScheduler(async () => {
-			const key = createTaskScopeKey(message.projectId, message.taskId);
-			const task = (await projectRepository.loadProject(message.projectId))?.graph.nodes.find((node) => node.id === message.taskId && node.kind === "task");
-			const run = await taskRunRepository.latest(message.projectId, message.taskId);
-			const providerJobId = run?.providerJobId || task?.apiJobId;
-			if (providerJobId) {
-				if (["team", "team_web"].includes(task.generationMode)) await cancelTeamGatewayJob(providerJobId).catch(() => void 0);
-				else await apiWorkerRequest(`/jobs/${providerJobId}`, { method: "DELETE" }).catch(() => void 0);
-				teamResultDownloads.delete(providerJobId);
+			const children = (await projectRepository.loadProject(message.projectId))?.graph.nodes.filter((node) => node.kind === "task" && node.upscaleParentId === message.taskId).map((node) => node.id) || [];
+			for (const cancelId of [message.taskId, ...children]) {
+				const key = createTaskScopeKey(message.projectId, cancelId);
+				const activeTeamWebJob = message.projectId === TEAM_WEB_PROJECT_ID ? activeTeamWebJobs.get(cancelId) : void 0;
+				if (activeTeamWebJob) await clearActiveTeamWebJob(false, activeTeamWebJob);
+				const task = (await projectRepository.loadProject(message.projectId))?.graph.nodes.find((node) => node.id === cancelId && node.kind === "task");
+				const run = await taskRunRepository.latest(message.projectId, cancelId);
+				const providerJobId = run?.providerJobId || task?.apiJobId;
+				if (providerJobId) {
+					if (["team", "team_web"].includes(task.generationMode)) await cancelTeamGatewayJob(providerJobId).catch(() => void 0);
+					else await apiWorkerRequest(`/jobs/${providerJobId}`, { method: "DELETE" }).catch(() => void 0);
+					teamResultDownloads.delete(providerJobId);
+				}
+				if (run && !isTerminalRunStatus(run.status)) await persistAndBroadcast({
+					type: "TASK_STATUS",
+					projectId: message.projectId,
+					taskId: cancelId,
+					status: "failed",
+					runStatus: "canceled",
+					detail: "任务已取消"
+				});
+				queue = cancelTask(queue, key);
+				pendingScopes.delete(key);
+				browserTaskMessages.delete(key);
+				resumedBrowserUrls.delete(key);
+				browserRecoveryReloadedAt.delete(key);
+				await saveBrowserTaskMessages();
+				if (browserTaskMessages.size === 0) await chrome.alarms.clear(BROWSER_RESULT_RECOVERY_ALARM);
+				await removeActiveScope(key);
+				await tabRegistry.close(key);
 			}
-			if (run && !isTerminalRunStatus(run.status)) await persistAndBroadcast({
-				type: "TASK_STATUS",
-				projectId: message.projectId,
-				taskId: message.taskId,
-				status: "failed",
-				runStatus: "canceled",
-				detail: "任务已取消"
-			});
-			queue = cancelTask(queue, key);
-			pendingScopes.delete(key);
-			browserTaskMessages.delete(key);
-			resumedBrowserUrls.delete(key);
-			browserRecoveryReloadedAt.delete(key);
-			await saveBrowserTaskMessages();
-			if (browserTaskMessages.size === 0) await chrome.alarms.clear(BROWSER_RESULT_RECOVERY_ALARM);
-			await removeActiveScope(key);
-			await tabRegistry.close(key);
 		}).then(() => sendResponse({ accepted: true }), (error) => sendResponse({
 			accepted: false,
 			error: String(error)
@@ -6626,7 +7014,29 @@ chrome.runtime.onMessage.addListener((raw, sender, sendResponse) => {
 	});
 	return false;
 });
-startupRecoveryReady = reconcileSchedulerSnapshot().then(() => recoverInterruptedApiTasks()).then(() => updateScheduler(async () => void 0)).catch((error) => {
+startupRecoveryReady = reconcileSchedulerSnapshot().then(() => recoverInterruptedApiTasks()).then(() => updateScheduler(async () => {
+	for (const project of await projectRepository.listProjects()) for (const parent of project.graph.nodes) {
+		if (parent.kind !== "task" || !parent.upscale?.plan) continue;
+		const run = await taskRunRepository.latest(project.id, parent.id);
+		if (!run || isTerminalRunStatus(run.status)) continue;
+		for (const tile of parent.upscale.plan.tiles) {
+			const child = project.graph.nodes.find((n) => n.id === tile.taskId && n.kind === "task");
+			if (tile.resultAssetId || !child || [
+				"completed",
+				"failed",
+				"manual_action"
+			].includes(child.status)) continue;
+			const key = createTaskScopeKey(project.id, child.id);
+			await startTaskRun(project.id, child.id);
+			pendingScopes.set(key, {
+				projectId: project.id,
+				taskId: child.id
+			});
+			queue = enqueue(queue, [key]);
+		}
+		await projectWrites.run(project.id, () => upscaleController.finish(project.id, parent.id));
+	}
+})).catch((error) => {
 	console.error("Pixel Flow startup recovery failed; allowing new tasks to start", error);
 });
 chrome.alarms.onAlarm.addListener((alarm) => {

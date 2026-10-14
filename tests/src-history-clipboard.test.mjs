@@ -114,7 +114,8 @@ test("new tasks use the current viewport, connect every selected image, and avoi
   assert.match(store, /Math\.max\(\.\.\.sources\.map\(source=>source\.position\.x\+\(source\.width\?\?320\)\)\)\+80/);
   assert.match(store, /const edges=currentSources\.map/);
   assert.match(store, /inputEdgeOrder:edges\.map\(edge=>edge\.id\)/);
-  assert.match(store, /offset\+=48/);
+  assert.match(store, /const occupied=p\.graph\.nodes\.filter\(\(node\):node is TaskNode=>node\.kind==="task"&&!node\.hidden\)/);
+  assert.match(store, /placed\.y\+=360/);
 });
 
 test("memory release exposes working, success, empty, and error feedback", async () => {

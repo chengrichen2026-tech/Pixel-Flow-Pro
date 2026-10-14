@@ -22,3 +22,5 @@ import "./team-generation-mode.test.mjs";
 
 import "./team-web-delivery.test.mjs";
 import "./team-web-worker-settings.test.mjs";
+
+import "./image-upscale.test.mjs";

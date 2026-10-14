@@ -1,3 +1,7 @@
+param(
+  [switch]$ForceRestart
+)
+
 $ErrorActionPreference = "Stop"
 
 $projectDir = Split-Path -Parent $PSScriptRoot
@@ -10,13 +14,53 @@ $healthUrl = "http://127.0.0.1:43129/health"
 
 New-Item -ItemType Directory -Force -Path $runtimeDir | Out-Null
 
+function Get-PixelFlowWorkerProcess {
+  if (Test-Path $pidPath) {
+    try {
+      $savedPid = [int](Get-Content $pidPath -Raw)
+      $savedProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $savedPid" -ErrorAction SilentlyContinue
+      if ($savedProcess -and $savedProcess.CommandLine -match "api-worker[\\/]server\.mjs") {
+        return $savedProcess
+      }
+    } catch {
+    }
+  }
+
+  try {
+    $connection = Get-NetTCPConnection -LocalAddress "127.0.0.1" -LocalPort 43129 -State Listen -ErrorAction Stop | Select-Object -First 1
+    if ($connection) {
+      $portProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $($connection.OwningProcess)" -ErrorAction SilentlyContinue
+      if ($portProcess -and $portProcess.CommandLine -match "api-worker[\\/]server\.mjs") {
+        return $portProcess
+      }
+    }
+  } catch {
+  }
+
+  return $null
+}
+
+$runningHealth = $null
 try {
-  $health = Invoke-RestMethod -Uri $healthUrl -TimeoutSec 2
-  if ($health.ok) {
-    Write-Host "Pixel Flow API Worker is already running."
+  $runningHealth = Invoke-RestMethod -Uri $healthUrl -TimeoutSec 2
+} catch {
+}
+
+if ($runningHealth -and $runningHealth.ok) {
+  $supportsCurrentModels = $runningHealth.workerVersion -ge 2 -and $runningHealth.apiModels -contains "gpt-image-2.5-sunburst" -and $runningHealth.apiModels -contains "gpt-image-2.5-flare"
+  if (-not $ForceRestart -and $supportsCurrentModels) {
+    Write-Host "Pixel Flow API Worker is already running with current model support."
     exit 0
   }
-} catch {
+
+  $runningProcess = Get-PixelFlowWorkerProcess
+  if (-not $runningProcess) {
+    throw "Port 43129 is in use, but the running process could not be verified as Pixel Flow API Worker. Stop it manually and retry."
+  }
+  Write-Host "Stopping previous Pixel Flow API Worker (PID $($runningProcess.ProcessId)) before update."
+  Stop-Process -Id $runningProcess.ProcessId -Force -ErrorAction Stop
+  Start-Sleep -Seconds 1
+  Remove-Item -Path $pidPath -Force -ErrorAction SilentlyContinue
 }
 
 $node = (Get-Command node -ErrorAction Stop).Source

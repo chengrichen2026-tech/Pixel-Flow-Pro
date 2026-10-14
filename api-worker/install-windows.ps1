@@ -15,6 +15,6 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "$st
 "@
 Set-Content -Path $launcherPath -Value $launcher -Encoding ascii
 
-& $startScript
+& $startScript -ForceRestart
 Write-Host "Installed startup launcher: $launcherPath"
 Write-Host "Pixel Flow API Worker will start automatically after Windows sign-in."

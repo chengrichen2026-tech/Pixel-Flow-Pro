@@ -100,8 +100,17 @@ export async function applyTaskMessage(
     return updateBatchParent(updated, message.taskId, projection.status, projection.statusDetail);
   }
   let graph = project.graph;
-  for (const image of message.images) graph = appendResult(graph, message.taskId, await saveAsset(decodeBase64(image.base64, image.mimeType)));
-  if (message.responseText?.trim()) graph = appendTextResult(graph, message.taskId, message.responseText);
+  const child = graph.nodes.find((node): node is TaskNode => node.id === message.taskId && node.kind === "task");
+  if (child?.upscaleParentId) {
+    if(message.images.length!==1)throw new Error("分块必须返回一张图片");
+    const parent = graph.nodes.find((node): node is TaskNode => node.id === child.upscaleParentId && node.kind === "task");
+    if (!parent?.upscale?.plan || parent.upscale.token !== child.upscaleToken || parent.runtimeStatus === "canceled") return project;
+    const assetId = await saveAsset(decodeBase64(message.images[0].base64, message.images[0].mimeType));
+    graph = {...graph,nodes:graph.nodes.map(node=>node.id===parent.id&&node.kind==="task"?{...node,upscale:{...parent.upscale!,plan:{...parent.upscale!.plan!,tiles:parent.upscale!.plan!.tiles.map(tile=>tile.taskId===child.id?{...tile,resultAssetId:assetId}:tile)}}}:node)};
+  } else {
+    for (const image of message.images) graph = appendResult(graph, message.taskId, await saveAsset(decodeBase64(image.base64, image.mimeType)));
+  }
+  if (!child?.upscaleParentId && message.responseText?.trim()) graph = appendTextResult(graph, message.taskId, message.responseText);
   const updated = updateTask({ ...project, graph, updatedAt: Date.now() }, message.taskId, task => ({ ...task, ...projection, runCount: task.runCount + 1, conversationUrl: projection.conversationUrl ?? task.conversationUrl, lastResponseText: message.responseText }));
   return updateBatchParent(updated, message.taskId, projection.status, projection.statusDetail);
 }

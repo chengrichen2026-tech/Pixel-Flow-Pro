@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { requestApiImages } from "../public/api-client.js";
+import { PIXEL_FLOW_API_MODELS, requestApiImages } from "../public/api-client.js";
 
 const host = "127.0.0.1";
 const port = Number(process.env.PIXEL_FLOW_API_WORKER_PORT || 43129);
@@ -107,7 +107,13 @@ const server = http.createServer(async (request, response) => {
     if (request.method === "OPTIONS") return sendJson(response, 204, {});
     const url = new URL(request.url || "/", `http://${host}:${port}`);
     if (request.method === "GET" && url.pathname === "/health") {
-      return sendJson(response, 200, { ok: true, service: "pixel-flow-api-worker", pid: process.pid });
+      return sendJson(response, 200, {
+        ok: true,
+        service: "pixel-flow-api-worker",
+        workerVersion: 2,
+        apiModels: PIXEL_FLOW_API_MODELS,
+        pid: process.pid
+      });
     }
     if (request.method === "POST" && url.pathname === "/jobs") {
       const input = await readJson(request);

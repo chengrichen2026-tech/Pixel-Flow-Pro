@@ -8,7 +8,7 @@ Pixel Flow 是一个运行在 Chrome / Edge 中的本地 AI 创意任务画布�
 
 ## 当前版本
 
-当前版本为 **v0.3.16**。任务卡恢复紧凑的单一“生图模式”入口，只显示三个主模式：
+当前版本为 **v0.3.17**。任务卡恢复紧凑的单一“生图模式”入口，只显示三个主模式：
 
 | 主模式 | 二级选择 | 底层兼容值 |
 | --- | --- | --- |
@@ -53,6 +53,9 @@ GPT Web 选择“团队”即原 Team Web 链路。已有画布继续读取 `api
 - **Team Cloud**：通过妙搭任务箱、Cloudflare Queue / Worker 和服务端 Codex OAuth 生图；可选 Flare / Sunburst，成员浏览器只保存成员令牌，平台访问 Key 由中继托管。
 
 Team Web 的性能与验收记录见 [TEAM_WEB_PERFORMANCE.md](TEAM_WEB_PERFORMANCE.md)。旧本机 Team Gateway / Quick Tunnel 仍是兼容路径，不是新伙伴的推荐方案。
+
+
+本版新增轻量图片放大任务卡：选中图片后创建放大任务，选择2×/4×/8×，自动分块生成并拼合PNG。详见 [图片放大说明](IMAGE_UPSCALING.md)。
 
 ## 快速开始
 

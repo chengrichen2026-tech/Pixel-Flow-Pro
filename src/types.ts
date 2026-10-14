@@ -1,3 +1,4 @@
+import type { UpscaleState } from "./domain/image-upscale";
 import type { RunStatus } from "./domain/task-run.ts";
 
 export type Point = { x: number; y: number };
@@ -12,7 +13,7 @@ export type GenerationMode = "browser" | "api" | "team" | "team_web";
 export type TeamImageModel = "flare" | "sunburst";
 export type ApiImageModel = "gpt-image-2" | "gpt-image-2.5-sunburst" | "gpt-image-2.5-flare";
 export type BatchItem = { id: string; title: string; status: TaskStatus; taskId?: string; detail?: string };
-export type TaskNode = { id: string; kind: "task"; name: string; prompt: string; position: Point; inputEdgeOrder: string[]; runCount: number; status: string; runtimeStatus?: RunStatus; recoverableResult?: boolean; aspectRatio?: string; generationMode?: GenerationMode; teamImageModel?: TeamImageModel; apiImageModel?: ApiImageModel; apiJobId?: string; conversationUrl?: string; statusDetail?: string; templateId?: string; templateNodeId?: string; templateSlot?: number; batchItems?: BatchItem[]; batchParentTaskId?: string; batchItemId?: string; hidden?: boolean };
+export type TaskNode = { id: string; kind: "task"; name: string; prompt: string; position: Point; inputEdgeOrder: string[]; runCount: number; status: string; runtimeStatus?: RunStatus; recoverableResult?: boolean; aspectRatio?: string; generationMode?: GenerationMode; teamImageModel?: TeamImageModel; apiImageModel?: ApiImageModel; apiJobId?: string; conversationUrl?: string; statusDetail?: string; templateId?: string; templateNodeId?: string; templateSlot?: number; batchItems?: BatchItem[]; batchParentTaskId?: string; batchItemId?: string; hidden?: boolean; upscale?: UpscaleState; upscaleParentId?: string; upscaleToken?: string };
 export type CanvasNode = ImageNode | ImageContainerNode | ResultNode | TextNode | TextResultNode | TaskNode;
 export type CanvasEdge = { id: string; source: string; target: string; kind?: "input" | "output" };
 export type Project = { id: string; name: string; graph: { nodes: CanvasNode[]; edges: CanvasEdge[] }; createdAt: number; updatedAt: number };

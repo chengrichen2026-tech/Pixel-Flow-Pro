@@ -120,7 +120,7 @@ test('finishing a remote web job immediately advances queued local browser work'
 test('worker reconciliation clears a terminal persisted remote job before claiming more work', () => {
   assert.match(source, /teamWebWorkerRequest\(`\/jobs\/\$\{expected\.job\.id\}\/status`\)/);
   assert.match(source, /\["completed", "failed", "canceled"\]\.includes\(remote\.status\)[\s\S]*await clearActiveTeamWebJob\(true, expected\);[\s\S]*await updateScheduler\(async \(\) => void 0\);/);
-  assert.match(source, /status === 404 \|\| status === 410[\s\S]*await clearActiveTeamWebJob\(true, expected\);[\s\S]*await updateScheduler\(async \(\) => void 0\);/);
+  assert.match(source, /\[404, 409, 410\]\.includes\(status\)[\s\S]*await clearActiveTeamWebJob\(true, expected\);[\s\S]*await updateScheduler\(async \(\) => void 0\);/);
 });
 test('one worker keeps five independent Team Web jobs and claims only free browser slots', () => {
   assert.match(source, /const TEAM_WEB_MAX_CONCURRENCY = 5/);

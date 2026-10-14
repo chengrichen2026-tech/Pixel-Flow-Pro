@@ -48,13 +48,28 @@ async function executeOne(command:Record<string,unknown>){const store=useStore.g
   if(op==="canvas.open"){await store.openProject(String(command.projectId));return{projectId:String(command.projectId)}}
   if(op==="canvas.delete"){const projectId=String(command.projectId||store.project?.id||"");await store.deleteProject(projectId);return{deletedProjectId:projectId,currentProjectId:useStore.getState().project?.id}}
   if(op==="task.create"){const position=(command.position&&typeof command.position==="object"?command.position:{x:620,y:220}) as {x:number,y:number};await store.addTask(position,Array.isArray(command.sourceNodeIds)?command.sourceNodeIds.map(String):[]);const taskId=useStore.getState().selected[0];const generationMode=command.generationMode==="browser"?"browser":command.generationMode==="team"?"team":command.generationMode==="team_web"?"team_web":"api";const teamImageModel=command.teamImageModel==="sunburst"?"sunburst":"flare";const apiImageModel=command.apiImageModel==="gpt-image-2.5-sunburst"?"gpt-image-2.5-sunburst":command.apiImageModel==="gpt-image-2.5-flare"?"gpt-image-2.5-flare":"gpt-image-2";await useStore.getState().updateNode(taskId,{prompt:String(command.prompt||""),generationMode,teamImageModel,apiImageModel,aspectRatio:String(command.aspectRatio||"auto")} as Partial<TaskNode>);return{taskId}}
+  if(op==="upscale.capabilities"){return await chrome.runtime.sendMessage({type:"GET_API_CAPABILITIES"})}
+  if(op==="upscale.inspect"){
+    const task=store.project?.graph.nodes.find((n):n is TaskNode=>n.id===command.taskId&&n.kind==='task');
+    if(!task?.upscale)throw new Error('Upscale task not found');
+    const ids=task.upscale.plan?.tiles.map(t=>t.taskId)||[];
+    return {taskId:task.id,upscale:task.upscale,children:store.project!.graph.nodes.filter(n=>ids.includes(n.id)).map(n=>({...n})),inputAssetIds:store.project!.graph.nodes.filter(n=>n.kind==='image'&&store.project!.graph.edges.some(e=>ids.includes(e.target)&&e.source===n.id)).map(n=>n.kind==='image'?n.assetId:'')};
+  }
+  if(op==="upscale.create"){
+    const scale=Number(command.scale??2);if(![2,4,8].includes(scale))throw new Error('scale must be 2, 4, or 8');
+    await store.addUpscaleTask((command.position||{x:620,y:220}) as {x:number,y:number},Array.isArray(command.sourceNodeIds)?command.sourceNodeIds.map(String):[]);
+    const taskId=useStore.getState().selected[0];
+    const generationMode=command.generationMode==='api'?'api':command.generationMode==='team'?'team':command.generationMode==='team_web'?'team_web':'browser';
+    await useStore.getState().updateNode(taskId,{upscale:{scale:scale as 2|4|8},generationMode,teamImageModel:command.teamImageModel==='flare'?'flare':'sunburst',apiImageModel:command.apiImageModel==='gpt-image-2.5-sunburst'?'gpt-image-2.5-sunburst':command.apiImageModel==='gpt-image-2.5-flare'?'gpt-image-2.5-flare':'gpt-image-2'} as Partial<TaskNode>);return{taskId};
+  }
+  if(op==="task.cancel"){await store.cancelTask(String(command.taskId));return{taskId:String(command.taskId),canceled:true}}
   if(op==="task.run"){await store.runTask(String(command.taskId));const task=useStore.getState().project?.graph.nodes.find((node):node is TaskNode=>node.id===command.taskId&&node.kind==="task");return{taskId:String(command.taskId),status:task?.status}}
   if(op==="task.recoverTeamResult"){const projectId=String(command.projectId||store.project?.id||""),taskId=String(command.taskId||""),jobId=String(command.jobId||"");if(!projectId||!taskId||!jobId)throw new Error("projectId, taskId, and jobId are required");const result=await chrome.runtime.sendMessage({type:"RECOVER_TEAM_RESULT",projectId,taskId,jobId});if(!result?.accepted)throw new Error(String(result?.error||"恢复团队生图结果失败"));await useStore.getState().openProject(projectId);return result}
   if(op==="task.duplicate"){await store.duplicateTask(String(command.taskId));return{taskId:useStore.getState().selected[0]}}
   if(op==="task.delete"||op==="node.delete"){store.setSelected([String(command.taskId||command.nodeId)]);await useStore.getState().deleteSelected();return{deletedId:String(command.taskId||command.nodeId)}}
   if(op==="asset.deleteIfUnused"){
     const requested=[...new Set((Array.isArray(command.assetIds)?command.assetIds:[]).map(String).filter(Boolean))];if(!requested.length)throw new Error("assetIds is required");
-    const referenced=new Set<string>();for(const project of await db.projects.toArray())for(const node of project.graph.nodes){if(node.kind==="image"||node.kind==="result")referenced.add(node.assetId);if(node.kind==="image_container")for(const item of node.items)referenced.add(item.assetId)}
+    const referenced=new Set<string>();for(const project of await db.projects.toArray())for(const node of project.graph.nodes){if(node.kind==="image"||node.kind==="result")referenced.add(node.assetId);if(node.kind==="image_container")for(const item of node.items)referenced.add(item.assetId);if(node.kind==="task"&&node.upscale){if(node.upscale.sourceAssetId)referenced.add(node.upscale.sourceAssetId);for(const tile of node.upscale.plan?.tiles||[])if(tile.resultAssetId)referenced.add(tile.resultAssetId)}}
     const library=readLocalLibrary();for(const prompt of library.prompts||[])if(prompt.exampleAssetId)referenced.add(String(prompt.exampleAssetId));for(const media of library.media||[])if(media.assetId)referenced.add(String(media.assetId));
     const existing=await db.assets.bulkGet(requested),deletable=requested.filter((assetId,index)=>existing[index]&&!referenced.has(assetId)),retained=requested.filter(assetId=>referenced.has(assetId)),missing=requested.filter((_,index)=>!existing[index]);await db.assets.bulkDelete(deletable);return{requestedAssetIds:requested,deletedAssetIds:deletable,retainedReferencedAssetIds:retained,missingAssetIds:missing}
   }

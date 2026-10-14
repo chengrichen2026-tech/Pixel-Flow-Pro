@@ -37,6 +37,7 @@ test("new runs wait for startup recovery before entering the scheduler", async (
   assert.ok(source.includes("recoverInterruptedApiTasks()"));
 });
 
+
 test("manual-action errors prefer the concrete conversation URL reported by the page", async () => {
   const source = await readBackgroundSource();
   assert.match(source, /function resolveTaskConversationUrl/);
@@ -187,6 +188,13 @@ test("generation messages persist TaskRun and project projection in one transact
   assert.doesNotMatch(background, /mirrorTaskMessageToRun/);
   assert.match(background, /runStatus: "canceled", detail: "任务已取消"/);
   assert.match(background, /await startTaskRun\(projectId, taskId\);\s*await persistAndBroadcast\(\{ type: "TASK_STATUS", projectId, taskId, status: "generating", runStatus: "delivering"/);
+});
+
+test("cancelled or deleted Team Web jobs cannot be restored after extension restart", async () => {
+  const background = await readBackgroundSource();
+  assert.match(background, /if \(\[404, 409, 410\]\.includes\(status\)\) \{\s*await clearActiveTeamWebJob\(true, expected\)/);
+  assert.match(background, /const activeTeamWebJob = message\.projectId === TEAM_WEB_PROJECT_ID \? activeTeamWebJobs\.get\(cancelId\) : void 0/);
+  assert.match(background, /if \(activeTeamWebJob\) await clearActiveTeamWebJob\(false, activeTeamWebJob\)/);
 });
 
 test("normal, batch and retry actions share one run interface", async () => {
@@ -485,6 +493,7 @@ test("hidden ChatGPT task tabs receive internal refresh signals without foregrou
 
 test("Windows API Worker has install, start, uninstall, and health-check scripts", async () => {
   const packageJson = await readFile(new URL("package.json", root), "utf8");
+  const server = await readFile(new URL("api-worker/server.mjs", root), "utf8");
   const install = await readFile(new URL("api-worker/install-windows.ps1", root), "utf8");
   const start = await readFile(new URL("api-worker/start-windows.ps1", root), "utf8");
   const uninstall = await readFile(new URL("api-worker/uninstall-windows.ps1", root), "utf8");
@@ -493,8 +502,14 @@ test("Windows API Worker has install, start, uninstall, and health-check scripts
   assert.match(packageJson, /api-worker:uninstall:windows/);
   assert.match(install, /\[Environment\]::GetFolderPath\("Startup"\)/);
   assert.match(install, /Node\.js 20 or newer/);
+  assert.match(install, /& \$startScript -ForceRestart/);
+  assert.match(server, /workerVersion: 2/);
+  assert.match(server, /apiModels: PIXEL_FLOW_API_MODELS/);
   assert.match(start, /Invoke-RestMethod -Uri \$healthUrl/);
   assert.match(start, /api-worker\.windows\.pid/);
+  assert.match(start, /Get-NetTCPConnection -LocalAddress "127\.0\.0\.1" -LocalPort 43129/);
+  assert.match(start, /apiModels -contains "gpt-image-2\.5-sunburst"/);
+  assert.match(start, /Stop-Process -Id \$runningProcess\.ProcessId -Force/);
   assert.match(uninstall, /Get-CimInstance Win32_Process/);
   assert.match(uninstall, /CommandLine\.Contains\(\$serverPath\)/);
 });

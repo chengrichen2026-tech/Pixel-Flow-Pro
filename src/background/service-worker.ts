@@ -34,11 +34,14 @@ import { ConversationUnavailableError, TabRegistry } from "./tab-registry";
 import { apiWorkerRequest, waitForApiWorkerJob } from "./api-worker-client";
 import { cancelTeamGatewayJob, teamGatewayRequest, teamGatewayResultRequest, teamGatewaySettings } from "./team-gateway-http";
 import { TEAM_TASKBOX_BASE_URL, TEAM_TASKBOX_WORKER_API_KEY } from "../team-taskbox-config";
+import { UpscaleController } from "./upscale-controller";
+import { validateUpscaleTile } from "../domain/image-upscale";
 import { applyTaskMessage, getTaskInputs } from "./generation-projector";
 
 var database = new NodeCanvasDatabase();
 var projectRepository = new ProjectRepository(database);
 var taskRunRepository = new TaskRunRepository(database.runs);
+const upscaleController = new UpscaleController(projectRepository, taskRunRepository, undefined, async(projectId)=>broadcast({type:"TASK_STATUS",projectId,persisted:true}));
 
 // src/background/serviceWorker.ts
 var tabRegistry = new TabRegistry(chrome.tabs, new TaskTabGrouper(chrome.tabs, chrome.tabGroups));
@@ -51,8 +54,6 @@ var browserTaskMessages = /* @__PURE__ */ new Map();
 var resumedBrowserUrls = /* @__PURE__ */ new Map();
 var browserRecoveryReloadedAt = /* @__PURE__ */ new Map();
 var lastBrowserLaunchAt = 0;
-// Do not start a new run while the first worker tick is reconciling persisted work.
-// Otherwise that run can be mistaken for a pre-existing interrupted submission.
 var startupRecoveryReady = Promise.resolve();
 var schedulerReady = chrome.storage.session.get(["schedulerState", "activeTaskTabs", "browserTaskMessages"]).then(async ({ schedulerState, activeTaskTabs, browserTaskMessages: storedBrowserTaskMessages }) => {
   const restored = restoreQueueSnapshot(schedulerState);
@@ -157,6 +158,17 @@ async function broadcast(message) {
   }
 }
 async function persistAndBroadcast(message) {
+  const loaded = await projectRepository.loadProject(message.projectId);
+  const tileTask = loaded?.graph.nodes.find(node=>node.id===message.taskId&&node.kind==='task');
+  if (tileTask?.upscaleParentId && message.type==='TASK_RESULT') {
+    const parent = loaded.graph.nodes.find(node=>node.id===tileTask.upscaleParentId&&node.kind==='task');
+    if (!parent || parent.runtimeStatus==='canceled' || parent.upscale?.token!==tileTask.upscaleToken) return;
+    try {
+      if(message.images?.length!==1)throw new Error('分块必须返回一张图片');
+      const bitmap=await createImageBitmap(decodeBase64(message.images[0].base64,message.images[0].mimeType||'image/png'));
+      try{validateUpscaleTile(bitmap.width,bitmap.height,parent.upscale.plan.side*parent.upscale.plan.scale);}finally{bitmap.close();}
+    }catch(error){message={type:'TASK_ERROR',projectId:message.projectId,taskId:message.taskId,reason:'invalid_upscale_tile',detail:String(error)};}
+  }
   let applied = false;
   await projectWrites.run(message.projectId, async () => {
     await projectRepository.mutateGenerationState(message.projectId, async (project) => {
@@ -171,7 +183,13 @@ async function persistAndBroadcast(message) {
       return applyTaskMessage(project, message, (blob) => projectRepository.saveAsset(blob), run);
     });
   });
-  if (applied) await broadcast({ ...message, persisted: true });
+  if (applied) {
+    if(tileTask?.upscaleParentId) {
+      await projectWrites.run(message.projectId,()=>upscaleController.finish(message.projectId,tileTask.upscaleParentId));
+      await broadcast({type:'TASK_STATUS',projectId:message.projectId,taskId:tileTask.upscaleParentId,persisted:true});
+    }
+    await broadcast({ ...message, persisted: true });
+  }
 }
 async function reconcileTaskRunProjections() {
   for (const project of await projectRepository.listProjects()) {
@@ -759,7 +777,7 @@ async function teamWebWorkerTickOnce() {
       remote = await teamWebWorkerRequest(`/jobs/${expected.job.id}/status`);
     } catch (error) {
       const status = Number(error?.status);
-      if (status === 404 || status === 410) {
+      if ([404, 409, 410].includes(status)) {
         await clearActiveTeamWebJob(true, expected);
         await updateScheduler(async () => void 0);
         return;
@@ -1170,24 +1188,14 @@ async function reconcileSchedulerSnapshot() {
   await schedulerReady;
   const liveScopes = new Map();
   const interruptedBrowserTasks = [];
-  const retryBrowserTasks = [];
   for (const project of await projectRepository.listProjects()) {
     const latestRuns = await taskRunRepository.latestByProject(project.id);
     for (const task of project.graph.nodes) {
-      if (task.kind !== "task") continue;
+      if (task.kind !== "task" || task.upscale) continue;
       const runtime = resolveTaskRuntime(task, latestRuns.get(task.id));
       if (!runtime.active) continue;
       if (task.generationMode === "browser" && runtime.status !== "queued" && !concreteChatGptConversationUrl(runtime.conversationUrl)) {
-        const key = createTaskScopeKey(project.id, task.id);
-        // Match the legacy local GPT Web behavior: a browser task without a
-        // concrete conversation is still recoverable work, not a terminal
-        // failure. A restart can happen before ChatGPT reports its URL.
-        if (browserTaskMessages.has(key)) {
-          liveScopes.set(key, { projectId: project.id, taskId: task.id });
-        } else {
-          liveScopes.set(key, { projectId: project.id, taskId: task.id });
-          retryBrowserTasks.push(key);
-        }
+        interruptedBrowserTasks.push({ projectId: project.id, taskId: task.id });
         continue;
       }
       liveScopes.set(createTaskScopeKey(project.id, task.id), { projectId: project.id, taskId: task.id });
@@ -1207,10 +1215,6 @@ async function reconcileSchedulerSnapshot() {
   const activeTaskTabs = (Array.isArray(state.activeTaskTabs) ? state.activeTaskTabs : []).filter((entry) => Array.isArray(entry) && runningKeys.has(entry[0]));
   await chrome.storage.session.set({ activeTaskScopes, activeTaskTabs });
   await saveScheduler();
-  if (retryBrowserTasks.length) {
-    queue = enqueue(retryBrowserTasks.reduce((snapshot, key) => cancelTask(snapshot, key), queue), retryBrowserTasks);
-    await saveScheduler();
-  }
   for (const task of interruptedBrowserTasks) {
     await persistAndBroadcast({
       type: "TASK_ERROR",
@@ -1235,7 +1239,7 @@ async function recoverInterruptedApiTasks() {
   for (const project of await projectRepository.listProjects()) {
     const latestRuns = await taskRunRepository.latestByProject(project.id);
     for (const task of project.graph.nodes) {
-      if (task.kind !== "task" || !["api", "team", "team_web"].includes(task.generationMode)) continue;
+      if (task.kind !== "task" || task.upscale || !["api", "team", "team_web"].includes(task.generationMode)) continue;
       const runtime = resolveTaskRuntime(task, latestRuns.get(task.id));
       if (!runtime.active || !runtime.status || !recoverableStatuses.has(runtime.status)) continue;
       const key = createTaskScopeKey(project.id, task.id);
@@ -1278,7 +1282,7 @@ async function reconcileCompletedApiTasks() {
   for (const project of await projectRepository.listProjects()) {
     const latestRuns = await taskRunRepository.latestByProject(project.id);
     for (const task of project.graph.nodes) {
-      if (task.kind !== "task" || !["api", "team", "team_web"].includes(task.generationMode)) continue;
+      if (task.kind !== "task" || task.upscale || !["api", "team", "team_web"].includes(task.generationMode)) continue;
       const runtime = resolveTaskRuntime(task, latestRuns.get(task.id));
       const jobId = runtime.providerJobId;
       if (!runtime.active || !jobId) continue;
@@ -1463,7 +1467,7 @@ chrome.runtime.onMessage.addListener((raw, sender, sendResponse) => {
   if (!isExtensionMessage(raw)) return false;
   const message = raw;
   if (message.type === "GET_API_CAPABILITIES") {
-    sendResponse({ accepted: true, apiModels: ["gpt-image-2", "gpt-image-2.5-sunburst", "gpt-image-2.5-flare"] });
+    sendResponse({ accepted: true, upscaleVersion: 1, apiModels: ["gpt-image-2", "gpt-image-2.5-sunburst", "gpt-image-2.5-flare"] });
     return false;
   }
   if (message.type === "RECOVER_TEAM_RESULT") {
@@ -1477,7 +1481,21 @@ chrome.runtime.onMessage.addListener((raw, sender, sendResponse) => {
     void startupRecoveryReady.then(() => updateScheduler(async () => {
       const taskIds = message.type === "RUN_TASKS" ? [...new Set(message.taskIds)] : [message.taskId];
       const keys = [];
-      for (const taskId of taskIds) {
+      const expanded=[];
+      for(const taskId of taskIds){
+        const project=await projectRepository.loadProject(message.projectId);
+        const parent=project?.graph.nodes.find(node=>node.id===taskId&&node.kind==='task');
+        if(parent?.upscale){
+          const existing=await taskRunRepository.latest(message.projectId,taskId);
+          if(existing&&!isTerminalRunStatus(existing.status))continue;
+          await startTaskRun(message.projectId,taskId);
+          try{expanded.push(...await projectWrites.run(message.projectId,()=>upscaleController.prepare(message.projectId,taskId)));}
+          catch(error){await persistAndBroadcast({type:'TASK_ERROR',projectId:message.projectId,taskId,reason:'upscale_prepare',detail:String(error)});throw error;}
+          await projectWrites.run(message.projectId,()=>upscaleController.finish(message.projectId,taskId));
+          await broadcast({type:'TASK_STATUS',projectId:message.projectId,taskId,persisted:true});
+        }else expanded.push(taskId);
+      }
+      for (const taskId of expanded) {
         const key = createTaskScopeKey(message.projectId, taskId);
         await startTaskRun(message.projectId, taskId);
         await persistAndBroadcast({ type: "TASK_STATUS", projectId: message.projectId, taskId, status: "queued", runStatus: "queued", detail: void 0 });
@@ -1490,10 +1508,15 @@ chrome.runtime.onMessage.addListener((raw, sender, sendResponse) => {
   }
   if (message.type === "CANCEL_TASK") {
     void updateScheduler(async () => {
-      const key = createTaskScopeKey(message.projectId, message.taskId);
+      const cancelProject=await projectRepository.loadProject(message.projectId);
+      const children=cancelProject?.graph.nodes.filter(node=>node.kind==='task'&&node.upscaleParentId===message.taskId).map(node=>node.id)||[];
+      for(const cancelId of [message.taskId,...children]){
+      const key = createTaskScopeKey(message.projectId, cancelId);
+      const activeTeamWebJob = message.projectId === TEAM_WEB_PROJECT_ID ? activeTeamWebJobs.get(cancelId) : void 0;
+      if (activeTeamWebJob) await clearActiveTeamWebJob(false, activeTeamWebJob);
       const project = await projectRepository.loadProject(message.projectId);
-      const task = project?.graph.nodes.find((node) => node.id === message.taskId && node.kind === "task");
-      const run = await taskRunRepository.latest(message.projectId, message.taskId);
+      const task = project?.graph.nodes.find((node) => node.id === cancelId && node.kind === "task");
+      const run = await taskRunRepository.latest(message.projectId, cancelId);
       const providerJobId = run?.providerJobId || task?.apiJobId;
       if (providerJobId) {
         if (["team", "team_web"].includes(task.generationMode)) {
@@ -1504,7 +1527,7 @@ chrome.runtime.onMessage.addListener((raw, sender, sendResponse) => {
         teamResultDownloads.delete(providerJobId);
       }
       if (run && !isTerminalRunStatus(run.status)) {
-        await persistAndBroadcast({ type: "TASK_STATUS", projectId: message.projectId, taskId: message.taskId, status: "failed", runStatus: "canceled", detail: "任务已取消" });
+        await persistAndBroadcast({ type: "TASK_STATUS", projectId: message.projectId, taskId: cancelId, status: "failed", runStatus: "canceled", detail: "任务已取消" });
       }
       queue = cancelTask(queue, key);
       pendingScopes.delete(key);
@@ -1515,6 +1538,7 @@ chrome.runtime.onMessage.addListener((raw, sender, sendResponse) => {
       if (browserTaskMessages.size === 0) await chrome.alarms.clear(BROWSER_RESULT_RECOVERY_ALARM);
       await removeActiveScope(key);
       await tabRegistry.close(key);
+      }
     }).then(() => sendResponse({ accepted: true }), (error) => sendResponse({ accepted: false, error: String(error) }));
     return true;
   }
@@ -1570,12 +1594,20 @@ chrome.runtime.onMessage.addListener((raw, sender, sendResponse) => {
   }
   return false;
 });
-startupRecoveryReady = reconcileSchedulerSnapshot()
-  .then(() => recoverInterruptedApiTasks())
-  .then(() => updateScheduler(async () => void 0))
-  .catch((error) => {
-    console.error("Pixel Flow startup recovery failed; allowing new tasks to start", error);
-  });
+startupRecoveryReady = reconcileSchedulerSnapshot().then(() => recoverInterruptedApiTasks()).then(() => updateScheduler(async () => {
+  for(const project of await projectRepository.listProjects())for(const parent of project.graph.nodes){
+    if(parent.kind!=='task'||!parent.upscale?.plan)continue;
+    const run=await taskRunRepository.latest(project.id,parent.id);
+    if(!run||isTerminalRunStatus(run.status))continue;
+    for(const tile of parent.upscale.plan.tiles){
+      const child=project.graph.nodes.find(n=>n.id===tile.taskId&&n.kind==='task');
+      if(tile.resultAssetId||!child||['completed','failed','manual_action'].includes(child.status))continue;
+      const key=createTaskScopeKey(project.id,child.id);
+      await startTaskRun(project.id,child.id);pendingScopes.set(key,{projectId:project.id,taskId:child.id});queue=enqueue(queue,[key]);
+    }
+    await projectWrites.run(project.id,()=>upscaleController.finish(project.id,parent.id));
+  }
+})).catch(error => { console.error("Pixel Flow startup recovery failed; allowing new tasks to start", error); });
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === API_RECOVERY_ALARM) void reconcileCompletedApiTasks();
   if (alarm.name === BROWSER_RESULT_RECOVERY_ALARM) void reconcileBrowserTaskResults();
