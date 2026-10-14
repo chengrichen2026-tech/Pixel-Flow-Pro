@@ -58,3 +58,11 @@ export const isActiveTaskRun = (task: { status: string; runtimeStatus?: RunStatu
   const status = taskRunStatus(task);
   return Boolean(status && !["completed", "failed", "canceled"].includes(status));
 };
+
+export function taskDetailTone(task:{status:string;runtimeStatus?:RunStatus},configurationError=''): 'is-error'|'is-success'|'is-progress'|'is-neutral' {
+  if(configurationError)return 'is-error';
+  const status=taskRunStatus(task);
+  if(status==='completed')return 'is-success';
+  if(status==='failed'||status==='needs_action')return 'is-error';
+  return isActiveTaskRun(task)?'is-progress':'is-neutral';
+}

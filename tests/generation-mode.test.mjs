@@ -220,7 +220,7 @@ test("normal API generation does not show a status detail as an alert", async ()
   assert.match(source, /status: "generating", detail: void 0, apiJobId: jobId/);
   assert.doesNotMatch(source, /正在重连本机 API 任务|正在向本机 API 任务服务提交请求/);
   assert.doesNotMatch(source, /API 任务已由本机服务持久执行，扩展重载后可恢复/);
-  assert.match(app, /className=\{`status-detail \$\{active\?'is-progress':'\'\}`\}/);
+  assert.match(app, /taskDetailTone\(n,configurationError\)/);
   assert.match(store, /status:"queued",runtimeStatus:"queued" as const,statusDetail:undefined/);
 });
 

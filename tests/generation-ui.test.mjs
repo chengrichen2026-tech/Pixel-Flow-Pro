@@ -37,3 +37,17 @@ test("one status projection distinguishes every user-visible run phase", () => {
   assert.equal(isActiveTaskRun({ status: "generating", runtimeStatus: "delivering" }), true);
   assert.equal(isActiveTaskRun({ status: "failed", runtimeStatus: "canceled" }), false);
 });
+
+test('completed detail is green while a current configuration error remains an error',async()=>{
+ const {taskDetailTone}=await import('../src/domain/generation-ui.ts');
+ assert.equal(taskDetailTone({status:'completed',runtimeStatus:'completed'}),'is-success');
+ assert.equal(taskDetailTone({status:'completed',runtimeStatus:'completed'},'missing key'),'is-error');
+});
+test('only failed or attention-required details are errors; cancellation is neutral',async()=>{
+ const {taskDetailTone}=await import('../src/domain/generation-ui.ts');
+ assert.equal(taskDetailTone({status:'failed',runtimeStatus:'failed'}),'is-error');
+ assert.equal(taskDetailTone({status:'manual_action',runtimeStatus:'needs_action'}),'is-error');
+ assert.equal(taskDetailTone({status:'failed',runtimeStatus:'canceled'}),'is-neutral');
+ assert.equal(taskDetailTone({status:'idle'}),'is-neutral');
+ assert.equal(taskDetailTone({status:'generating',runtimeStatus:'delivering'}),'is-progress');
+});
