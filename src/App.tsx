@@ -7,9 +7,10 @@ import { clearTeamGateway, hasTeamGateway, readTeamGateway, readTeamWebAvailabil
 import { clearTeamWebWorker, pairTeamWebWorker, readTeamWebWorker, setTeamWebWorkerEnabled } from "./team-web-worker-settings";
 import { TEAM_TASKBOX_BASE_URL } from "./team-taskbox-config";
 import { readLibraryDrag } from "./library";
-import { generationModeForProvider, generationProvider, gptWebLocation, isActiveTaskRun, taskRunStatus, taskStatusLabel, taskDetailTone, type GenerationProvider, type GptWebLocation } from "./domain/generation-ui";
+import { generationModeForProvider, generationProvider, gptWebLocation, isActiveTaskRun, taskRunStatus, taskStatusLabel, taskDetailTone, upscaleTileState, type GenerationProvider, type GptWebLocation } from "./domain/generation-ui";
 import type { LibraryTab } from "./AssetLibrary";
 import type { ApiImageModel, CanvasEdge, CanvasNode, GenerationMode, Project, TaskNode, TeamImageModel } from "./types";
+import { UpscaleTile } from "./UpscaleTile";
 import "./generation-ui.css";
 
 const ratios=[['auto','自适应'],['1:1','方形 1:1'],['3:4','竖向 3:4'],['9:16','竖向 9:16'],['16:9','横向 16:9']];
@@ -58,7 +59,10 @@ function TaskCard({data}:{data:{node:TaskNode,projectId:string,inputImages:TaskI
       const child=s.project?.graph.nodes.find((node):node is TaskNode=>node.kind==='task'&&node.id===tile.taskId);
       const input=s.project?.graph.edges.find(e=>e.target===tile.taskId&&e.kind!=='output');const source=s.project?.graph.nodes.find(node=>node.id===input?.source);
       const assetId=tile.resultAssetId||tile.previousResultAssetId||(source&&'assetId' in source?source.assetId:undefined),url=assetId?s.assets[assetId]:undefined;
-      return <figure key={tile.id} data-upscale-tile={tile.id}><div className="upscale-tile-preview">{url?<img src={url} alt={`分块 ${tile.id}`} loading="lazy"/>:<span>等待生成</span>}</div><figcaption>{tile.id}<small>{tile.resultAssetId?'已完成':child?taskStatusLabel(child):'待生成'}</small></figcaption><button disabled={active} aria-label={`重新生成分块 ${tile.id}`} onClick={async()=>{setConfigurationError('');try{await pendingSettingsSave.current;await s.regenerateUpscaleTile(n.id,tile.id)}catch(error){setConfigurationError(error instanceof Error?error.message:String(error))}}}>{!tile.resultAssetId&&active?'生成中':'重新生成'}</button></figure>;
+      const state=upscaleTileState(tile,child);
+      const regenerate=async()=>{if(active)return;setConfigurationError('');try{await pendingSettingsSave.current;await s.regenerateUpscaleTile(n.id,tile.id)}catch(error){setConfigurationError(error instanceof Error?error.message:String(error))}};
+      return <UpscaleTile key={tile.id} id={tile.id} state={state} url={url} disabled={active} onRegenerate={regenerate}/>;
+
     })}</div>}
     {(configurationError||n.statusDetail)&&<p className={`status-detail ${taskDetailTone(n,configurationError)}`} role="status">{configurationError||n.statusDetail}</p>}{!n.upscale&&<TaskPrompt node={n}/>}
     <footer className="task-card__toolbar"><div><button title="复制任务" onClick={()=>s.duplicateTask(n.id)}><PixelIcon name="copy"/></button>{mode==='browser'&&!n.upscale&&<button title="打开真实对话" onClick={()=>s.openTask(n.id)}><PixelIcon name="open"/></button>}<button title="删除任务" onClick={()=>{s.setSelected([n.id]);void s.deleteSelected()}}><PixelIcon name="trash"/></button></div>{!n.upscale&&<small>上下文 {n.runCount??0} 轮</small>}{failed>0&&<button className="retry-failed" onClick={()=>void s.retryFailedBatch(n.id)}>只重试失败项</button>}{active&&<button className="cancel-task" onClick={()=>void s.cancelTask(n.id)}>取消</button>}{!active&&n.recoverableResult&&(mode==='team'||mode==='team_web')&&<button className="recover-task" onClick={()=>void s.recoverTask(n.id)}>恢复结果</button>}<button className="run run-button" disabled={active} onClick={()=>void run()}><PixelIcon name="play" className="filled"/>{active?statusText:runLabel}</button></footer><Handle type="source" position={Position.Right} className="node-handle"/>

@@ -66,3 +66,10 @@ export function taskDetailTone(task:{status:string;runtimeStatus?:RunStatus},con
   if(status==='failed'||status==='needs_action')return 'is-error';
   return isActiveTaskRun(task)?'is-progress':'is-neutral';
 }
+
+export function upscaleTileState(tile:{resultAssetId?:string},child?:{status:string;runtimeStatus?:RunStatus}):'generating'|'completed'|'failed' {
+  const status=child?taskRunStatus(child):undefined;
+  if(status==='failed'||status==='canceled'||status==='needs_action')return 'failed';
+  if(tile.resultAssetId)return 'completed';
+  return 'generating';
+}

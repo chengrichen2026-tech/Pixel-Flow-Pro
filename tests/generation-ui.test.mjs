@@ -51,3 +51,24 @@ test('only failed or attention-required details are errors; cancellation is neut
  assert.equal(taskDetailTone({status:'idle'}),'is-neutral');
  assert.equal(taskDetailTone({status:'generating',runtimeStatus:'delivering'}),'is-progress');
 });
+test('upscale borders distinguish active, completed, failed and failed regeneration with an old preview',async()=>{
+ const {upscaleTileState}=await import('../src/domain/generation-ui.ts');
+ assert.equal(upscaleTileState({}, {status:'generating',runtimeStatus:'generating'}),'generating');
+ assert.equal(upscaleTileState({resultAssetId:'ready'}, {status:'completed',runtimeStatus:'completed'}),'completed');
+ assert.equal(upscaleTileState({}, {status:'failed',runtimeStatus:'failed'}),'failed');
+ assert.equal(upscaleTileState({previousResultAssetId:'old'}, {status:'failed',runtimeStatus:'failed'}),'failed');
+ assert.equal(upscaleTileState({previousResultAssetId:'old'}, {status:'queued',runtimeStatus:'queued'}),'generating');
+ assert.equal(upscaleTileState({}, {status:'failed',runtimeStatus:'canceled'}),'failed');
+});
+test('tile regenerates on double click, never on single click, and blocks active attempts',async()=>{
+ const {UpscaleTile}=await import('../src/UpscaleTile.tsx');let calls=0,stopped=0;
+ const tile=UpscaleTile({id:'r1_c1',state:'completed',url:'blob:test',disabled:false,onRegenerate:()=>calls++});
+ assert.equal(tile.props.onClick,undefined);assert.equal(tile.props.children.type,'div');
+ tile.props.onDoubleClick({stopPropagation(){stopped++}});assert.equal(calls,1);assert.equal(stopped,1);
+ const busy=UpscaleTile({id:'r1_c1',state:'generating',disabled:true,onRegenerate:()=>calls++});busy.props.onDoubleClick({stopPropagation(){}});assert.equal(calls,1);assert.equal(busy.props['aria-disabled'],true);
+});
+test('keyboard tile regeneration is available without visible extra controls',async()=>{
+ const {UpscaleTile}=await import('../src/UpscaleTile.tsx');let calls=0;const tile=UpscaleTile({id:'r1_c2',state:'failed',disabled:false,onRegenerate:()=>calls++});
+ for(const key of ['Enter',' '])tile.props.onKeyDown({key,preventDefault(){},stopPropagation(){}});assert.equal(calls,2);
+ tile.props.onKeyDown({key:'ArrowRight'});assert.equal(calls,2);
+});
