@@ -1477,6 +1477,14 @@ chrome.runtime.onMessage.addListener((raw, sender, sendResponse) => {
     );
     return true;
   }
+  if(message.type==='REGENERATE_UPSCALE_TILE'){
+    void startupRecoveryReady.then(()=>updateScheduler(async()=>{
+      const childId=await projectWrites.run(message.projectId,()=>upscaleController.regenerateTile(message.projectId,message.taskId,message.tileId));
+      await startTaskRun(message.projectId,childId);
+      await persistAndBroadcast({type:'TASK_STATUS',projectId:message.projectId,taskId:childId,status:'queued',runStatus:'queued'});
+      const key=createTaskScopeKey(message.projectId,childId);pendingScopes.set(key,{projectId:message.projectId,taskId:childId});queue=enqueue(queue,[key]);
+    })).then(()=>sendResponse({accepted:true}),error=>sendResponse({accepted:false,error:String(error)}));return true;
+  }
   if (message.type === "RUN_TASK" || message.type === "RUN_TASKS") {
     void startupRecoveryReady.then(() => updateScheduler(async () => {
       const taskIds = message.type === "RUN_TASKS" ? [...new Set(message.taskIds)] : [message.taskId];

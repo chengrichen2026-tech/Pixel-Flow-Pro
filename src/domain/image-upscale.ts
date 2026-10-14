@@ -1,7 +1,7 @@
 export type UpscaleScale = 2 | 4 | 8;
-export type UpscaleTile = { id: string; x: number; y: number; side: number; taskId?: string; resultAssetId?: string };
+export type UpscaleTile = { id: string; x: number; y: number; side: number; taskId?: string; resultAssetId?: string; previousResultAssetId?: string };
 export type UpscalePlan = { width: number; height: number; scale: UpscaleScale; side: number; overlap: number; tiles: UpscaleTile[] };
-export type UpscaleState = { scale: UpscaleScale; plan?: UpscalePlan; sourceAssetId?: string; token?: string };
+export type UpscaleState = { scale: UpscaleScale; plan?: UpscalePlan; sourceAssetId?: string; token?: string; replacementResultId?: string };
 
 export function planUpscale(width: number, height: number, scale: number): UpscalePlan {
   if (![2,4,8].includes(scale)) throw new Error('放大倍数只支持 2、4、8');

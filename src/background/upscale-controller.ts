@@ -46,6 +46,27 @@ export class UpscaleController {
     await this.projects.mutateProject(projectId,current=>({...current,graph:{...current.graph,nodes:current.graph.nodes.map(n=>n.id===taskId?{...n,...projectRunToLegacyTask(next)}:n)}}));
     return taskIds;
   }
+  async regenerateTile(projectId:string,parentId:string,tileId:string):Promise<string>{
+    const project=await this.projects.loadProject(projectId),parent=project?.graph.nodes.find((n):n is TaskNode=>n.kind==='task'&&n.id===parentId);
+    const config=parent?.upscale,plan=config?.plan,tile=plan?.tiles.find(t=>t.id===tileId);
+    if(!project||!parent||!config||!plan||!tile)throw new Error('找不到放大分块');
+    const existing=await this.runs.latest(projectId,parentId);
+    if(existing&&!isTerminalRunStatus(existing.status))throw new Error('请等待当前放大任务完成或先取消');
+    if(config.scale!==plan.scale)throw new Error('倍数已变更，请重新运行整个放大任务');
+    const child=project.graph.nodes.find((n):n is TaskNode=>n.kind==='task'&&n.id===tile.taskId);
+    if(!child)throw new Error('原分块输入不存在，请重新运行整个任务');
+    const incoming=project.graph.edges.filter(e=>e.target===child.id&&e.kind!=='output');
+    if(!incoming.length)throw new Error('原分块输入不存在');
+    const childId=makeId('upscale-tile'),edges=incoming.map(e=>({...e,id:makeId('edge'),target:childId}));
+    const replacement=project.graph.nodes.filter(n=>n.kind==='result'&&n.taskId===parentId).at(-1);
+    const run=await this.runs.start(projectId,parentId,parent.generationMode||'browser');
+    const next=await this.runs.advance(run.id,'generating',{detail:`正在重新生成 ${tile.id}`});
+    await this.projects.mutateGenerationState(projectId,current=>({...current,graph:{
+      nodes:current.graph.nodes.filter(n=>n.id!==child.id).map(n=>n.id===parentId?{...n,...projectRunToLegacyTask(next),upscale:{...config,replacementResultId:replacement?.id,plan:{...plan,tiles:plan.tiles.map(t=>t.id===tile.id?{...t,taskId:childId,previousResultAssetId:t.resultAssetId||t.previousResultAssetId,resultAssetId:undefined}:t)}}}:n).concat({...child,id:childId,inputEdgeOrder:edges.map(e=>e.id),runCount:0,status:'queued',runtimeStatus:undefined,conversationUrl:undefined,apiJobId:undefined,statusDetail:undefined,generationMode:parent.generationMode,teamImageModel:parent.teamImageModel,apiImageModel:parent.apiImageModel}),
+      edges:current.graph.edges.filter(e=>e.target!==child.id&&e.source!==child.id).concat(edges)
+    }}));
+    return childId;
+  }
   async finish(projectId:string,parentId:string):Promise<void>{
     const project=await this.projects.loadProject(projectId),parent=project?.graph.nodes.find((n):n is TaskNode=>n.id===parentId&&n.kind==='task');
     const config=parent?.upscale,run=await this.runs.latest(projectId,parentId);
@@ -69,9 +90,11 @@ export class UpscaleController {
         if(!latest||isTerminalRunStatus(latest.status))return current;
         const currentParent=current.graph.nodes.find((n):n is TaskNode=>n.id===parentId&&n.kind==='task');
         if(currentParent?.upscale?.token!==config.token)return current;
-        const assetId=await this.projects.saveAsset(blob),resultId=makeId('result');
+        const assetId=await this.projects.saveAsset(blob),replacement=current.graph.nodes.find(n=>n.kind==='result'&&n.taskId===parentId&&n.id===config.replacementResultId),resultId=replacement?.id||makeId('result');
         const next=await this.runs.advance(latest.id,'completed',{detail:`${plan.width*plan.scale}×${plan.height*plan.scale} · ${plan.tiles.length}块已拼合`});
-        return {...current,graph:{nodes:current.graph.nodes.map(n=>n.id===parentId&&n.kind==='task'?{...n,...projectRunToLegacyTask(next),runCount:n.runCount+1}:n).concat({id:resultId,kind:'result',assetId,taskId:parentId,title:`放大结果 ${plan.scale}×`,position:{x:parent.position.x+560,y:parent.position.y}}),edges:[...current.graph.edges,{id:makeId('edge'),source:parentId,target:resultId,kind:'output'}]}};
+        const nodes=current.graph.nodes.map(n=>n.id===parentId&&n.kind==='task'?{...n,...projectRunToLegacyTask(next),runCount:n.runCount+1,upscale:{...n.upscale!,replacementResultId:undefined}}:n.id===replacement?.id?{...n,assetId}:n);
+        if(!replacement)nodes.push({id:resultId,kind:'result',assetId,taskId:parentId,title:`放大结果 ${plan.scale}×`,position:{x:parent.position.x+560,y:parent.position.y}});
+        return {...current,graph:{nodes,edges:replacement?current.graph.edges:[...current.graph.edges,{id:makeId('edge'),source:parentId,target:resultId,kind:'output'}]}};
       });
     }catch(error){
       const latest=await this.runs.latest(projectId,parentId);if(!latest||isTerminalRunStatus(latest.status))return;

@@ -63,3 +63,15 @@ test('stale tokens and cancellation prevent the tile projector accepting late im
  const p=h.project;p.graph.nodes.find(n=>n.id==='parent').upscale.token='new-round';let saves=0;
  const next=await applyTaskMessage(p,{type:'TASK_RESULT',projectId:'p',taskId:id,images:[{base64:'YQ==',mimeType:'image/png'}]},async()=>{saves++;return 'late'},run);assert.equal(saves,0);assert.equal(next.graph.nodes.filter(n=>n.kind==='result').length,0);
 });
+test('single tile regeneration preserves other tiles and replaces one final image after recomposition',async()=>{
+ globalThis.createImageBitmap=async()=>({width:521,height:307,close(){}});const h=harness();await h.runs.start('p','parent','browser');const ids=await h.controller.prepare('p','parent');
+ await h.projects.mutateProject('p',p=>{const parent=p.graph.nodes.find(n=>n.id==='parent');parent.upscale.plan.tiles.forEach((t,i)=>t.resultAssetId=`good${i}`);for(const child of p.graph.nodes)if(ids.includes(child.id))child.status='completed';return p});await h.controller.finish('p','parent');const final=h.project.graph.nodes.find(n=>n.kind==='result'),oldAsset=final.assetId;
+ const newId=await h.controller.regenerateTile('p','parent','r1_c1');const parent=h.project.graph.nodes.find(n=>n.id==='parent');assert.equal(parent.upscale.plan.tiles[0].resultAssetId,undefined);assert.equal(parent.upscale.plan.tiles[0].previousResultAssetId,'good0');assert.equal(parent.upscale.plan.tiles[1].resultAssetId,'good1');assert.equal(parent.upscale.plan.tiles[1].taskId,ids[1]);assert.notEqual(newId,ids[0]);
+ await assert.rejects(()=>h.controller.regenerateTile('p','parent','r1_c2'),/等待/);
+ await h.projects.mutateProject('p',p=>{p.graph.nodes.find(n=>n.id==='parent').upscale.plan.tiles[0].resultAssetId='new0';return p});await h.controller.finish('p','parent');assert.equal(h.project.graph.nodes.filter(n=>n.kind==='result').length,1);assert.equal(h.project.graph.nodes.find(n=>n.kind==='result').id,final.id);assert.notEqual(h.project.graph.nodes.find(n=>n.kind==='result').assetId,oldAsset);assert.equal((await h.runs.latest('p','parent')).status,'completed');
+});
+test('tile regeneration rejects missing tiles and a changed scale before starting a new attempt',async()=>{
+ globalThis.createImageBitmap=async()=>({width:100,height:100,close(){}});const h=harness();await h.runs.start('p','parent','browser');await h.controller.prepare('p','parent');const r=await h.runs.latest('p','parent');await h.runs.advance(r.id,'failed');
+ await assert.rejects(()=>h.controller.regenerateTile('p','parent','missing'),/找不到/);
+ await h.projects.mutateProject('p',p=>{p.graph.nodes.find(n=>n.id==='parent').upscale.scale=4;return p});await assert.rejects(()=>h.controller.regenerateTile('p','parent','r1_c1'),/倍数/);
+});

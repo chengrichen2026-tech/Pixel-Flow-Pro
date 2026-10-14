@@ -15,6 +15,7 @@ export type PageTaskMessage = TaskAddress & (
 export type ExtensionMessage =
   | { type: "GET_API_CAPABILITIES" }
   | (TaskAddress & { type: "RUN_TASK" | "CANCEL_TASK" | "OPEN_TASK_TAB" | "CLOSE_TASK_TAB" })
+  | (TaskAddress & { type: "REGENERATE_UPSCALE_TILE"; tileId:string })
   | { type: "RUN_TASKS"; projectId: string; taskIds: string[] }
   | { type: "HIBERNATE_TASK_TABS"; projectId: string; taskIds: string[] }
   | (TaskAddress & { type: "RECOVER_TEAM_RESULT"; jobId?: string })
@@ -47,6 +48,7 @@ export function isExtensionMessage(value: unknown): value is ExtensionMessage {
       && Array.isArray(message.taskIds)
       && message.taskIds.every(taskId => typeof taskId === "string");
   }
+  if (message.type === "REGENERATE_UPSCALE_TILE") return typeof message.projectId==="string"&&typeof message.taskId==="string"&&typeof message.tileId==="string"&&message.tileId.length>0;
   if (message.type === "RUN_TASKS") {
     return typeof message.projectId === "string"
       && Array.isArray(message.taskIds)

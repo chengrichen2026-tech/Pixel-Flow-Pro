@@ -4411,6 +4411,7 @@ function isExtensionMessage(value) {
 	const message = value;
 	if (message.type === "GET_API_CAPABILITIES") return true;
 	if (message.type === "HIBERNATE_TASK_TABS") return typeof message.projectId === "string" && Array.isArray(message.taskIds) && message.taskIds.every((taskId) => typeof taskId === "string");
+	if (message.type === "REGENERATE_UPSCALE_TILE") return typeof message.projectId === "string" && typeof message.taskId === "string" && typeof message.tileId === "string" && message.tileId.length > 0;
 	if (message.type === "RUN_TASKS") return typeof message.projectId === "string" && Array.isArray(message.taskIds) && message.taskIds.length > 0 && message.taskIds.every((taskId) => typeof taskId === "string");
 	if (message.type === "DOWNLOAD_ASSET") return typeof message.projectId === "string" && typeof message.taskId === "string" && typeof message.assetId === "string";
 	if (message.type === "SHOW_NOTIFICATION") return typeof message.projectId === "string" && typeof message.taskId === "string" && typeof message.title === "string" && typeof message.message === "string";
@@ -4975,6 +4976,63 @@ var UpscaleController = class {
 		}));
 		return taskIds;
 	}
+	async regenerateTile(projectId, parentId, tileId) {
+		const project = await this.projects.loadProject(projectId), parent = project?.graph.nodes.find((n) => n.kind === "task" && n.id === parentId);
+		const config = parent?.upscale, plan = config?.plan, tile = plan?.tiles.find((t) => t.id === tileId);
+		if (!project || !parent || !config || !plan || !tile) throw new Error("找不到放大分块");
+		const existing = await this.runs.latest(projectId, parentId);
+		if (existing && !isTerminalRunStatus(existing.status)) throw new Error("请等待当前放大任务完成或先取消");
+		if (config.scale !== plan.scale) throw new Error("倍数已变更，请重新运行整个放大任务");
+		const child = project.graph.nodes.find((n) => n.kind === "task" && n.id === tile.taskId);
+		if (!child) throw new Error("原分块输入不存在，请重新运行整个任务");
+		const incoming = project.graph.edges.filter((e) => e.target === child.id && e.kind !== "output");
+		if (!incoming.length) throw new Error("原分块输入不存在");
+		const childId = makeId$1("upscale-tile"), edges = incoming.map((e) => ({
+			...e,
+			id: makeId$1("edge"),
+			target: childId
+		}));
+		const replacement = project.graph.nodes.filter((n) => n.kind === "result" && n.taskId === parentId).at(-1);
+		const run = await this.runs.start(projectId, parentId, parent.generationMode || "browser");
+		const next = await this.runs.advance(run.id, "generating", { detail: `正在重新生成 ${tile.id}` });
+		await this.projects.mutateGenerationState(projectId, (current) => ({
+			...current,
+			graph: {
+				nodes: current.graph.nodes.filter((n) => n.id !== child.id).map((n) => n.id === parentId ? {
+					...n,
+					...projectRunToLegacyTask(next),
+					upscale: {
+						...config,
+						replacementResultId: replacement?.id,
+						plan: {
+							...plan,
+							tiles: plan.tiles.map((t) => t.id === tile.id ? {
+								...t,
+								taskId: childId,
+								previousResultAssetId: t.resultAssetId || t.previousResultAssetId,
+								resultAssetId: void 0
+							} : t)
+						}
+					}
+				} : n).concat({
+					...child,
+					id: childId,
+					inputEdgeOrder: edges.map((e) => e.id),
+					runCount: 0,
+					status: "queued",
+					runtimeStatus: void 0,
+					conversationUrl: void 0,
+					apiJobId: void 0,
+					statusDetail: void 0,
+					generationMode: parent.generationMode,
+					teamImageModel: parent.teamImageModel,
+					apiImageModel: parent.apiImageModel
+				}),
+				edges: current.graph.edges.filter((e) => e.target !== child.id && e.source !== child.id).concat(edges)
+			}
+		}));
+		return childId;
+	}
 	async finish(projectId, parentId) {
 		const project = await this.projects.loadProject(projectId), parent = project?.graph.nodes.find((n) => n.id === parentId && n.kind === "task");
 		const config = parent?.upscale, run = await this.runs.latest(projectId, parentId);
@@ -5024,27 +5082,36 @@ var UpscaleController = class {
 				const latest = await this.runs.latest(projectId, parentId);
 				if (!latest || isTerminalRunStatus(latest.status)) return current;
 				if (current.graph.nodes.find((n) => n.id === parentId && n.kind === "task")?.upscale?.token !== config.token) return current;
-				const assetId = await this.projects.saveAsset(blob), resultId = makeId$1("result");
+				const assetId = await this.projects.saveAsset(blob), replacement = current.graph.nodes.find((n) => n.kind === "result" && n.taskId === parentId && n.id === config.replacementResultId), resultId = replacement?.id || makeId$1("result");
 				const next = await this.runs.advance(latest.id, "completed", { detail: `${plan.width * plan.scale}×${plan.height * plan.scale} · ${plan.tiles.length}块已拼合` });
+				const nodes = current.graph.nodes.map((n) => n.id === parentId && n.kind === "task" ? {
+					...n,
+					...projectRunToLegacyTask(next),
+					runCount: n.runCount + 1,
+					upscale: {
+						...n.upscale,
+						replacementResultId: void 0
+					}
+				} : n.id === replacement?.id ? {
+					...n,
+					assetId
+				} : n);
+				if (!replacement) nodes.push({
+					id: resultId,
+					kind: "result",
+					assetId,
+					taskId: parentId,
+					title: `放大结果 ${plan.scale}×`,
+					position: {
+						x: parent.position.x + 560,
+						y: parent.position.y
+					}
+				});
 				return {
 					...current,
 					graph: {
-						nodes: current.graph.nodes.map((n) => n.id === parentId && n.kind === "task" ? {
-							...n,
-							...projectRunToLegacyTask(next),
-							runCount: n.runCount + 1
-						} : n).concat({
-							id: resultId,
-							kind: "result",
-							assetId,
-							taskId: parentId,
-							title: `放大结果 ${plan.scale}×`,
-							position: {
-								x: parent.position.x + 560,
-								y: parent.position.y
-							}
-						}),
-						edges: [...current.graph.edges, {
+						nodes,
+						edges: replacement ? current.graph.edges : [...current.graph.edges, {
 							id: makeId$1("edge"),
 							source: parentId,
 							target: resultId,
@@ -5227,7 +5294,8 @@ async function applyTaskMessage(project, message, saveAsset, run) {
 						...parent.upscale.plan,
 						tiles: parent.upscale.plan.tiles.map((tile) => tile.taskId === child.id ? {
 							...tile,
-							resultAssetId: assetId
+							resultAssetId: assetId,
+							previousResultAssetId: void 0
 						} : tile)
 					}
 				}
@@ -6869,6 +6937,29 @@ chrome.runtime.onMessage.addListener((raw, sender, sendResponse) => {
 		}), (error) => sendResponse({
 			accepted: false,
 			error: error instanceof Error ? error.message : String(error)
+		}));
+		return true;
+	}
+	if (message.type === "REGENERATE_UPSCALE_TILE") {
+		startupRecoveryReady.then(() => updateScheduler(async () => {
+			const childId = await projectWrites.run(message.projectId, () => upscaleController.regenerateTile(message.projectId, message.taskId, message.tileId));
+			await startTaskRun(message.projectId, childId);
+			await persistAndBroadcast({
+				type: "TASK_STATUS",
+				projectId: message.projectId,
+				taskId: childId,
+				status: "queued",
+				runStatus: "queued"
+			});
+			const key = createTaskScopeKey(message.projectId, childId);
+			pendingScopes.set(key, {
+				projectId: message.projectId,
+				taskId: childId
+			});
+			queue = enqueue(queue, [key]);
+		})).then(() => sendResponse({ accepted: true }), (error) => sendResponse({
+			accepted: false,
+			error: String(error)
 		}));
 		return true;
 	}

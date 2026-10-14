@@ -106,7 +106,7 @@ export async function applyTaskMessage(
     const parent = graph.nodes.find((node): node is TaskNode => node.id === child.upscaleParentId && node.kind === "task");
     if (!parent?.upscale?.plan || parent.upscale.token !== child.upscaleToken || parent.runtimeStatus === "canceled") return project;
     const assetId = await saveAsset(decodeBase64(message.images[0].base64, message.images[0].mimeType));
-    graph = {...graph,nodes:graph.nodes.map(node=>node.id===parent.id&&node.kind==="task"?{...node,upscale:{...parent.upscale!,plan:{...parent.upscale!.plan!,tiles:parent.upscale!.plan!.tiles.map(tile=>tile.taskId===child.id?{...tile,resultAssetId:assetId}:tile)}}}:node)};
+    graph = {...graph,nodes:graph.nodes.map(node=>node.id===parent.id&&node.kind==="task"?{...node,upscale:{...parent.upscale!,plan:{...parent.upscale!.plan!,tiles:parent.upscale!.plan!.tiles.map(tile=>tile.taskId===child.id?{...tile,resultAssetId:assetId,previousResultAssetId:undefined}:tile)}}}:node)};
   } else {
     for (const image of message.images) graph = appendResult(graph, message.taskId, await saveAsset(decodeBase64(image.base64, image.mimeType)));
   }
