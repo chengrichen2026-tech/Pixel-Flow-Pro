@@ -276,7 +276,7 @@
 .status-detail.is-neutral {color:#68717e;background:#f5f6f8;border-color:#e0e4e9;}
 .status-detail.is-error {color:#b52d25;background:#fff2ef;border-color:#f3c9c3;}
 
-.upscale-tiles figure {border:2px solid #9b7bec;border-radius:8px;padding:2px;cursor:pointer;}
+.upscale-tiles figure {border:1px solid #9b7bec;border-radius:8px;padding:2px;cursor:pointer;}
 .upscale-tiles figure[data-tile-state="generating"] {border-color:#9b7bec;}
 .upscale-tiles figure[data-tile-state="completed"] {border-color:#36a269;}
 .upscale-tiles figure[data-tile-state="failed"] {border-color:#dc514b;}
