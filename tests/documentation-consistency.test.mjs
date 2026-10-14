@@ -49,6 +49,7 @@ test("HTML guide navigation and local images resolve", async () => {
   }
   const docDate=html.match(/name="documentation-updated" content="(\d{4}-\d{2}-\d{2})"/)?.[1];
   assert.ok(docDate);
+  for(const file of ["使用说明.txt","版本说明.txt"]){const doc=await readFile(new URL(file,root),"utf8");assert.ok(doc.includes(`文档更新：${docDate}`));}
   assert.ok(html.includes(`<title>Pixel Flow v${packageJson.version} 使用说明（${docDate} 更新）</title>`));
   assert.ok(html.includes(`<footer>Pixel Flow · AI 创意任务画布 · v${packageJson.version} · ${docDate}`));
   assert.match(html, /<img src="扩展程序\/icon-128\.png" alt="Pixel Flow PF 图标">/);
