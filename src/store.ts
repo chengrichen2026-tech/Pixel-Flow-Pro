@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { DEFAULT_UPSCALE_OPTIONS } from "./domain/upscale-command";
 import { db, id } from "./db";
 import { hasTeamGateway } from "./team-settings";
 import type { CanvasEdge, CanvasNode, ImageContainerNode, Point, Project, TaskNode } from "./types";
@@ -120,7 +121,7 @@ export const useStore = create<Store>((set,get) => ({
   async regenerateUpscaleTile(taskId,tileId){const p=get().project;if(!p||!globalThis.chrome?.runtime?.id)return;const response=await chrome.runtime.sendMessage({type:'REGENERATE_UPSCALE_TILE',projectId:p.id,taskId,tileId});if(response?.accepted===false)throw new Error(response.error||'分块重新生成失败');await get().refresh(p.id)},
   async addUpscaleTask(position,sourceNodeIds=[]){
     await get().addTask(position,sourceNodeIds);const taskId=get().selected[0];
-    if(taskId)await get().updateNode(taskId,{name:'图片放大',upscale:{scale:2},generationMode:'browser',aspectRatio:'1:1'} as Partial<TaskNode>);
+    if(taskId)await get().updateNode(taskId,{name:'图片放大',upscale:{scale:2},...DEFAULT_UPSCALE_OPTIONS,aspectRatio:'1:1'} as Partial<TaskNode>);
   },
   async addImageContainer(position,sourceNodeIds=[]){const p=get().project;if(!p)return;const members=p.graph.nodes.filter((node):node is Extract<CanvasNode,{kind:"image"|"result"}>=>(sourceNodeIds.includes(node.id)&&(node.kind==="image"||node.kind==="result")));const container:ImageContainerNode={id:id("image-container"),kind:"image_container",name:`图片容器 ${p.graph.nodes.filter(node=>node.kind==="image_container").length+1}`,items:members.map(node=>({id:id("container-item"),assetId:node.assetId,title:node.kind==="result"?(node.title||"生成结果"):node.title})),position,width:360,height:members.length?210:150};const project=await mutate(p.id,x=>{const selected=new Set(members.map(node=>node.id));return{...x,graph:{nodes:[...x.graph.nodes.filter(node=>!selected.has(node.id)),container],edges:x.graph.edges.filter(edge=>!selected.has(edge.source)&&!selected.has(edge.target)).map(edge=>edge)}}});set({project,selected:[container.id],assets:await urlsFor(project)});},
   async addText(position){const p=get().project;if(!p)return;const node:CanvasNode={id:id("text"),kind:"text",text:"",position};const project=await mutate(p.id,x=>({...x,graph:{...x.graph,nodes:[...x.graph.nodes,node]}}));set({project});},

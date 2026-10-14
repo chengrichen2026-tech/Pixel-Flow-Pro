@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { db } from "./db";
 import { useStore } from "./store";
 import { upscaleTileState } from "./domain/generation-ui";
-import { executeUpscaleCommand } from "./domain/upscale-command";
+import { executeUpscaleCommand, DEFAULT_UPSCALE_OPTIONS } from "./domain/upscale-command";
 import type { CanvasNode, TaskNode } from "./types";
 
 const BRIDGE_URL="ws://127.0.0.1:43128/canvas";
@@ -52,7 +52,7 @@ async function readUpscaleTask(taskId:string){
   const runs=(await db.runs.where('[projectId+taskId]').equals([projectId,taskId]).toArray()).filter(r=>r.schemaVersion===2).sort((a,b)=>(b.startedAt||0)-(a.startedAt||0));
   const status=runs[0]?.status||task.runtimeStatus||task.status,tiles=task.upscale.plan?.tiles||[];
   const results=project.graph.nodes.filter(n=>n.kind==='result'&&n.taskId===taskId).map(n=>({...n,nodeId:n.id}));
-  return {projectId,taskId,status,detail:task.statusDetail,scale:task.upscale.scale,progress:{completed:tiles.filter(t=>t.resultAssetId).length,total:tiles.length},tiles:tiles.map(t=>({tileId:t.id,status:upscaleTileState(t,project.graph.nodes.find((n):n is TaskNode=>n.kind==='task'&&n.id===t.taskId)),resultAssetId:t.resultAssetId})),targetSize:task.upscale.plan?{width:task.upscale.plan.width*task.upscale.plan.scale,height:task.upscale.plan.height*task.upscale.plan.scale}:undefined,finalResults:status==='completed'?results:[],previousResults:status==='completed'?[]:results,runId:runs[0]?.id};
+  return {projectId,taskId,status,detail:task.statusDetail,scale:task.upscale.scale,generationMode:task.generationMode,apiImageModel:task.apiImageModel,progress:{completed:tiles.filter(t=>t.resultAssetId).length,total:tiles.length},tiles:tiles.map(t=>({tileId:t.id,status:upscaleTileState(t,project.graph.nodes.find((n):n is TaskNode=>n.kind==='task'&&n.id===t.taskId)),resultAssetId:t.resultAssetId})),targetSize:task.upscale.plan?{width:task.upscale.plan.width*task.upscale.plan.scale,height:task.upscale.plan.height*task.upscale.plan.scale}:undefined,finalResults:status==='completed'?results:[],previousResults:status==='completed'?[]:results,runId:runs[0]?.id};
 }
 async function executeOne(command:Record<string,unknown>):Promise<Record<string,unknown>>{const store=useStore.getState(),op=String(command.op||"");
   if(op==="canvas.create"){await store.createProject();const created=useStore.getState().project;if(created&&command.name)await useStore.getState().renameProject(String(command.name),created.id);return{projectId:created?.id}}
@@ -90,8 +90,8 @@ async function executeOne(command:Record<string,unknown>):Promise<Record<string,
     const scale=Number(command.scale??2);if(![2,4,8].includes(scale))throw new Error('scale must be 2, 4, or 8');
     await store.addUpscaleTask((command.position||{x:620,y:220}) as {x:number,y:number},Array.isArray(command.sourceNodeIds)?command.sourceNodeIds.map(String):[]);
     const taskId=useStore.getState().selected[0];
-    const generationMode=command.generationMode==='api'?'api':command.generationMode==='team'?'team':command.generationMode==='team_web'?'team_web':'browser';
-    await useStore.getState().updateNode(taskId,{upscale:{scale:scale as 2|4|8},generationMode,teamImageModel:command.teamImageModel==='flare'?'flare':'sunburst',apiImageModel:command.apiImageModel==='gpt-image-2.5-sunburst'?'gpt-image-2.5-sunburst':command.apiImageModel==='gpt-image-2.5-flare'?'gpt-image-2.5-flare':'gpt-image-2'} as Partial<TaskNode>);return{taskId};
+    const generationMode=command.generationMode==='browser'?'browser':command.generationMode==='team'?'team':command.generationMode==='team_web'?'team_web':DEFAULT_UPSCALE_OPTIONS.generationMode;
+    await useStore.getState().updateNode(taskId,{upscale:{scale:scale as 2|4|8},generationMode,teamImageModel:command.teamImageModel==='flare'?'flare':'sunburst',apiImageModel:command.apiImageModel==='gpt-image-2'?'gpt-image-2':command.apiImageModel==='gpt-image-2.5-flare'?'gpt-image-2.5-flare':DEFAULT_UPSCALE_OPTIONS.apiImageModel} as Partial<TaskNode>);return{taskId};
   }
   if(op==="task.cancel"){await store.cancelTask(String(command.taskId));return{taskId:String(command.taskId),canceled:true}}
   if(op==="task.run"){await store.runTask(String(command.taskId));const task=useStore.getState().project?.graph.nodes.find((node):node is TaskNode=>node.id===command.taskId&&node.kind==="task");return{taskId:String(command.taskId),status:task?.status}}

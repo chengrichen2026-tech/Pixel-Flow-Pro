@@ -47,8 +47,23 @@ test("HTML guide navigation and local images resolve", async () => {
   for (const match of html.matchAll(/<img[^>]+src="([^"]+)"/g)) {
     await access(new URL(match[1], new URL("先看这里-使用说明.html", root)));
   }
-  assert.match(html, new RegExp(`<title>Pixel Flow v${packageJson.version.replaceAll(".", "\\.")} 使用说明（2026-09-17 更新）<\\/title>`));
-  assert.match(html, new RegExp(`<footer>Pixel Flow · AI 创意任务画布 · v${packageJson.version.replaceAll(".", "\\.")} · 2026-09-17`));
+  const docDate=html.match(/name="documentation-updated" content="(\d{4}-\d{2}-\d{2})"/)?.[1];
+  assert.ok(docDate);
+  assert.ok(html.includes(`<title>Pixel Flow v${packageJson.version} 使用说明（${docDate} 更新）</title>`));
+  assert.ok(html.includes(`<footer>Pixel Flow · AI 创意任务画布 · v${packageJson.version} · ${docDate}`));
   assert.match(html, /<img src="扩展程序\/icon-128\.png" alt="Pixel Flow PF 图标">/);
   assert.doesNotMatch(html, /说明图片\/brand-logo\.png/);
+});
+
+test('current guides align with upscale defaults, supported API models and documented data boundaries',async()=>{
+ const {DEFAULT_UPSCALE_OPTIONS}=await import('../src/domain/upscale-command.ts');const {PIXEL_FLOW_API_MODELS}=await import('../public/api-client.js');
+ const [usage,html,release]=await Promise.all(['使用说明.txt','先看这里-使用说明.html','版本说明.txt'].map(f=>readFile(new URL(f,root),'utf8')));
+ for(const doc of [usage,html,release]){
+   assert.match(doc,/API Sunburst/);assert.match(doc,/双击/);assert.match(doc,/中性/);assert.match(doc,/pixel_flow_upscale_image/);assert.doesNotMatch(doc,/API 固定|API 固定为|模型固定为 gpt-image-2/);
+ }
+ assert.equal(DEFAULT_UPSCALE_OPTIONS.generationMode,'api');assert.equal(DEFAULT_UPSCALE_OPTIONS.apiImageModel,'gpt-image-2.5-sunburst');
+ for(const model of PIXEL_FLOW_API_MODELS){assert.ok(html.includes(model));assert.ok(usage.includes(model));}
+ for(const doc of [html,usage]){assert.match(doc,/容器.*未完整打包|容器内部图片及放大中间分块结果未完整打包/);assert.match(doc,/43129/);assert.match(doc,/43128/);}
+ const version=JSON.parse(await readFile(new URL('package.json',root),'utf8')).version;
+ assert.ok(release.includes(`版本：${version}`));assert.ok(release.includes(`当前版本 v${version}`));
 });

@@ -20,7 +20,7 @@
 - API 持久执行：`api-worker/server.mjs`，任务文件位于 `runtime/api-jobs/`；macOS 使用动态生成的 LaunchAgent，Windows 使用当前用户启动文件夹与 PID 验证脚本
 - 正式团队任务箱客户端：`src/background/team-gateway-http.ts`；云端服务由妙搭任务箱与 Cloudflare Worker承接
 - Codex OAuth 只在服务端执行环境读取；扩展和网络接口都不返回 OAuth 凭证
-- 团队平台访问 Key 只保存在 Cloudflare Worker secret；成员浏览器只保存成员令牌。GPT Web 团队与 Team Cloud 任务统一计入成员每日团队生图用量与额度
+- 团队个人成员令牌保存在浏览器；团队应用级访问配置可能随客户端构建提供，发布按明确授权范围处理。GPT Web 团队与 Team Cloud 任务统一计入成员每日团队生图用量与额度
 - 画布迁移门禁与进度：`CANVAS_MIGRATION.md`
 - 扩展权限和产品信息：`public/manifest.json`
 - 后台调度源码：`src/background/service-worker.ts` 及其 `src/background/`、`src/domain/` 模块
@@ -60,6 +60,6 @@ IndexedDB 名称为 `gpt-node-canvas`，版本 1：
 
 第八阶段已增加 `generation-ui.ts` 作为运行配置与状态文案的唯一 UI 投影。当前任务卡显示 GPT Web、Team Cloud、API 三个主模式：GPT Web 再选择本机/团队，Team Cloud 再选择 Flare/Sunburst；内部继续映射到 `browser / team_web / team / api`。TaskNode 保存 `runtimeStatus` 兼容投影；活动任务支持取消，失败或取消任务支持重试，可恢复团队 Job 支持重新写回。普通任务、模板、图片容器批量和失败重试统一提交 `RUN_TASKS`。
 
-当前 v0.3.21 的功能事实以 `TaskRun`、三个主模式、四条底层执行链路和真实加载扩展为准。
+当前 v0.3.22 的功能事实以 `TaskRun`、三个主模式、四条底层执行链路和真实加载扩展为准。
 
 后续重点是批量运行模型迁移、资产管理端 TypeScript 化、ChatGPT DOM 探测、备份迁移测试及主包拆分。

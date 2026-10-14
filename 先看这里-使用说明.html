@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Pixel Flow v0.3.21 使用说明（2026-09-17 更新）</title>
+  <title>Pixel Flow v0.3.22 使用说明（2026-10-14 更新）</title>
   <link rel="icon" href="扩展程序/icon.svg">
   <style>
     :root {
@@ -197,239 +197,36 @@
     .step::before { color:#fff; }
     .screenshot { border-color:#dfe2e7; background:#eef0f3; }
     details { border-top-color:#e1e4e9; } summary { color:#17191d; }
+
+    pre {max-width:100%;overflow:auto;border:1px solid var(--line);border-radius:12px;padding:16px;background:#f6f3ff;white-space:pre-wrap;word-break:break-word;}
+    pre code {border:0;padding:0;background:transparent;}
+    code {overflow-wrap:anywhere;word-break:break-word;}
+    table {width:100%;border-collapse:collapse;table-layout:fixed;font-size:14px;}
+    th,td {border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top;overflow-wrap:anywhere;}
+    td code {overflow-wrap:anywhere;}
+    @media(max-width:700px){nav{position:static}section{scroll-margin-top:16px}table{font-size:12px}th,td{padding:6px}pre{font-size:12px}}
   </style>
+<meta name="documentation-updated" content="2026-10-14">
 </head>
-<body>
-  <div class="page">
-    <header class="hero">
-      <div class="brand">
-        <img src="扩展程序/icon-128.png" alt="Pixel Flow PF 图标">
-        <div class="brand-copy"><strong>Pixel Flow</strong><span>AI 创意任务画布</span></div>
-      </div>
-      <p class="eyebrow">CHROME / EDGE 本地扩展</p>
-      <h1>Pixel Flow<br>使用说明</h1>
-      <p class="lead">把图片、文字、任务和生成结果放进一张无限画布。任务卡只保留 GPT Web、Team Cloud 和 API 三个主模式。</p>
-      <div class="badges">
-        <span class="badge">版本 <strong>0.3.21</strong></span>
-        <span class="badge">支持 Chrome / Edge</span>
-        <span class="badge">图片容器与批量结果</span>
-        <span class="badge">本地保存画布</span>
-      </div>
-    </header>
+<body><div class="page"><header class="hero"><div class="brand"><img src="扩展程序/icon-128.png" alt="Pixel Flow PF 图标"><div class="brand-copy"><strong>Pixel Flow</strong><span>AI 创意任务画布</span></div></div><p class="eyebrow">先看这里 · 2026-10-14 更新</p><h1>Pixel Flow<br>使用说明</h1><p class="lead">普通生图、批量任务、图片放大与 AI 结构化操作。图片放大默认 API Sunburst；分块只用细边框表示状态，双击即可单独重生。</p><div class="badges"><span class="badge">版本 <strong>0.3.22</strong></span><span class="badge">Chrome / Edge</span><span class="badge">macOS / Windows</span><span class="badge">2× / 4× / 8× 放大</span></div></header><div class="notice"><strong>快速开始：</strong>完整解压后加载扩展程序。普通生图按所选通道准备；放大优先配置 Sunburst Key 与 API Worker，再选中一张图创建放大任务。</div><nav aria-label="目录"><a href="#overview">工具结构与能力</a><a href="#prepare">先选择生图方式</a><a href="#install">安装与更新</a><a href="#quickstart">普通生图</a><a href="#upscale">图片放大</a><a href="#canvas">画布、容器与批量</a><a href="#library">提示词、素材、图库与模板</a><a href="#settings">生图设置与 API 模型</a><a href="#worker">API Worker 与 AI Bridge</a><a href="#codex">AI 结构化调用</a><a href="#data">保存、备份与数据范围</a><a href="#trouble">常见问题与完成检查</a></nav><section id="overview"><h2>1. 工具结构与能力</h2><p>Pixel Flow 是 Chrome / Edge 本地扩展，用一张无限画布组织图片、文字、任务和结果。可以普通生图、容器批量生成、分块放大，并让 AI 通过结构化命令执行这些动作。</p><div class="grid"><div class="card"><h3>画布层</h3><p>图片、文字、图片容器、普通生图任务、图片放大任务、图片或文字结果。连线决定任务输入，结果回到任务右侧。</p></div><div class="card"><h3>执行层</h3><p>GPT Web 本机/团队、Team Cloud、API 四条执行链路。API 使用本机 Worker；团队模式使用远端任务箱与执行服务。</p></div><div class="card"><h3>数据层</h3><p>当前浏览器本地保存画布、资产与 TaskRun 运行记录。提示词库、产品素材、参考图库和模板提供复用入口。</p></div><div class="card"><h3>AI 接入层（可选）</h3><p>本机 Bridge + MCP 让 Codex 读写真实画布、启动任务、查询终态和下载结果。手动操作不需要 Bridge。</p></div></div></section>
+<section id="prepare"><h2>2. 先选择生图方式</h2><div class="grid"><div class="card"><h3>GPT Web · 本机</h3><p>当前浏览器登录并能正常使用 chatgpt.com。使用当前账号的图片生成能力；不需要 API Key 或 API Worker。</p></div><div class="card"><h3>GPT Web · 团队</h3><p>提交电脑保存成员令牌；团队至少一台已配对、已登录 ChatGPT 且正在接单的网页生图机。提交电脑不用配对成执行机，与 Team Cloud 共用成员每日额度池。</p></div><div class="card"><h3>Team Cloud</h3><p>保存成员令牌，选择 Flare 或 Sunburst；由团队远端服务执行，不需要登录 ChatGPT，也不需要提交电脑安装 API Worker。</p></div><div class="card"><h3>API</h3><p>准备可用于 aihub.rbmanon.cn 的对应模型 API Key、Node.js 20+ 和本机 API Worker。可选 GPT Image 2 / Sunburst 2.5 / Flare 2.5，不需要登录 ChatGPT 网页。</p></div></div><p><strong>默认规则：</strong>普通新任务在已配置团队成员时默认 GPT Web · 团队，否则默认 API；普通 API 模型默认 GPT Image 2。<strong>新建图片放大任务独立默认 API Sunburst</strong>，也可以手动选其他模式。已有任务保持已保存的配置。</p><p>费用与额度按所选通道和账户规则计算。放大由多个分块请求组成；倍率越高、分块越多，用量和等待时间通常越多。</p></section>
+<section id="install"><h2>3. 安装与更新</h2><ol><li>完整解压下载包；源代码下载用户应先按项目说明完成构建。</li><li>Chrome 打开 <code>chrome://extensions</code>，Edge 打开 <code>edge://extensions</code>。</li><li>开启开发者模式，选择“加载已解压的扩展程序”，指向 <code>扩展程序/</code> 文件夹。</li><li>点击工具栏 Pixel Flow 图标打开画布。更新文件后，在扩展管理页重新加载，再刷新画布。</li></ol><p>这份说明页可以双击离线阅读；工具的 index.html 需要通过扩展安装入口运行。重新加载正在生成的任务前，先看任务状态；能恢复已保存的对话或 Job 不代表所有中断都可自动恢复。</p></section>
+<section id="quickstart"><h2>4. 普通生图：第一次操作</h2><ol><li>上传、拖入或粘贴图片，也可新增文字节点。</li><li>选中输入图片，点击底部“新增任务”；或从输入节点右侧连线到任务左侧。多张普通图片会作为同一个任务的参考输入。</li><li>选择主模式与二级选项：GPT Web 的本机/团队、Team Cloud 的 Flare/Sunburst、API 的三种模型。</li><li>填写提示词。需要配置时，从顶部“生图设置”保存对应 Key 或成员令牌。</li><li>点击“运行任务”，等待结果写回右侧，查看内容后下载。</li></ol><p>TaskRun 是每次运行的权威状态：排队、准备、上传/发送、等待接单、生成、写回、完成、失败、待手动处理、取消。活动任务可取消，失败/取消后可重试；有保留团队 Job 时可“恢复结果”。普通任务可能收到文字回复，要确认结果是所需图片；命令受理、网页出现图片和图片已写回画布是不同阶段。</p></section>
+<section id="upscale"><h2>5. 图片放大：默认 API Sunburst</h2><ol><li>选中<strong>一张图片或生成结果</strong>，点击底部“新增图片放大任务”。</li><li>选择 2× / 4× / 8×；默认 2×、API Sunburst。确认 Sunburst 2.5 对应 Key 已保存，API Worker 已运行。</li><li>点击“开始放大”。工具按原图像素和目标倍率自动带重叠分块，逐块生成，再拼合完整 PNG；无需编辑提示词或手工切图。</li><li>任务卡只显示紧凑缩略图，全部展开。<strong>紫色细框：生成中；红色：失败；完成：中性 1px 细框，不着色。</strong></li><li><strong>双击某块缩略图</strong>只重新生成该块；其他成功块不变。成功后重新拼合，更新原大图节点。运行中禁用重生，失败时保留旧预览与旧大图。</li><li>整体任务 completed 后，检查结果并下载任务右侧的大图。</li></ol><p>倍率指宽和高分别放大：1000×1000 的 2×目标为 2000×2000。当前目标上限为 6400 万像素、最长边 16384px、最多 256 块；超限会明确提示。</p><p>工具校验每块实际像素尺寸，并保留原图透明通道。AI 增强会补充细节，产品结构、文字和 Logo 仍需要与原图对照验收；扩尺寸完成不等于商业质量已通过。</p></section>
+<section id="canvas"><h2>6. 画布、容器与批量</h2><ul><li>顶部切换、新建、重命名、管理画布；画布名称可就地编辑。</li><li>拖动节点、框选；滚轮/双指滑动平移，触控板捏合缩放，左下控制按钮也可缩放或适配视图。</li><li>Command/Ctrl+C、V 复制粘贴图片、结果、容器和任务；任务副本保留输入与配置并重置运行状态。单选图片/结果还能复制真实图片到其他应用。</li><li>Delete/Backspace 删除选中节点；Command/Ctrl+Z 撤销。编辑文本时快捷键作用于文本。</li><li>点击输入线可断开，节点保留。“节省内存”释放可安全关闭的任务网页并保留对话地址。</li></ul><h3>图片容器</h3><p>选中多图创建容器，连接到普通任务后，每张图生成一个子任务；容器外的输入图作为共享参考。可只重试失败项。容器内图可拖出或移出，容器支持内部复制。跨应用多图剪贴板受系统限制，不保证变成多个独立附件。</p><p>图片放大只接一张图；批量逐图生成用图片容器。</p></section>
+<section id="library"><h2>7. 提示词、素材、图库与模板</h2><ul><li>左侧提供提示词库、产品素材、参考图库、生图模板。</li><li>提示词可替换或追加到选中任务，也可拖成文字节点。素材可拖入画布，或连接到选中任务/加入选中容器。</li><li>各库维护名称、标签与示例图，分别导出/导入；导入应选择对应库类型。</li><li>正式模板入口在左侧模板库，可组合文案、构图、背景、补充、输入图片、模式和 1–4 张输出；模板任务独立运行，失败项可单独重试。</li><li>底部“生图模版”仍是开发中占位入口。</li></ul></section>
+<section id="settings"><h2>8. 生图设置与 API 模型</h2><p>从顶部“生图设置”进入。个人 API 分为 GPT Image 2、Sunburst 2.5、Flare 2.5 三个 Key 字段；选用哪个模型，就保存该模型可用的 Key。没有对应 Key 时，手动任务会引导打开设置，AI 任务需查看返回错误。</p><table><thead><tr><th>显示模型</th><th>API 标识</th><th>用途</th></tr></thead><tbody><tr><td>GPT Image 2</td><td><code>gpt-image-2</code></td><td>普通 API 任务默认项</td></tr><tr><td>Sunburst 2.5</td><td><code>gpt-image-2.5-sunburst</code></td><td>图片放大默认优先项</td></tr><tr><td>Flare 2.5</td><td><code>gpt-image-2.5-flare</code></td><td>可手动选择</td></tr></tbody></table><p>模型标识对应本工具使用的 API 网关；Key 还需具备该模型的调用权限。不同字段不会自动互相借用 Key。</p><h3>团队设置</h3><p>提交任务的电脑保存成员令牌，可查看在线执行机数。只有承担网页生成的电脑需要在“本机作为网页生图执行机”配对，配对后可开始/暂停接单或解除配对；设备名称由团队任务箱统一设置。团队成员令牌与设备令牌用途不同。</p></section>
+<section id="worker"><h2>9. API Worker 与 AI Bridge</h2><div class="grid"><div class="card"><h3>API Worker：43129</h3><p>为 API 生图提供持久本机任务执行；API 模式需要它，GPT Web 本机不需要它。</p><p>macOS：在项目根目录运行 <code>npm run api-worker:install</code> 尝试常驻安装；如启动失败，可用 <code>node api-worker/server.mjs</code> 手动启动并保持终端打开。</p><p>Windows：<code>npm run api-worker:install:windows</code> 安装登录自启，<code>npm run api-worker:start:windows</code> 手动启动，<code>npm run api-worker:uninstall:windows</code> 卸载；更新安装会检查并替换旧 Pixel Worker。</p></div><div class="card"><h3>Bridge：43128</h3><p>供 AI 调用真实画布，普通手动使用可不安装。在项目根目录运行 <code>npm run bridge:install</code>，检查用 <code>npm run bridge:status</code>；同时打开 Pixel Flow 画布。</p><p>Bridge 和 API Worker 是不同服务。ready=false 通常需要检查画布连接，不代表 API 网关失败。</p></div></div><h3>健康检查</h3><pre><code>macOS / Linux：
+curl --noproxy '*' http://127.0.0.1:43129/health
 
-    <div class="notice">
-      <strong>先做这一件事：</strong>请先把收到的 ZIP 完整解压。安装时选择解压后的 <code>扩展程序</code> 文件夹，不能直接选择 ZIP，也不要选择最外层“分享版”文件夹。
-    </div>
-
-    <nav aria-label="目录">
-      <a href="#prepare">使用前准备</a>
-      <a href="#install">安装扩展</a>
-      <a href="#quickstart">第一次使用</a>
-      <a href="#controls">常用操作</a>
-      <a href="#generation">生图方式</a>
-      <a href="#team">团队生图</a>
-      <a href="#trouble">常见问题</a>
-      <a href="#privacy">安全说明</a>
-    </nav>
-
-    <section id="prepare">
-      <h2>一、使用前准备</h2>
-      <div class="grid">
-        <div class="card">
-          <h3>GPT Web · 本机</h3>
-          <ul>
-            <li>macOS 或 Windows 电脑。</li>
-            <li>最新版 Chrome 或 Edge 浏览器。</li>
-            <li>一个已登录并能正常使用 <code>chatgpt.com</code> 的 ChatGPT 账号。</li>
-            <li>不需要 API Key、Node.js 或运行命令。</li>
-          </ul>
-        </div>
-        <div class="card">
-          <h3>GPT Web · 团队</h3>
-          <ul>
-            <li>提交电脑只需保存团队成员令牌。</li>
-            <li>团队内至少一台已配对、已登录 ChatGPT 且正在接单的网页生图机。</li>
-            <li>提交电脑不需要登录 ChatGPT，也不需要配对成执行机。</li>
-            <li>与 Team Cloud 共用同一个成员每日额度池。</li>
-          </ul>
-        </div>
-        <div class="card">
-          <h3>Team Cloud</h3>
-          <ul>
-            <li>只需团队成员令牌，任务箱地址已内置。</li>
-            <li>模型可选 Flare 或 Sunburst。</li>
-            <li>不需要登录 ChatGPT、安装 Node.js 或运行 API Worker。</li>
-            <li>与 GPT Web · 团队共用同一个成员每日额度池。</li>
-          </ul>
-        </div>
-        <div class="card">
-          <h3>API</h3>
-          <ul>
-            <li>macOS 或 Windows 电脑。</li>
-            <li>最新版 Chrome 或 Edge 浏览器。</li>
-            <li>可用于 <code>aihub.rbmanon.cn</code> 的 API Key。</li>
-            <li>Node.js 20 或更高版本。</li>
-            <li>安装并运行 Pixel Flow API Worker。</li>
-            <li>不需要登录 ChatGPT 网页账号。</li>
-          </ul>
-        </div>
-      </div>
-    </section>
-
-    <section id="install">
-      <h2>二、安装扩展</h2>
-      <h3>Chrome 安装方法</h3>
-      <div class="steps">
-        <div class="step"><b>打开扩展管理页</b>在地址栏输入 <code>chrome://extensions</code>，按回车。</div>
-        <div class="step"><b>打开“开发者模式”</b>找到页面右上角的“开发者模式”开关并打开。</div>
-        <div class="step"><b>点击“加载已解压的扩展程序”</b>在弹出的窗口里，选择本分享包中的 <code>扩展程序</code> 文件夹。</div>
-        <div class="step"><b>固定扩展图标</b>点击浏览器右上角的拼图按钮，把“Pixel Flow｜像素流”固定到工具栏。</div>
-      </div>
-
-      <h3>Edge 安装方法</h3>
-      <div class="steps">
-        <div class="step"><b>打开扩展管理页</b>在地址栏输入 <code>edge://extensions</code>，按回车。</div>
-        <div class="step"><b>打开“开发人员模式”</b>找到页面左侧或右侧的“开发人员模式”开关并打开。</div>
-        <div class="step"><b>点击“加载解压缩的扩展”</b>选择本分享包中的 <code>扩展程序</code> 文件夹。</div>
-        <div class="step"><b>固定扩展图标</b>把“Pixel Flow｜像素流”固定到浏览器工具栏。</div>
-      </div>
-
-      <p class="muted">浏览器可能提示这是“开发者模式扩展”，这是手动安装本地扩展时的正常提示。只要分享包来源可信即可继续使用。</p>
-    </section>
-
-    <section id="quickstart">
-      <h2>三、第一次使用</h2>
-      <div class="steps">
-        <div class="step"><b>准备生图方式</b>使用 GPT Web · 本机时先确认 <code>chatgpt.com</code> 已登录；API 或 Team Cloud 按后文配置。</div>
-        <div class="step"><b>打开无限画布</b>点击浏览器工具栏中的“Pixel Flow”图标。</div>
-        <div class="step"><b>放入图片或文字</b>点击左侧“上传图像”或“新增文字节点”；也可以按 <kbd>Command</kbd> + <kbd>V</kbd>（Windows：Ctrl+V）粘贴。</div>
-        <div class="step"><b>新建任务或图片容器</b>点击底部“新增任务”，再从图片或文字右侧的紫色连接点拖线到任务卡左侧。如果需要逐张执行，先选中多张图片再点“新建图片容器”，把容器连到任务。</div>
-        <div class="step"><b>填写要求并运行</b>选择 GPT Web、Team Cloud 或 API；再按模式选择本机/团队或 Flare/Sunburst，设置比例和提示词后运行。</div>
-        <div class="step"><b>查看状态和结果</b>任务卡会显示排队、准备、上传、发送、等待执行机、生成、写回和终态；图片结果在任务右侧排列，每张图都可下载。</div>
-      </div>
-      <div class="notice"><strong>当前任务卡：</strong>恢复紧凑的单一“生图模式”选择。GPT Web 显示本机/团队，Team Cloud 显示 Flare/Sunburst，API 不显示额外选择。</div>
-    </section>
-
-    <section id="controls">
-      <h2>四、常用操作</h2>
-      <div class="grid">
-        <div class="card">
-          <h3>创建和连接</h3>
-          <p><span class="key">双击画布空白处</span>：快速新建图片、文字或任务。</p>
-          <p><span class="key">从节点右侧拖线到空白处</span>：可以自动新建任务并连接。</p>
-          <p><span class="key">拖动任务卡里的小缩略图</span>：调整多张参考图的顺序。</p>
-        </div>
-        <div class="card">
-          <h3>移动和删除</h3>
-          <p><span class="key">按住节点拖动</span>：节点会实时跟随鼠标。</p>
-          <p><span class="key">选中节点后按 Backspace 或 Delete</span>：删除节点和相连的线。</p>
-          <p><span class="key">按 Command + Z</span>（Windows：Ctrl+Z）：撤销当前画布的最近动作，包括删除节点、移动节点和新增任务。</p>
-          <p><span class="key">双指平行滑动</span>：快速平移画布；双指并拢或张开可缩小、放大。</p>
-        </div>
-        <div class="card">
-          <h3>复制图片与容器</h3>
-          <p><span class="key">选中图片、生成结果或容器 + Command/Ctrl+C</span>：复制画布节点。</p>
-          <p><span class="key">Command/Ctrl+V</span>：粘贴图片或容器副本，会自动错开。单选图片或生成结果时，同时可粘贴真实图片到聊天工具。</p>
-          <p>容器的多图向外粘贴依赖 macOS 与聊天工具对多图剪贴板的支持。当前不能稳定作为多张独立附件粘贴，此项标记为待解决；容器的画布内部复制不受影响。</p>
-        </div>
-        <div class="card">
-          <h3>保存和内存</h3>
-          <p><span class="key">节省内存</span>：关闭可以安全关闭的任务网页，但保留对话地址。</p>
-          <p><span class="key">备份画布</span>：保存完整的画布、连线和图片数据。</p>
-          <p>删除扩展前请先备份，否则该浏览器里的本地画布数据可能一起被删除。</p>
-        </div>
-      </div>
-    </section>
-
-    <section id="generation">
-      <h2>五、三个模式</h2>
-      <div class="grid">
-        <div class="card"><h3>GPT Web</h3><p>选择“本机”时使用当前浏览器已登录的 ChatGPT；选择“团队”时由团队中任意已配对且在线的网页生图机执行，提交电脑无需配对。GPT Web 团队与 Team Cloud 共用成员每日额度池。</p></div>
-        <div class="card"><h3>Team Cloud</h3><p>使用团队任务箱和服务端 Codex OAuth，可选择 Flare 或 Sunburst；伙伴不需要主账号登录态。</p></div>
-        <div class="card"><h3>API</h3><p>模型固定为 gpt-image-2。通过本机 API Worker 提交持久任务；纯文字走 generations，参考图走 JSON Base64 edits。</p></div>
-      </div>
-      <h3>统一任务状态</h3>
-      <p>TaskRun 是一次运行的权威记录。活动任务可取消；失败或取消后可重试；保留团队 Job 的失败任务可“恢复结果”，不重新生图。只有结果资产、节点和连线写入画布后才算完成。</p>
-      <h3>API Key 配置</h3>
-      <div class="steps">
-        <div class="step"><b>保存 API Key</b>点击顶部“生图设置”，在“个人 API”中输入并保存完整 Key。</div>
-        <div class="step"><b>确认任务配置</b>生图模式选择“API”。新任务默认使用 API，已有任务保留原设置。</div>
-        <div class="step"><b>运行并回写</b>点击“运行任务”。纯文字任务调用 generations；参考图通过 JSON Base64 Data URL 调用 edits；返回图片自动写回画布。</div>
-      </div>
-      <div class="notice"><strong>数据边界：</strong>API Key 只保存在当前浏览器本地；API 模式会把任务提示词和连接的参考图片发送到 <code>aihub.rbmanon.cn</code>。</div>
-      <h3>Windows API Worker</h3>
-      <div class="steps">
-        <div class="step"><b>安装 Node.js</b>Windows 10 / 11 需要 Node.js 20 或更新版本；GPT Web 不需要此步。</div>
-        <div class="step"><b>安装登录自启</b>在 Pixel Flow 目录运行 <code>npm run api-worker:install:windows</code>，无需管理员权限。</div>
-        <div class="step"><b>管理 Worker</b>手动启动用 <code>npm run api-worker:start:windows</code>，卸载用 <code>npm run api-worker:uninstall:windows</code>。</div>
-      </div>
-    </section>
-
-    <section id="team">
-      <h2>六、团队生图</h2>
-      <div class="steps">
-        <div class="step"><b>保存成员令牌</b>在“生图设置 → 团队成员”填写成员令牌。任务箱地址已内置，平台访问 Key 由安全中继托管。</div>
-        <div class="step"><b>使用共享执行机</b>团队中任意一台在线执行机都可接单，提交电脑无需配对；GPT Web 团队与 Team Cloud 共用成员每日额度池。</div>
-        <div class="step"><b>使用 Team Cloud</b>任务卡主模式选择“Team Cloud”，再选择 Flare 或 Sunburst。</div>
-        <div class="step"><b>使用团队 GPT Web</b>主模式选择“GPT Web”，位置选择“团队”；管理员需先在任务箱生成配对码，执行机在“网页生图执行机”中完成配对并保持接单。</div>
-        <div class="step"><b>观察任务状态</b>等待上线、执行机忙、需要手动处理、正在生成和正在写回都会单独显示；任务可取消。</div>
-      </div>
-      <div class="notice"><strong>隐私边界：</strong>网页生图机只保存可撤销设备令牌，ChatGPT 密码、Cookie 和登录态不会上传。团队输入会发送到配置的任务箱。</div>
-    </section>
-
-    <section id="trouble">
-      <h2>七、常见问题</h2>
-      <details open>
-        <summary>点击“运行任务”后没有正常生成</summary>
-        <p>先打开 ChatGPT 网页，确认账号已登录、没有验证码或使用次数限制。然后刷新 ChatGPT 页面和画布页面，再运行一次。</p>
-      </details>
-      <details>
-        <summary>任务提示“需要手动处理”</summary>
-        <p>点击任务卡上的“打开真实对话”，在网页里完成登录、验证码或其他提示，处理完后回到画布重新运行。</p>
-      </details>
-      <details>
-        <summary>更新分享包后，界面还是旧的</summary>
-        <p>打开扩展管理页，找到“Pixel Flow｜像素流”并点击重新加载按钮；再刷新画布和 ChatGPT 对话页。</p>
-      </details>
-      <details>
-        <summary>Team Web 一直显示“等待上线”</summary>
-        <p>任务已经安全进入团队任务箱，但没有在线且正在接单的网页生图机。请检查执行机 Chrome、网络、配对状态和暂停开关。</p>
-      </details>
-      <details>
-        <summary>团队任务云端已完成，但画布显示失败</summary>
-        <p>如果任务卡显示“恢复结果”，优先点击它取回已有结果，不要直接重新生图；也可让 Codex 使用结构化恢复命令。</p>
-      </details>
-      <details>
-        <summary>重新打开浏览器后任务网页不见了</summary>
-        <p>这是正常的节省内存功能。画布仍会保存原对话地址，再次运行任务或点击“打开真实对话”就会重新打开。</p>
-      </details>
-      <details>
-        <summary>能不能直接双击 index.html 使用？</summary>
-        <p>不能。必须按照前面的步骤，把 <code>扩展程序</code> 文件夹加载到 Chrome 或 Edge。直接双击网页文件无法使用浏览器权限。</p>
-      </details>
-    </section>
-
-    <section id="privacy">
-      <h2>八、安全与隐私说明</h2>
-      <ul>
-        <li>工具使用你自己已经登录的 ChatGPT 网页账号，不读取或保存 ChatGPT 密码。</li>
-        <li>画布、连线和图片保存在安装该扩展的浏览器本地数据库中。</li>
-        <li>ChatGPT Web 本机模式访问 <code>chatgpt.com</code>；API Key 模式访问配置的 API 网关；团队模式访问内置的固定安全中继。</li>
-        <li>API Key、团队凭证和网页生图机令牌只保存在当前浏览器本地。</li>
-        <li>Team Cloud / Team Web 会把提示词和参考图经固定中继发送到团队任务箱；成员浏览器不保存平台访问 Key。</li>
-        <li>工具不会绕过 ChatGPT 的登录、验证码、套餐限制或使用次数限制。</li>
-        <li>ChatGPT 网页改版后，网页识别规则可能需要更新。</li>
-      </ul>
-      <p class="good"><strong>建议：</strong>重要项目定期使用“备份画布”，并把备份文件保存到安全位置。</p>
-    </section>
-
-    <section id="codex">
-      <h2>九、Codex 结构化操作（可选）</h2>
-      <p>普通手动使用 Pixel Flow 不需要 Bridge。如果需要让 Codex 直接操作真实画布，可在项目目录运行 <code>npm run bridge:install</code>。</p>
-      <div class="notice"><strong>安全边界：</strong>Bridge 只监听本机 <code>127.0.0.1:43128</code>。Codex 可读取画布、管理和执行任务、恢复团队结果、读取 TaskRun、导入资产库及下载图片；写操作必须带唯一 requestId 和最新 expectedRevision。详细命令见 <code>COMMAND_API.md</code>。</div>
-    </section>
-
-    <footer>Pixel Flow · AI 创意任务画布 · v0.3.21 · 2026-09-17 · macOS / Windows</footer>
-  </div>
-</body>
-</html>
+Windows PowerShell：
+Invoke-RestMethod http://127.0.0.1:43129/health</code></pre><p>确认 ok=true、service=pixel-flow-api-worker、workerVersion=2 且 apiModels 包含所需模型。启动命令返回不等于服务健康；当前电脑的后台进程运行正常，也不等于登录自启已通过。API 超时后先检查网关调用记录，再决定是否重试。</p></section>
+<section id="codex"><h2>10. AI 结构化调用</h2><p>AI 可读取状态、导入图片、建立连线、创建/执行任务、放大图片、单块重生、查询 TaskRun、恢复已有团队结果和下载大图。操作默认走 MCP → 本机 Bridge → 真实扩展。</p><ul><li><code>pixel_flow_upscale_image</code>：图片节点、本地绝对路径、Data URL 或 assetId 四选一，一步创建并默认启动放大；默认 API Sunburst、2倍。</li><li><code>pixel_flow_get_upscale_task</code>：查询 status、progress、tiles、目标尺寸及 finalResults。只有 completed 才提供新成品；重生期间旧图在 previousResults。</li><li><code>pixel_flow_regenerate_upscale_tile</code>：指定 taskId、tileId 单块重生。</li><li>当前通用 <code>pixel_flow_execute</code> 也支持 <code>image.upscale</code>；专用工具在新聊天/刷新 MCP 连接后挂载。</li></ul><pre><code>{
+  "op": "image.upscale",
+  "sourceNodeId": "实际图片节点ID",
+  "scale": 2,
+  "generationMode": "api",
+  "apiImageModel": "gpt-image-2.5-sunburst"
+}</code></pre><p>写入必须带唯一 requestId 和刚读取的 expectedRevision。命令受理不是完成；继续查询 completed 与 finalResults，再用最终 nodeId 下载。相同 requestId 用于重放同一请求；参数变化使用新 ID。超时先查原请求与画布，不盲目重复生图。</p><p>详细参数见 <a href="COMMAND_API.md">COMMAND_API.md</a>，放大边界与验收见 <a href="IMAGE_UPSCALING.md">IMAGE_UPSCALING.md</a>。</p></section>
+<section id="data"><h2>11. 保存、备份与数据范围</h2><p>画布、独立图片和运行记录保存在当前扩展的本地 IndexedDB；各资产库独立导出/导入。重新构建或重载不主动清空本地画布，删除扩展前应先保存必要资料。</p><p><strong>当前画布备份范围：</strong>打包当前画布、连线、独立图片与最终结果；容器内部图片及放大中间分块结果未完整打包。跨电脑迁移时，需要另行保留原图、各库导出和成品，并先做恢复验证。</p><p>个人 API Key、成员令牌和设备令牌由生图设置保存；个人 Key 在 API 请求时传给本机 Worker 和网关，不进入画布备份。团队应用级访问配置/凭证可能随构建提供，与个人授权令牌不同；公开发布按明确授权范围处理，不把用户画布、素材和日志带入公开包。</p><p>API 模式把提示词与参考图发送到配置的 API 网关；团队模式把输入发送到团队任务箱/执行服务。GPT Web 使用已有浏览器登录态；工具不会替代登录、验证码或账户额度处理。</p></section>
+<section id="trouble"><h2>12. 常见问题与完成检查</h2><details open><summary>API Sunburst 放大没有启动</summary><p>检查 Sunburst 2.5 对应 Key、模型调用权限、API Worker 的健康与 apiModels；查看任务具体错误。普通 GPT Image 2 的 Key 字段不会自动替代 Sunburst 字段。</p></details><details><summary>某块红框，或想修正某个分块</summary><p>等待整体任务结束或先取消，再双击目标块；仅该块重新生成，成功后更新原大图。运行中不重复提交。无需整体再生成一遍。</p></details><details><summary>已经完成，但要确认质量</summary><p>核对目标像素、图片内容、产品结构、文字/Logo、接缝及透明边缘。任务终态说明执行链路已结束，不代替人工质量验收。</p></details><details><summary>团队任务等待上线、或结果已生成却没写回</summary><p>等待上线时检查执行机是否配对、在线且接单。结果已存在时优先“恢复结果”，避免重复生成与用量。</p></details><details><summary>更新后界面或模型列表没变</summary><p>确认加载目录是本次构建的扩展程序，重新加载扩展并刷新画布；模型报旧 Worker 时检查 workerVersion/apiModels。</p></details><details><summary>GPT Web 需要手动处理</summary><p>按具体提示完成登录、验证码或额度处理。先查看已保存的真实对话和任务状态，再决定恢复或重试。</p></details><details><summary>AI 工具没出现或 Bridge 未连接</summary><p>打开 Pixel Flow 画布，检查 Bridge 状态；新 MCP 工具在新聊天或刷新连接后加载。当前通用 execute 可调用已有底层命令。</p></details><details><summary>容器复制、备份和跨设备迁移</summary><p>容器内部复制可用，多图粘贴到外部应用受系统限制。迁移按备份范围说明另行保留原图、库导出和成品，不只保留一个画布文件。</p></details></section><footer>Pixel Flow · AI 创意任务画布 · v0.3.22 · 2026-10-14 · macOS / Windows</footer></div></body></html>

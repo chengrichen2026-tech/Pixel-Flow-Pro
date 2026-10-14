@@ -12,7 +12,7 @@ Pixel Flow 扩展通过 `ws://127.0.0.1:43128/canvas` 连接本机 Bridge，Code
 - `pixel_flow_auto_tag_products`：按素材名称推导产品系列与“包装盒/铝箔”标签；默认预览，`apply=true` 时写入。
 - `pixel_flow_create_canvas`：新建并打开画布。
 - `pixel_flow_import_image`：从绝对本地路径、Base64 Data URL 或已有 `assetId` 创建画布图片节点；可用 `targetTaskId` 在创建时直接连接任务。
-- `pixel_flow_upscale_image`：一步导入或选择图片，创建并默认启动分块放大；支持 sourceNodeId / filePath / imageDataUrl / assetId 四选一，2/4/8倍，默认GPT Web本机。
+- `pixel_flow_upscale_image`：一步导入或选择图片，创建并默认启动分块放大；支持 sourceNodeId / filePath / imageDataUrl / assetId 四选一，2/4/8倍，默认API Sunburst。
 - `pixel_flow_get_upscale_task`：只读查询权威TaskRun状态、进度、目标尺寸和结果节点；只有completed时返回finalResults。
 - `pixel_flow_regenerate_upscale_tile`：指定taskId和tileId，重生单块并重新拼合。
 - `pixel_flow_create_task`：新建生图任务，可设提示词、`api / browser / team / team_web` 模式、团队模型 `flare / sunburst`、比例、位置和输入节点。
@@ -85,7 +85,8 @@ MCP 配置位于 `~/.codex/config.toml` 的 `[mcp_servers.pixel-flow]`。新建 
   "op": "image.upscale",
   "sourceNodeId": "image-实际节点ID",
   "scale": 2,
-  "generationMode": "browser"
+  "generationMode": "api",
+  "apiImageModel": "gpt-image-2.5-sunburst"
 }
 ```
 

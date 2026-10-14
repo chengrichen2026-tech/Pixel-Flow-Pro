@@ -14,7 +14,7 @@ async function harness(t){
 test('MCP exposes dedicated upscale tools and submits a single structured image.upscale command',async t=>{
  const {rpc,calls}=await harness(t);const list=await rpc('tools/list');for(const name of ['pixel_flow_upscale_image','pixel_flow_get_upscale_task','pixel_flow_regenerate_upscale_tile'])assert.ok(list.tools.some(tool=>tool.name===name));
  await rpc('tools/call',{name:'pixel_flow_upscale_image',arguments:{sourceNodeId:'image',scale:4,requestId:'once',expectedRevision:12}});
- assert.equal(calls.length,1);assert.equal(calls[0].payload.commands.op,'image.upscale');assert.equal(calls[0].payload.commands.sourceNodeId,'image');assert.equal(calls[0].payload.commands.scale,4);assert.equal(calls[0].payload.commands.generationMode,'browser');assert.equal(calls[0].requestId,'once');
+ assert.equal(calls.length,1);assert.equal(calls[0].payload.commands.op,'image.upscale');assert.equal(calls[0].payload.commands.sourceNodeId,'image');assert.equal(calls[0].payload.commands.scale,4);assert.equal(calls[0].payload.commands.generationMode,'api');assert.equal(calls[0].payload.commands.apiImageModel,'gpt-image-2.5-sunburst');assert.equal(calls[0].requestId,'once');
 });
 test('MCP rejects ambiguous sources and relative paths before contacting the bridge',async t=>{
  const {rpc,calls}=await harness(t);for(const args of [{sourceNodeId:'a',assetId:'b'},{filePath:'relative.png'}]){const out=await rpc('tools/call',{name:'pixel_flow_upscale_image',arguments:{...args,requestId:'test',expectedRevision:1}});assert.equal(out.isError,true)}assert.equal(calls.length,0);
