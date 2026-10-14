@@ -2,7 +2,7 @@
 export function assertUpscaleTileBorders({width=1}={}) {
   const grid=document.querySelector('.upscale-tiles');
   if(!grid?.children.length)throw new Error('No upscale thumbnails to inspect');
-  const colors={generating:'rgb(155, 123, 236)',completed:'rgb(54, 162, 105)',failed:'rgb(220, 81, 75)'};
+  const colors={generating:'rgb(155, 123, 236)',completed:'rgb(221, 225, 232)',failed:'rgb(220, 81, 75)'};
   for(const tile of grid.children){
     const css=getComputedStyle(tile);
     if(parseFloat(css.borderTopWidth)!==width||parseFloat(css.borderLeftWidth)!==width)throw new Error(`Unexpected border width on ${tile.dataset.upscaleTile}`);

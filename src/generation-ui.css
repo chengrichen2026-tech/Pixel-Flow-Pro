@@ -278,7 +278,7 @@
 
 .upscale-tiles figure {border:1px solid #9b7bec;border-radius:8px;padding:2px;cursor:pointer;}
 .upscale-tiles figure[data-tile-state="generating"] {border-color:#9b7bec;}
-.upscale-tiles figure[data-tile-state="completed"] {border-color:#36a269;}
+.upscale-tiles figure[data-tile-state="completed"] {border-color:#dde1e8;}
 .upscale-tiles figure[data-tile-state="failed"] {border-color:#dc514b;}
 .upscale-tiles figure:focus-visible {outline:2px solid #6f3cff;outline-offset:2px;}
 .upscale-tiles figure[aria-disabled="true"] {cursor:default;}
