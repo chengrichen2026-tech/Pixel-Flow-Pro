@@ -8,7 +8,7 @@ Pixel Flow 是一个运行在 Chrome / Edge 中的本地 AI 创意任务画布�
 
 ## 当前版本
 
-当前版本为 **v0.3.20**。任务卡恢复紧凑的单一“生图模式”入口，只显示三个主模式：
+当前版本为 **v0.3.21**。任务卡恢复紧凑的单一“生图模式”入口，只显示三个主模式：
 
 | 主模式 | 二级选择 | 底层兼容值 |
 | --- | --- | --- |
@@ -78,7 +78,7 @@ Team Web 的性能与验收记录见 [TEAM_WEB_PERFORMANCE.md](TEAM_WEB_PERFORMA
 
 ## Codex 结构化操作
 
-安装本机 Bridge 后，Codex 可通过 Pixel Flow MCP 读取真实画布、管理画布和任务、执行或恢复任务、读取 TaskRun、导入资产库及下载图片。Bridge 只监听 `127.0.0.1:43128`。
+安装本机 Bridge 后，Codex 可通过 Pixel Flow MCP 读取真实画布、管理画布和任务、把本地图片直接导入画布并连接任务、执行或恢复任务、读取 TaskRun、导入资产库及下载图片。Bridge 只监听 `127.0.0.1:43128`。
 
 详见 [COMMAND_API.md](COMMAND_API.md)。所有写操作都必须使用唯一 `requestId` 和最近状态的 `expectedRevision`，写后继续回读。
 

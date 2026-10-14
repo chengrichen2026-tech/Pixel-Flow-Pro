@@ -45,3 +45,11 @@
 ## v0.3.20 纯缩略图界面
 
 移除分块按钮、编号与可见状态文字；生成中外框紫色，失败红色；完成恢复中性1px细线，不以彩色强调。双击单块重生，单击不触发；键盘Enter/空格可操作，运行中阻止重复提交。实际9块任务验收：9张纯缩略图，按钮/说明文字均为0，完成外框全部绿色、无内部滚动；230项本地测试通过。
+
+## AI直接调用
+
+专用MCP：pixel_flow_upscale_image、pixel_flow_get_upscale_task、pixel_flow_regenerate_upscale_tile。已有通用工具可立即使用image.upscale：选定sourceNodeId后一次创建并启动任务。具体参数与终态验收见COMMAND_API.md。
+
+## v0.3.21 结构化接口验收
+
+真实新MCP进程以filePath一次调用完成导入/创建/启动，返回accepted=true、generating、finalResults为空；随后只读查询completed、2/2分块、1042×614及最终nodeId。相同requestId重放返回同一taskId，未重复创建任务。专用工具在MCP重载/新聊天后挂载；当前通用execute入口已可调用image.upscale。
