@@ -6398,7 +6398,7 @@ async function executeTeamTask(projectId, taskId, project, task) {
 				detail: void 0
 			});
 			jobId = (await submitTeamGatewayJob({
-				requestId: `${projectId}:${taskId}:${submissionRunId}`,
+				requestId: submissionRunId,
 				...request,
 				imageModel: task.teamImageModel === "sunburst" ? "sunburst" : "flare",
 				provider: task.generationMode === "team_web" ? "chatgpt_web" : "codex_cloud"

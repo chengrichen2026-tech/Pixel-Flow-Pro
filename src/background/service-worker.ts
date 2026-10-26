@@ -1005,7 +1005,10 @@ async function executeTeamTask(projectId, taskId, project, task) {
     if (!jobId || resumeUpload) {
       if (!jobId) await persistAndBroadcast({ type: "TASK_STATUS", projectId, taskId, status: "sending", detail: void 0 });
       const submitted = await submitTeamGatewayJob({
-        requestId: `${projectId}:${taskId}:${submissionRunId}`,
+        // TaskRun IDs are globally unique and stable across reload recovery. Keeping
+        // this key compact avoids exceeding the taskbox's 128-character limit for
+        // batch child task IDs.
+        requestId: submissionRunId,
         ...request,
         imageModel: task.teamImageModel === "sunburst" ? "sunburst" : "flare",
         provider: task.generationMode === "team_web" ? "chatgpt_web" : "codex_cloud",

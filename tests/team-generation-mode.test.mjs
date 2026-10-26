@@ -16,7 +16,8 @@ test("team mode sends direct taskbox jobs without exposing Codex OAuth to the ex
   assert.match(background, /`\$\{baseUrl\}\$\{path\}`/);
   assert.match(background, /Authorization: `Bearer \$\{TEAM_TASKBOX_MEMBER_API_KEY\}`/);
   assert.match(background, /async function executeTeamTask\(projectId, taskId, project, task\)/);
-  assert.match(background, /requestId: `\$\{projectId\}:\$\{taskId\}:\$\{submissionRunId\}`/);
+  assert.match(background, /requestId: submissionRunId/);
+  assert.doesNotMatch(background, /requestId: `\$\{projectId\}:\$\{taskId\}:\$\{submissionRunId\}`/);
   assert.match(background, /async function submitTeamGatewayJob\(input, existingJobId, onJobCreated\)/);
   assert.match(background, /protocolVersion/);
   assert.match(background, /Number\(health\.protocolVersion \|\| 1\) < 4/);
@@ -74,12 +75,25 @@ test("team submission persists its job before input upload and resumes the same 
   assert.match(executeTeamTask, /if \(!jobId \|\| resumeUpload\)/);
   assert.match(executeTeamTask, /if \(!jobId\) await persistAndBroadcast/);
   assert.match(executeTeamTask, /runStatus: "uploading"[\s\S]*apiJobId: createdJobId/);
-  assert.match(executeTeamTask, /requestId: `\$\{projectId\}:\$\{taskId\}:\$\{submissionRunId\}`/);
+  assert.match(executeTeamTask, /requestId: submissionRunId/);
   assert.ok(
     executeTeamTask.indexOf('detail: "云端任务已创建，正在上传输入"')
       < executeTeamTask.indexOf('detail: "任务已提交，等待执行机接单"'),
     "the provider job must be persisted before input upload completes",
   );
+});
+
+test("Team Cloud and GPT Web team request ids stay within the taskbox limit for batch child tasks", () => {
+  const projectId = "project-7261f9ac-5022-4bb8-bfd2-00c0885c22ff";
+  const batchTaskId = "batch-task-a535fec3-b25e-4cfc-8a61-6f8d90791e3f";
+  const submissionRunId = "run-00000000-0000-0000-0000-000000000000";
+  const legacyRequestId = `${projectId}:${batchTaskId}:${submissionRunId}`;
+
+  assert.equal(legacyRequestId.length, 133);
+  assert.equal(submissionRunId.length, 40);
+  assert.ok(submissionRunId.length <= 128);
+  assert.match(background, /requestId: submissionRunId/);
+  assert.match(background, /provider: task\.generationMode === "team_web" \? "chatgpt_web" : "codex_cloud"/);
 });
 
 test("structured commands can create team generation tasks", () => {
