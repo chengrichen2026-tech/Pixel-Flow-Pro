@@ -1,7 +1,7 @@
 "use strict";
 (() => {
   // src/shared/protocol.ts
-  var CHATGPT_ADAPTER_VERSION = 32;
+  var CHATGPT_ADAPTER_VERSION = 34;
   var taskTypes = /* @__PURE__ */ new Set([
     "RUN_TASK",
     "CANCEL_TASK",
@@ -378,6 +378,14 @@
     composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
     composer.dispatchEvent(new Event("change", { bubbles: true }));
   }
+  function isResponseGenerating() {
+    // ChatGPT keeps inactive composer controls mounted after generation ends.
+    return [...document.querySelectorAll(stopSelector)].some((button) => {
+      if (button.hidden || button.closest('[hidden], [aria-hidden="true"]')) return false;
+      const style = getComputedStyle(button);
+      return style.display !== "none" && style.visibility !== "hidden" && style.visibility !== "collapse" && button.getClientRects().length > 0;
+    });
+  }
   function generatedImageSource(image) {
     const src = image.currentSrc || image.src;
     if (!src) return false;
@@ -391,17 +399,34 @@
   }
   function expectsGeneratedImages(prompt) {
     const normalized = normalizeTurnText(prompt || "");
-    return /(?:生图|生成(?:一张|图片|图像)|画一张|绘制|image|photo|picture|illustrat|render|visual)/i.test(normalized);
+    return /(?:生图|生成(?:图片|图像)|(?:生成|画)\s*(?:\d+|[一二两三四五六七八九十]+)\s*张|绘制|image|photo|picture|illustrat|render|visual)/i.test(normalized);
   }
   function responseIndicatesGeneratedImage(text) {
     const normalized = normalizeTurnText(text || "");
-    return /(?:已生成|生成了|生成图片|生成图像|图片已|图像已|created|generated|here(?:'s| is) the image)/i.test(normalized);
+    return /(?:已生成|生成了)\s*(?:[\d一二两三四五六七八九十]+\s*张|[^。！？\n]{0,48}(?:图片|图像))|(?:图片|图像)已(?:经)?生成/.test(normalized)
+      || /\b(?:created|generated)\b[^.!?\n]{0,48}\b(?:images?|pictures?|photos?|illustrations?)\b|here(?:'s| is| are)\b[^.!?\n]{0,36}\bimages?\b/i.test(normalized);
   }
   function extractLatestResult() {
     const turns = assistantTurns();
     const latest = turns.at(-1);
-    if (!latest) return { images: [], responseText: "" };
-    const images = [...latest.querySelectorAll("img")].filter(generatedImageSource).map((image) => image.currentSrc || image.src);
+    const exchangeSelector = "[data-turn-key], [data-content-search-turn-key]";
+    const exchange = userTurns().at(-1)?.closest(exchangeSelector);
+    const groups = [...(exchange?.querySelectorAll('[role="group"][aria-label="生成的图像"], [role="group"][aria-label="Generated images" i]') ?? [])];
+    const slides = groups.flatMap((group) => [...group.querySelectorAll("button[aria-pressed]")]);
+    // The main preview repeats the selected slide. Read one source per slide.
+    const slideImages = slides.map((slide) => slide.querySelector("img"));
+    const previews = [...(exchange?.querySelectorAll('[data-testid="generated-image-preview"] img') ?? [])];
+    const hasCurrentGallery = slides.length > 0 || previews.length > 0;
+    const imageElements = slides.length ? slideImages.filter(Boolean)
+      : previews.length ? previews
+      : [...(latest?.querySelectorAll("img") ?? [])];
+    const images = [...new Set(imageElements.filter(generatedImageSource).map((image) => image.currentSrc || image.src))];
+    // Lazy thumbnails can have readable Blob URLs before the browser decodes them.
+    const exchangeState = exchange?.querySelector("[data-talvt-turn-state]")?.getAttribute("data-talvt-turn-state");
+    const galleryReady = images.length >= slides.length && (!hasCurrentGallery || !exchangeState || exchangeState === "complete");
+    if (!latest || (exchange && latest.closest(exchangeSelector) && !exchange.contains(latest))) {
+      return { images: hasCurrentGallery ? images : [], responseText: "", galleryReady, hasCurrentGallery };
+    }
     const textSource = latest.cloneNode(true);
     textSource.querySelectorAll([
       "button",
@@ -419,7 +444,9 @@
     textSource.querySelectorAll("p, li, h1, h2, h3, h4, h5, h6, pre, blockquote, tr").forEach((element) => element.append("\n"));
     const responseText = (textSource.textContent || "").split("\n").map((line) => line.trim().replace(/^ChatGPT\s*(?:说|said)\s*[:：]?\s*/i, "").replace(/^Worked for\s+(?:\d+\s*(?:s|m|h|sec(?:ond)?s?|min(?:ute)?s?|hours?)\s*)+/i, "").replace(/^思考了\s*(?:\d+\s*(?:秒|分钟|小时)\s*)+/i, "").trim()).filter((line) => !/^(?:编辑|复制|edit|copy)$/i.test(line)).filter(Boolean).join("\n").trim();
     return {
-      images: [...new Set(images)],
+      images,
+      galleryReady,
+      hasCurrentGallery,
       responseText: isTransientResponseText(responseText) ? "" : responseText
     };
   }
@@ -520,8 +547,8 @@
       const latest = turns.at(-1) ?? null;
       const result = extractLatestResult();
       const signature = JSON.stringify(result);
-      const hasNewTurn = turns.length > previousTurnCount;
-      const isGenerating = Boolean(document.querySelector(stopSelector));
+      const hasNewTurn = turns.length > previousTurnCount || result.images.length > 0 && result.hasCurrentGallery;
+      const isGenerating = isResponseGenerating();
       const hasMeaningfulResult = Boolean(result.responseText || result.images.length > 0);
       const imageExpected = expectsGeneratedImages(prompt);
       const imageClaimed = responseIndicatesGeneratedImage(result.responseText);
@@ -540,10 +567,10 @@
         await new Promise((resolve) => setTimeout(resolve, 1e3));
         continue;
       }
-      const imageReady = !imageExpected || result.images.length > 0 || (!imageClaimed && Date.now() - started > 20e3);
+      const imageReady = result.galleryReady && (result.images.length > 0 || !imageClaimed && (!imageExpected || Date.now() - started > 20e3));
       if (hasNewTurn && !isGenerating && !isTemporaryRetryError(latest) && hasMeaningfulResult && imageReady) {
         stableChecks = signature === previousSignature ? stableChecks + 1 : 0;
-        if (stableChecks >= 3) return;
+        if (stableChecks >= 3) return result;
       } else {
         stableChecks = 0;
       }
@@ -621,11 +648,10 @@
       previousUserTurnCount,
       input.prompt
     );
-    await waitForCompletion(previousTurnCount, assertCompletionConversation, input.prompt);
+    const result = await waitForCompletion(previousTurnCount, assertCompletionConversation, input.prompt);
     if (!assertCompletionConversation()) {
       throw new AdapterError("conversation_unavailable", "\u7B49\u5F85\u671F\u95F4\u6807\u7B7E\u9875\u5207\u6362\u5230\u4E86\u5176\u4ED6 ChatGPT \u5BF9\u8BDD");
     }
-    const result = extractLatestResult();
     return {
       images: await Promise.all(result.images.map(imageUrlToBase64)),
       responseText: result.responseText
@@ -638,8 +664,7 @@
       new AdapterError("conversation_unavailable", "ChatGPT 对话已打开，但没有找到已发送的任务消息")
     );
     const assertCompletionConversation = createCompletionConversationCheck(void 0, 0, input.prompt);
-    await waitForCompletion(0, assertCompletionConversation, input.prompt);
-    const result = extractLatestResult();
+    const result = await waitForCompletion(0, assertCompletionConversation, input.prompt);
     return {
       images: await Promise.all(result.images.map(imageUrlToBase64)),
       responseText: result.responseText

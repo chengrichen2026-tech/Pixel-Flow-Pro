@@ -233,13 +233,46 @@ test("switching to browser mode clears inherited API job state", async () => {
   assert.match(background, /providerJobId: event\.clearApiJobId \? null : event\.apiJobId/);
 });
 
-test("browser results preserve the original latest-assistant-turn writeback path", async () => {
+test("browser results preserve the latest-assistant fallback and collect all current carousel slides", async () => {
   const source = await readFile(new URL("public/contentScript.js", root), "utf8");
-  assert.match(source, /const images = \[\.\.\.latest\.querySelectorAll\("img"\)\]/);
-  assert.doesNotMatch(source, /existingImageSources/);
-  assert.doesNotMatch(source, /collectGeneratedImageSources/);
-  assert.match(source, /isTransientResponseText\(responseText\) \? "" : responseText/);
-  assert.match(source, /\(\?:\\d\+\\s\*\(\?:s\|m\|h/);
+  const section = source.slice(source.indexOf("function generatedImageSource("), source.indexOf("function decodeImage("));
+  const image = (id) => ({ src: `blob:${id}`, complete: false, naturalWidth: 0 });
+  const images = Array.from({ length: 5 }, (_, index) => image(index + 1));
+  const slides = images.map((asset) => ({ querySelector: () => asset }));
+  const group = { querySelectorAll: () => slides };
+  let turnState = "complete";
+  const exchange = {
+    contains: () => true,
+    querySelector: () => ({ getAttribute: () => turnState }),
+    querySelectorAll: (selector) => selector.includes("generated-image-preview") ? [images[0]] : [group],
+  };
+  const latest = {
+    closest: () => exchange,
+    querySelectorAll: () => [],
+    cloneNode: () => ({ textContent: "ChatGPT 说：已生成 5 张", querySelectorAll: () => [] }),
+  };
+  const context = vm.createContext({
+    assistantTurns: () => [latest],
+    userTurns: () => [{ closest: () => exchange }],
+    normalizeTurnText: (value) => value.trim(),
+  });
+  vm.runInContext(`${section}\nthis.extract = extractLatestResult; this.expects = expectsGeneratedImages; this.imageClaimed = responseIndicatesGeneratedImage;`, context);
+  assert.equal(context.expects("参考图保持品牌表达，高裂变生成5张"), true);
+  assert.equal(context.imageClaimed("ChatGPT\n已生成 5 张竖向广告图"), true);
+  assert.equal(context.imageClaimed("已生成一份报告"), false);
+  assert.deepEqual([...context.extract().images], images.map((asset) => asset.src));
+  assert.equal(context.extract().responseText, "已生成 5 张");
+  assert.equal(context.extract().galleryReady, true);
+  turnState = "streaming";
+  assert.equal(context.extract().galleryReady, false);
+  turnState = "complete";
+  slides[4] = { querySelector: () => null };
+  assert.equal(context.extract().galleryReady, false);
+  context.assistantTurns = () => [];
+  assert.equal(context.extract().hasCurrentGallery, true);
+  context.userTurns = () => [{ closest: () => null }];
+  context.assistantTurns = () => [{ ...latest, querySelectorAll: () => [image("legacy")] }];
+  assert.deepEqual([...context.extract().images], ["blob:legacy"]);
 });
 
 test("ChatGPT image progress percentages are not completed as text results", async () => {
@@ -255,8 +288,8 @@ test("ChatGPT image progress percentages are not completed as text results", asy
 test("reinjected ChatGPT adapter replaces a stale page listener after extension reload", async () => {
   const content = await readFile(new URL("public/contentScript.js", root), "utf8");
   const background = await readBackgroundSource();
-  assert.match(content, /CHATGPT_ADAPTER_VERSION = 32/);
-  assert.match(background, /CHATGPT_ADAPTER_VERSION = 32/);
+  assert.match(content, /CHATGPT_ADAPTER_VERSION = 34/);
+  assert.match(background, /CHATGPT_ADAPTER_VERSION = 34/);
   assert.match(content, /__gptNodeCanvasMessageListener/);
   assert.match(content, /removeListener\(previousMessageListener\)/);
   assert.match(content, /addListener\(currentMessageListener\)/);
@@ -291,7 +324,7 @@ test("ChatGPT image responses wait for hydrated image DOM before completing", as
   const source = await readFile(new URL("public/contentScript.js", root), "utf8");
   assert.match(source, /function expectsGeneratedImages\(prompt\)/);
   assert.match(source, /function responseIndicatesGeneratedImage\(text\)/);
-  assert.match(source, /const imageReady = !imageExpected \|\| result\.images\.length > 0/);
+  assert.match(source, /const imageReady = result\.galleryReady && \(result\.images\.length > 0 \|\| !imageClaimed/);
   assert.match(source, /waitForCompletion\(previousTurnCount, assertCompletionConversation, input\.prompt\)/);
   assert.match(source, /waitForCompletion\(0, assertCompletionConversation, input\.prompt\)/);
 });
@@ -512,4 +545,23 @@ test("Windows API Worker has install, start, uninstall, and health-check scripts
   assert.match(start, /Stop-Process -Id \$runningProcess\.ProcessId -Force/);
   assert.match(uninstall, /Get-CimInstance Win32_Process/);
   assert.match(uninstall, /CommandLine\.Contains\(\$serverPath\)/);
+});
+
+
+test("completed images ignore hidden stale stop controls but wait for visible generation", async () => {
+  const source = await readFile(new URL("public/contentScript.js", root), "utf8");
+  const section = source.slice(source.indexOf("function isResponseGenerating()"), source.indexOf("function generatedImageSource("));
+  let buttons = [];
+  const context = vm.createContext({ document: { querySelectorAll: () => buttons }, getComputedStyle: b => b.style, stopSelector: "stop" });
+  vm.runInContext(`${section};this.isGenerating = isResponseGenerating`, context);
+  const button = (overrides = {}) => ({ hidden: false, closest: () => null, style: { display: "block", visibility: "visible" }, getClientRects: () => [{}], ...overrides });
+  buttons = [button({ getClientRects: () => [] })];
+  assert.equal(context.isGenerating(), false, "completed response can retain a zero-layout stop control");
+  buttons = [button({ closest: () => ({}) })];
+  assert.equal(context.isGenerating(), false, "inactive aria-hidden composer does not block delivery");
+  buttons = [button({ style: { display: "block", visibility: "hidden" } })];
+  assert.equal(context.isGenerating(), false);
+  buttons.push(button());
+  assert.equal(context.isGenerating(), true, "a live visible stop control still blocks partial image delivery");
+  assert.match(source, /const isGenerating = isResponseGenerating\(\)/);
 });
