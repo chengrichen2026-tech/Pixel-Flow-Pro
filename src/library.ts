@@ -7,7 +7,6 @@ const inferTags = (item: PromptItem) => {
   if (Array.isArray(item.tags)) return [...new Set(item.tags.map(tag=>String(tag||"").trim()).filter(Boolean))];
   const text = `${item.name || ""} ${item.content || ""}`;
   const tags: string[] = [];
-  if (/模版|模板/.test(text)) tags.push("模版");
   if (/构图|排列|堆叠|复刻/.test(text)) tags.push("构图");
   if (/背景|场景|卧室|氛围/.test(text)) tags.push("背景");
   if (/材质|精修|生成规范|功能/.test(text)) tags.push("功能");
@@ -27,15 +26,13 @@ export function readLibrary(): LibraryData {
 }
 
 export type LibraryDragPayload =
-  | { kind: "prompt"; content: string }
-  | { kind: "media"; assetId: string; name: string };
+  { kind: "media"; assetId: string; name: string };
 
 export const LIBRARY_DRAG_TYPE = "application/x-pixel-flow-library";
 
 export function readLibraryDrag(dataTransfer: DataTransfer): LibraryDragPayload | undefined {
   try {
     const payload = JSON.parse(dataTransfer.getData(LIBRARY_DRAG_TYPE) || "null");
-    if (payload?.kind === "prompt" && typeof payload.content === "string") return payload;
     if (payload?.kind === "media" && typeof payload.assetId === "string" && typeof payload.name === "string") return payload;
   } catch {
     return;

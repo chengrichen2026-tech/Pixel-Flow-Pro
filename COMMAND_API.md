@@ -8,6 +8,8 @@ Pixel Flow 扩展通过 `ws://127.0.0.1:43128/canvas` 连接本机 Bridge，Code
 - `pixel_flow_get_state`：读取画布列表、当前项目、节点、连线、选中项与 `revision`。
 - `pixel_flow_get_products`：读取产品素材库的素材名称与当前标签。
 - `pixel_flow_get_library`：按 `all / prompts / products / references` 读取规范化资产库记录，并报告缺失的图片资源。
+- `pixel_flow_inspect_storage`：读取当前浏览器图片资产数量、占用、保留量和可安全清理量。
+- `pixel_flow_cleanup_storage`：经唯一 `requestId` 与最新 `expectedRevision` 确认后，删除未被任何画布或资产库引用的图片。
 - `pixel_flow_import_library`：接收 Agent 已整理和打标的数据；默认只预览，`apply=true` 时写入。支持 `merge / replace`。
 - `pixel_flow_auto_tag_products`：按素材名称推导产品系列与“包装盒/铝箔”标签；默认预览，`apply=true` 时写入。
 - `pixel_flow_create_canvas`：新建并打开画布。
@@ -29,6 +31,8 @@ Pixel Flow 扩展通过 `ws://127.0.0.1:43128/canvas` 连接本机 Bridge，Code
 - `task.create` / `task.run` / `task.recoverTeamResult` / `task.duplicate` / `task.delete`
 - `node.move` / `node.delete`
 - `asset.deleteIfUnused`（仅删除指定且未被任何画布、图片容器、提示词封面或素材库引用的底层图片资产）
+- `storage.inspect`（读取存储统计，不修改数据）
+- `storage.cleanup`（删除全部未引用且已超过 10 分钟保护期的图片资产）
 - `run.list`（读取当前画布或指定任务的权威 TaskRun 记录，可按 `taskId` 收窄）
 - `run.delete`（只删除明确指定且属于当前 TaskRun schema 的运行记录，用于临时验收清理）
 - `history.undo`

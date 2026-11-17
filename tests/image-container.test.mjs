@@ -51,7 +51,7 @@ test("duplicated tasks retain ordered image inputs and are placed without overla
 
 test("running a container batch keeps shared images outside the container visible", async () => {
   const app = await source("src/App.tsx");
-  assert.match(app, /graph\.nodes\.filter\(n=>!\(\(n\.kind==='task'\|\|n\.kind==='image'\)&&n\.hidden\)\)/);
+  assert.match(app, /graph\.nodes\.filter\(n=>n\.kind!=='text'&&!\(\(n\.kind==='task'\|\|n\.kind==='image'\)&&n\.hidden\)\)/);
   assert.doesNotMatch(app, /n\.kind==='image'&&s\.project!\.graph\.edges\.some/);
 });
 

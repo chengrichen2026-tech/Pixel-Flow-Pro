@@ -206,7 +206,7 @@ test("normal, batch and retry actions share one run interface", async () => {
   assert.match(store, /await requestTaskRuns\(p\.id,children\.map\(child=>child\.task\.id\)\)/);
   assert.doesNotMatch(store, /get\(\)\.updateNode\(taskId,\{status:"queued"/);
   assert.doesNotMatch(store, /node\.kind==="task"&&failedIds\.has\(node\.id\)\?\{\.\.\.node,status:"queued"/);
-  assert.match(store, /const taskIds=p\.graph\.nodes\.filter\(n=>n\.kind==="task"\)\.map\(n=>n\.id\)/);
+  assert.doesNotMatch(store, /HIBERNATE_TASK_TABS/);
   assert.match(background, /const providerJobId = run\?\.providerJobId \|\| task\?\.apiJobId/);
   assert.match(background, /run\?\.conversationUrl \?\? \(task\?\.kind === "task" \? task\.conversationUrl/);
   assert.match(background, /run \? run\.status === "completed" : task\.status === "completed"/);

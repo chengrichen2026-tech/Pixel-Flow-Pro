@@ -4,15 +4,15 @@ import {
 } from "@phosphor-icons/react";
 
 export type PixelIconName =
-  | "select" | "image" | "text" | "task" | "template"
-  | "prompt" | "product" | "reference" | "api" | "memory"
-  | "templateTask" | "imageContainer" | "upscale"
-  | "copy" | "open" | "trash" | "play" | "save" | "plus" | "edit" | "download" | "settings" | "caretDown";
+  | "select" | "image" | "task"
+  | "prompt" | "product" | "reference" | "api"
+  | "imageContainer" | "upscale"
+  | "copy" | "open" | "trash" | "play" | "save" | "plus" | "edit" | "download" | "settings" | "storage" | "caretDown";
 
 const artwork: Partial<Record<PixelIconName, string>> = {
-  select: "select.png", image: "image.png", text: "text.png", task: "task.png",
-  template: "template.png", templateTask: "template-task.png", imageContainer: "image-container.png", prompt: "prompt.png",
-  product: "product.png", reference: "reference.png", api: "api.png", memory: "memory.png",
+  select: "select.png", image: "image.png", task: "task.png",
+  imageContainer: "image-container.png", prompt: "prompt.png",
+  product: "product.png", reference: "reference.png", api: "api.png", storage: "memory.png",
 };
 
 const utilities: Partial<Record<PixelIconName, ComponentType<IconProps>>> = {

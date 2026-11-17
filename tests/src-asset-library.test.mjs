@@ -34,7 +34,7 @@ test("prompt and media calls go through the rebuilt store", async () => {
   const store = await readFile(new URL("src/store.ts", root), "utf8");
   assert.match(panel, /applyPromptToTask\(selectedTaskId,item\.content,"replace"\)/);
   assert.match(panel, /applyPromptToTask\(selectedTaskId,item\.content,"append"\)/);
-  assert.match(panel, /addTextContent\(item\.content/);
+  assert.doesNotMatch(panel, /addTextContent\(item\.content/);
   assert.match(panel, /addExistingAsset\(item\.assetId,item\.name,position,selectedTaskId\)/);
   assert.match(store, /if\(!p\|\|!await db\.assets\.get\(assetId\)\)return/);
   assert.match(store, /inputEdgeOrder:\[\.\.\.item\.inputEdgeOrder,edge\.id\]/);
@@ -46,6 +46,6 @@ test("library cards can be dragged into the canvas", async () => {
   assert.match(panel, /draggable onDragStart/);
   assert.match(panel, /setData\(LIBRARY_DRAG_TYPE/);
   assert.match(app, /readLibraryDrag\(event\.dataTransfer\)/);
-  assert.match(app, /libraryItem\?\.kind==='prompt'/);
+  assert.doesNotMatch(app, /libraryItem\?\.kind==='prompt'/);
   assert.match(app, /libraryItem\?\.kind==='media'/);
 });

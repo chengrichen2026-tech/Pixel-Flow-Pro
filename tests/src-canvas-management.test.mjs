@@ -42,3 +42,12 @@ test("opening an imported canvas refreshes the project list from IndexedDB", asy
   const openProject = store.slice(store.indexOf("async openProject"), store.indexOf("async renameProject"));
   assert.match(openProject, /projects:await db\.projects\.orderBy\("updatedAt"\)\.reverse\(\)\.toArray\(\)/);
 });
+
+test("deleting a non-current canvas also cancels tasks and removes runs", async () => {
+  const source = await readFile(new URL("production/asset-library.js", root), "utf8");
+  const deletion = source.slice(source.indexOf("async function deleteCanvasById"), source.indexOf("function formatProjectDate"));
+  assert.match(deletion,/type: "CANCEL_TASK"/);
+  assert.match(deletion,/transaction\(\["projects", "runs"\]/);
+  assert.match(deletion,/item\.projectId === projectId/);
+  assert.doesNotMatch(deletion,/deletedProjects/);
+});

@@ -48,5 +48,5 @@ test("legacy asset management enters native compatibility mode", async () => {
   assert.match(source, /dataset\.pixelFlowCanvas/);
   assert.match(source, /if \(nativeCanvas\) return/);
   assert.match(source, /pixel-flow:open-library-management/);
-  assert.match(source, /pixel-flow:open-template-library/);
+  assert.doesNotMatch(source, /pixel-flow:open-template-library/);
 });

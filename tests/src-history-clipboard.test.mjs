@@ -118,21 +118,6 @@ test("new tasks use the current viewport, connect every selected image, and avoi
   assert.match(store, /placed\.y\+=360/);
 });
 
-test("memory release exposes working, success, empty, and error feedback", async () => {
-  const [app,store,styles] = await Promise.all([
-    readFile(new URL("src/App.tsx",root),"utf8"),
-    readFile(new URL("src/store.ts",root),"utf8"),
-    readFile(new URL("src/memory-feedback.css",root),"utf8"),
-  ]);
-  assert.match(app,/function MemoryReleaseFeedback\(/);
-  assert.match(app,/正在释放后台标签/);
-  assert.match(app,/当前没有可释放的网页标签/);
-  assert.match(app,/运行中的任务不会被关闭/);
-  assert.match(store,/pixel-flow:memory-release-result/);
-  assert.match(styles,/\.memory-release-toast/);
-  assert.match(styles,/\.memory-release-spinner/);
-});
-
 test("uploads, drops, and pastes add every image and connect to a selected task", async () => {
   const app = await readFile(new URL("src/App.tsx", root), "utf8");
   const store = await readFile(new URL("src/store.ts", root), "utf8");

@@ -8,6 +8,7 @@ import "./generation-mode.test.mjs";
 import "./generation-ui.test.mjs";
 import "./documentation-consistency.test.mjs";
 import "./asset-library.test.mjs";
+import "./asset-cleanup.test.mjs";
 import "./api-recovery.test.mjs";
 import "./src-generation-mode.test.mjs";
 import "./src-canvas-management.test.mjs";

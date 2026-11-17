@@ -31,6 +31,13 @@ test("user-facing documentation matches the packaged version and task model", as
   assert.doesNotMatch(usage, /GPT Web 团队任务不消耗 Team Cloud/);
   assert.doesNotMatch(html, /不消耗 Team Cloud 每日额度/);
   assert.match(commandApi, /task\.recoverTeamResult/);
+  assert.match(commandApi, /pixel_flow_inspect_storage/);
+  assert.match(commandApi, /pixel_flow_cleanup_storage/);
+  for (const document of [usage, html]) {
+    assert.match(document, /存储空间/);
+    assert.match(document, /可安全清理/);
+    assert.doesNotMatch(document, /生图模板|文字节点|节省内存/);
+  }
   assert.match(partnerGuide, /“Team Cloud”，或选择“GPT Web → 团队”/);
   assert.match(partnerGuide, /Team Cloud 与 GPT Web 团队模式共用同一个成员每日额度池/);
   assert.match(partnerGuide, /切换模式不会获得额外次数/);

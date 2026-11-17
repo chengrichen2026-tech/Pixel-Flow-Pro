@@ -17,5 +17,12 @@ export class NodeCanvasDatabase extends Dexie {
       assets: "id, createdAt",
       runs: "id, [projectId+taskId], startedAt"
     });
+    this.version(2).stores({
+      projects: "id, updatedAt, name",
+      deletedProjects: "id, deletedAt",
+      assets: "id, createdAt",
+      runs: "id, [projectId+taskId], startedAt"
+    });
+    this.version(3).stores({ deletedProjects: null });
   }
 }

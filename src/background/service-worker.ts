@@ -898,10 +898,6 @@ async function recoverTeamTaskResult(projectId, taskId, requestedJobId) {
 }
 async function prepareTaskRequest(project, taskId, task) {
   const inputs = getTaskInputs(project.graph, taskId);
-  const text = inputs
-    .filter((input) => input.node.kind === "text")
-    .map((input) => input.node.kind === "text" ? input.node.text : "")
-    .filter(Boolean);
   const images = await Promise.all(inputs.flatMap((input) => {
     if (input.node.kind !== "image" && input.node.kind !== "result") return [];
     const assetNode = input.node;
@@ -916,7 +912,7 @@ async function prepareTaskRequest(project, taskId, task) {
   }));
   const ratio = task.aspectRatio ?? "auto";
   return {
-    prompt: appendAspectRatioPrompt([...text, task.prompt].filter(Boolean).join("\n\n"), ratio),
+    prompt: appendAspectRatioPrompt(task.prompt, ratio),
     ratio,
     images
   };
@@ -1567,15 +1563,6 @@ chrome.runtime.onMessage.addListener((raw, sender, sendResponse) => {
   if (message.type === "CLOSE_TASK_TAB") {
     void tabRegistry.close(createTaskScopeKey(message.projectId, message.taskId));
     sendResponse({ accepted: true });
-    return true;
-  }
-  if (message.type === "HIBERNATE_TASK_TABS") {
-    void (async () => {
-      await schedulerReady;
-      const protectedTaskKeys = /* @__PURE__ */ new Set([...queue.waiting, ...queue.running]);
-      const taskKeys = message.taskIds.map((taskId) => createTaskScopeKey(message.projectId, taskId)).filter((taskKey) => !protectedTaskKeys.has(taskKey));
-      sendResponse({ released: await tabRegistry.hibernateMany(taskKeys) });
-    })().catch(() => sendResponse({ error: "\u91CA\u653E\u7F51\u9875\u6807\u7B7E\u5931\u8D25" }));
     return true;
   }
   if (message.type === "DOWNLOAD_ASSET") {

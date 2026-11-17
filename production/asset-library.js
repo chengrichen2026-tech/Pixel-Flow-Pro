@@ -1,10 +1,7 @@
 (() => {
   const nativeCanvas = document.documentElement.dataset.pixelFlowCanvas === "native";
   const STORAGE_KEY = "pixelFlowMvpLibraryV1";
-  const PENDING_RUN_KEY = "pixelFlowPendingTemplateRunV1";
   const DB_NAME = "gpt-node-canvas";
-  const MARKER = "__PIXEL_FLOW_TEMPLATE__:";
-  const activeStatuses = new Set(["queued", "waiting_page", "uploading", "sending", "generating", "manual_action"]);
   let databasePromise;
   let panel;
   let rail;
@@ -12,8 +9,6 @@
   let activeTab = "prompts";
   let panelMode = "usage";
   let activeLibraryTag = "";
-  let editingTemplateId = "";
-  let editingTemplateNodeId = "";
   let searchQuery = "";
   let selectedNodeIdsSnapshot = null;
   const managedObjectUrls = new Set();
@@ -32,13 +27,12 @@
 
   const makeId = (prefix) => `${prefix}-${crypto.randomUUID()}`;
   const now = () => Date.now();
-  const emptyLibrary = () => ({ prompts: [], presets: { copy: [], background: [], composition: [] }, media: [], templates: [] });
+  const emptyLibrary = () => ({ prompts: [], media: [] });
   const normalizeTags = (tags) => [...new Set((Array.isArray(tags) ? tags : []).map((tag) => String(tag || "").trim()).filter(Boolean))];
   const promptTags = (item) => {
     if (Array.isArray(item.tags)) return normalizeTags(item.tags);
     const text = `${item.name || ""} ${item.content || ""}`;
     const tags = [];
-    if (/模版|模板/.test(text)) tags.push("模版");
     if (/构图|排列|堆叠|复刻/.test(text)) tags.push("构图");
     if (/背景|场景|卧室|氛围/.test(text)) tags.push("背景");
     if (/材质|精修|生成规范|功能/.test(text)) tags.push("功能");
@@ -47,7 +41,7 @@
   const readLibrary = () => {
     try {
       const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
-      return { ...emptyLibrary(), ...parsed, prompts: (parsed?.prompts || []).map((item) => ({ ...item, tags: promptTags(item) })), media: (parsed?.media || []).map((item) => ({ ...item, tags: normalizeTags(item.tags) })), presets: { ...emptyLibrary().presets, ...(parsed?.presets || {}) } };
+      return { ...emptyLibrary(), promptSyncMode: parsed?.promptSyncMode, prompts: (parsed?.prompts || []).map((item) => ({ ...item, tags: promptTags(item) })), media: (parsed?.media || []).map((item) => ({ ...item, tags: normalizeTags(item.tags) })) };
     } catch {
       return emptyLibrary();
     }
@@ -335,7 +329,7 @@
   async function deleteCurrentCanvas() {
     const project = await getProject();
     if (!project) return notify("找不到当前画布", "error");
-    if (!await openCanvasDialog({ title: `删除“${project.name}”`, message: "此操作无法撤销，但不会删除在线 ChatGPT 对话。建议先存储画布。", confirmLabel: "删除画布", tone: "danger" })) return;
+    if (!await openCanvasDialog({ title: `删除“${project.name}”`, message: "此操作无法撤销，但不会删除在线 ChatGPT 对话。删除后可在存储空间中一键清理未使用图片。", confirmLabel: "删除画布", tone: "danger" })) return;
     for (const task of project.graph.nodes.filter((node) => node.kind === "task")) {
       await chrome.runtime?.sendMessage({ type: "CANCEL_TASK", projectId: project.id, taskId: task.id }).catch(() => {});
     }
@@ -376,12 +370,22 @@
     const activeId = currentProjectId();
     if (projectId === activeId) return deleteCurrentCanvas();
     const project = await getProject(projectId);
-    if (!project || !await openCanvasDialog({ title: `删除“${project.name}”`, message: "此操作无法撤销，建议先存储画布。", confirmLabel: "删除画布", tone: "danger" })) return;
+    if (!project || !await openCanvasDialog({ title: `删除“${project.name}”`, message: "此操作无法撤销。删除后可在存储空间中一键清理未使用图片。", confirmLabel: "删除画布", tone: "danger" })) return;
+    for (const task of project.graph.nodes.filter((node) => node.kind === "task")) {
+      await chrome.runtime?.sendMessage({ type: "CANCEL_TASK", projectId: project.id, taskId: task.id }).catch(() => {});
+    }
     const db = await openDatabase();
     await new Promise((resolve, reject) => {
-      const request = db.transaction("projects", "readwrite").objectStore("projects").delete(projectId);
-      request.onsuccess = resolve;
+      const transaction = db.transaction(["projects", "runs"], "readwrite");
+      transaction.objectStore("projects").delete(projectId);
+      const request = transaction.objectStore("runs").getAll();
+      request.onsuccess = () => {
+        for (const run of (request.result || []).filter((item) => item.projectId === projectId)) transaction.objectStore("runs").delete(run.id);
+      };
       request.onerror = () => reject(request.error);
+      transaction.oncomplete = resolve;
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
     });
     window.dispatchEvent(new CustomEvent("pixel-flow:projects-refresh"));
     await renderProjectGallery();
@@ -442,7 +446,6 @@
     prompts: { kind: "pixel-flow-prompt-library", label: "提示词库", filename: "Pixel-Flow-提示词库" },
     products: { kind: "pixel-flow-product-library", label: "产品素材库", filename: "Pixel-Flow-产品素材库" },
     references: { kind: "pixel-flow-gallery-library", label: "图库", filename: "Pixel-Flow-图库" },
-    templates: { kind: "pixel-flow-template-library", label: "模版库", filename: "Pixel-Flow-模版库" },
     all: { kind: "pixel-flow-asset-library", label: "旧版完整资产库", filename: "Pixel-Flow-资产库" }
   };
 
@@ -450,7 +453,6 @@
     if (scope === "prompts") return { ...emptyLibrary(), prompts: library.prompts };
     if (scope === "products") return { ...emptyLibrary(), media: library.media.filter((item) => item.kind === "product") };
     if (scope === "references") return { ...emptyLibrary(), media: library.media.filter((item) => item.kind === "reference") };
-    if (scope === "templates") return { ...emptyLibrary(), templates: library.templates };
     return library;
   }
 
@@ -465,7 +467,7 @@
       if (asset?.blob) assets.push({ id: assetId, dataUrl: await blobToDataUrl(asset.blob) });
     }
     await downloadJson({ version: 1, kind: config.kind, scope, exportedAt: new Date().toISOString(), library, assets }, `${config.filename}-${new Date().toISOString().slice(0, 10)}.json`);
-    notify(`${config.label}已存储：${library.prompts.length} 条提示词，${library.media.length} 张图片，${library.templates.length} 个模板`);
+    notify(`${config.label}已存储：${library.prompts.length} 条提示词，${library.media.length} 张图片`);
   }
 
   async function importAssetLibrary(file, scope = "all") {
@@ -493,39 +495,28 @@
         if (importedAssetIdMap.size % 10 === 0) notify(`正在导入${config.label}：已写入 ${importedAssetIdMap.size} 张图片…`);
         return assetId;
       };
-      const promptIdMap = new Map();
       for (const prompt of incoming.prompts || []) {
         const existing = local.prompts.find((item) => item.name === prompt.name);
         const importedExampleAssetId = await importAssetId(prompt.exampleAssetId);
         const exampleAssetId = replacePrompts ? importedExampleAssetId : importedExampleAssetId || existing?.exampleAssetId || "";
-        if (existing) { Object.assign(existing, prompt, { id: existing.id, exampleAssetId, updatedAt: now() }); promptIdMap.set(prompt.id, existing.id); }
-        else { const record = { ...prompt, id: makeId("prompt"), exampleAssetId, updatedAt: now() }; local.prompts.push(record); promptIdMap.set(prompt.id, record.id); }
+        if (existing) Object.assign(existing, prompt, { id: existing.id, exampleAssetId, updatedAt: now() });
+        else local.prompts.push({ ...prompt, id: makeId("prompt"), exampleAssetId, updatedAt: now() });
       }
       if (replacePrompts) {
         const incomingNames = new Set((incoming.prompts || []).map((item) => item.name));
         local.prompts = local.prompts.filter((item) => incomingNames.has(item.name));
-        const retainedPromptIds = new Set(local.prompts.map((item) => item.id));
-        for (const template of local.templates) if (template.promptId && !retainedPromptIds.has(template.promptId)) template.promptId = "";
       }
-      if (scope === "all") for (const kind of ["copy", "background", "composition"]) local.presets[kind] = [...new Set([...(local.presets[kind] || []), ...(incoming.presets?.[kind] || [])])];
-      const mediaIdMap = new Map();
       for (const media of incoming.media || []) {
         if (!['product','reference'].includes(media.kind)) continue;
         const existing = local.media.find((item) => item.kind === media.kind && item.name === media.name);
         const assetId = await importAssetId(media.assetId) || existing?.assetId;
-        if (existing) { Object.assign(existing, media, { id: existing.id, assetId: assetId || existing.assetId, createdAt: existing.createdAt || now() }); mediaIdMap.set(media.id, existing.id); }
-        else if (assetId) { const record = { ...media, id: makeId("media"), assetId, createdAt: now() }; local.media.push(record); mediaIdMap.set(media.id, record.id); }
-      }
-      for (const template of incoming.templates || []) {
-        const mapped = { ...template, promptId: promptIdMap.get(template.promptId) || "", productIds: (template.productIds || []).map((id) => mediaIdMap.get(id)).filter(Boolean), referenceIds: (template.referenceIds || []).map((id) => mediaIdMap.get(id)).filter(Boolean), updatedAt: now() };
-        const existing = local.templates.find((item) => item.name === template.name);
-        if (existing) Object.assign(existing, mapped, { id: existing.id });
-        else local.templates.push({ ...mapped, id: makeId("template") });
+        if (existing) Object.assign(existing, media, { id: existing.id, assetId: assetId || existing.assetId, createdAt: existing.createdAt || now() });
+        else if (assetId) local.media.push({ ...media, id: makeId("media"), assetId, createdAt: now() });
       }
       saveLibrary(local);
       for (const assetId of previousPromptAssetIds) await deletePromptAssetIfUnused(assetId, local);
       renderPanel();
-      notify(`${config.label}导入完成：${(incoming.prompts || []).length} 条提示词，${(incoming.media || []).length} 张图片，${(incoming.templates || []).length} 个模板`);
+      notify(`${config.label}导入完成：${(incoming.prompts || []).length} 条提示词，${(incoming.media || []).length} 张图片`);
     } catch (error) {
       console.error("Pixel Flow library import failed", error);
       notify(`${config.label}导入失败：${error?.message || "无法读取或写入备份"}`, "error");
@@ -569,18 +560,6 @@
     toast.classList.add("is-visible");
     clearTimeout(notify.timer);
     notify.timer = setTimeout(() => toast.classList.remove("is-visible"), 2400);
-  }
-
-  function promptText(template) {
-    return [template.copy && `文案要求：${template.copy}`, template.composition && `构图描述：${template.composition}`, template.background && `背景描述：${template.background}`, template.extra].filter(Boolean).join("\n\n");
-  }
-
-  async function addTextNode(text, position) {
-    const project = await getProject();
-    if (!project) throw new Error("找不到当前画布");
-    project.graph.nodes.push({ id: makeId("text"), kind: "text", text, position });
-    await putProject(project);
-    location.reload();
   }
 
   async function addMediaNode(media, position, targetTaskId = "") {
@@ -705,124 +684,6 @@
     notify(`已导入 ${files.length} 张图片`);
   }
 
-  function blankTemplate() {
-    return { id: "", name: "未命名生图模板", copy: "", background: "", composition: "", extra: "", productIds: [], referenceIds: [], aspectRatio: "auto", count: 1, generationMode: "api", teamImageModel: "flare" };
-  }
-
-  function templateProvider(mode) {
-    if (mode === "browser" || mode === "team_web") return "gpt_web";
-    return mode === "team" ? "team_cloud" : "api";
-  }
-
-  function templateWebLocation(mode) {
-    return mode === "team_web" ? "team" : "local";
-  }
-
-  function templateGenerationMode(provider, location) {
-    if (provider === "gpt_web") return location === "team" ? "team_web" : "browser";
-    return provider === "team_cloud" ? "team" : "api";
-  }
-
-  function formTemplate(root = panel) {
-    const form = root?.matches?.(".pf-template-form") ? root : root?.querySelector?.(".pf-template-form");
-    if (!form) return blankTemplate();
-    const data = new FormData(form);
-    return {
-      id: form.dataset.templateId || editingTemplateId,
-      name: String(data.get("name") || "未命名生图模板").trim() || "未命名生图模板",
-      copy: String(data.get("copy") || "").trim(), background: String(data.get("background") || "").trim(),
-      composition: String(data.get("composition") || "").trim(), extra: String(data.get("extra") || "").trim(),
-      productIds: data.getAll("productIds").map(String), referenceIds: data.getAll("referenceIds").map(String), aspectRatio: String(data.get("aspectRatio") || "auto"),
-      count: Math.min(4, Math.max(1, Number(data.get("count") || 1))), generationMode: templateGenerationMode(String(data.get("generationProvider")), String(data.get("webExecutionLocation"))), teamImageModel: data.get("teamImageModel") === "sunburst" ? "sunburst" : "flare"
-    };
-  }
-
-  function saveTemplate(template = formTemplate()) {
-    const library = readLibrary();
-    const record = { ...template, id: template.id || makeId("template"), updatedAt: now() };
-    const index = library.templates.findIndex((item) => item.id === record.id);
-    if (index >= 0) library.templates[index] = record; else library.templates.unshift(record);
-    saveLibrary(library);
-    editingTemplateId = record.id;
-    renderPanel();
-    notify("生图模板已保存");
-    return record;
-  }
-
-  function savePreset(kind, value) {
-    const clean = value.trim();
-    if (!clean) return notify("请先填写内容", "error");
-    const library = readLibrary();
-    if (!library.presets[kind].includes(clean)) library.presets[kind].unshift(clean);
-    saveLibrary(library);
-    renderPanel();
-    notify("已保存为预设");
-  }
-
-  async function runTemplate(inputTemplate = formTemplate(), retryFailedOnly = false, existingTemplateNodeId = editingTemplateNodeId) {
-    const template = inputTemplate.id ? saveTemplate(inputTemplate) : saveTemplate(inputTemplate);
-    const finalPrompt = promptText(template);
-    if (!finalPrompt.trim() && !template.productIds.length && !template.referenceIds.length) return notify("模板至少需要提示词或图片素材", "error");
-    const project = await getProject();
-    if (!project) return notify("找不到当前画布", "error");
-    const previousTasks = project.graph.nodes.filter((node) => node.kind === "task" && node.templateId === template.id);
-    if (retryFailedOnly) {
-      const failed = previousTasks.filter((task) => task.status === "failed");
-      if (!failed.length) return notify("当前模板没有失败图片", "error");
-      localStorage.setItem(PENDING_RUN_KEY, JSON.stringify({ projectId: project.id, taskIds: failed.map((task) => task.id) }));
-      location.reload();
-      return;
-    }
-    const existingTemplateNode = project.graph.nodes.find((node) => node.id === existingTemplateNodeId && node.kind === "text" && node.text === `${MARKER}${template.id}`);
-    const templateNodeId = existingTemplateNode?.id || makeId("text");
-    const baseX = existingTemplateNode?.position?.x ?? 260 + (project.graph.nodes.length % 4) * 60;
-    const baseY = existingTemplateNode?.position?.y ?? 180 + (project.graph.nodes.length % 5) * 60;
-    if (!existingTemplateNode) project.graph.nodes.push({ id: templateNodeId, kind: "text", text: `${MARKER}${template.id}`, position: { x: baseX, y: baseY } });
-    const media = readLibrary().media.filter((item) => [...template.productIds, ...template.referenceIds].includes(item.id));
-    const imageNodes = media.map((item, index) => ({ id: makeId("image"), kind: "image", assetId: item.assetId, title: item.name, position: { x: baseX - 390, y: baseY + index * 190 } }));
-    project.graph.nodes.push(...imageNodes);
-    const taskIds = [];
-    for (let index = 0; index < template.count; index += 1) {
-      const taskId = makeId("task");
-      taskIds.push(taskId);
-      const task = { id: taskId, kind: "task", name: `${template.name} ${index + 1}/${template.count}`, prompt: finalPrompt, position: { x: baseX + 430, y: baseY + index * 300 }, inputEdgeOrder: [], runCount: 0, status: "idle", aspectRatio: template.aspectRatio, generationMode: template.generationMode, teamImageModel: template.teamImageModel === "sunburst" ? "sunburst" : "flare", templateId: template.id, templateNodeId, templateSlot: index + 1 };
-      for (const imageNode of imageNodes) {
-        const edgeId = makeId("edge");
-        project.graph.edges.push({ id: edgeId, source: imageNode.id, target: taskId, kind: "input" });
-        task.inputEdgeOrder.push(edgeId);
-      }
-      project.graph.nodes.push(task);
-    }
-    await putProject(project);
-    localStorage.setItem(PENDING_RUN_KEY, JSON.stringify({ projectId: project.id, taskIds }));
-    location.reload();
-  }
-
-  async function createTemplateTask(sourceTemplate) {
-    const library = readLibrary();
-    const template = sourceTemplate || { ...blankTemplate(), id: makeId("template"), updatedAt: now() };
-    if (!sourceTemplate) { library.templates.unshift(template); saveLibrary(library); }
-    const project = await getProject();
-    if (!project) return notify("找不到当前画布", "error");
-    const position = canvasPosition(window.innerWidth / 2, window.innerHeight / 2);
-    const templateNodeId = makeId("text");
-    project.graph.nodes.push({ id: templateNodeId, kind: "text", text: `${MARKER}${template.id}`, position });
-    await putProject(project);
-    editingTemplateId = template.id;
-    editingTemplateNodeId = templateNodeId;
-    window.dispatchEvent(new CustomEvent("pixel-flow:project-refresh", { detail: { projectId: project.id } }));
-    notify("已创建生图模板任务");
-  }
-
-  async function consumePendingRun() {
-    let pending;
-    try { pending = JSON.parse(localStorage.getItem(PENDING_RUN_KEY) || "null"); } catch { pending = null; }
-    if (!pending || pending.projectId !== currentProjectId() || !Array.isArray(pending.taskIds)) return;
-    localStorage.removeItem(PENDING_RUN_KEY);
-    await chrome.runtime?.sendMessage({ type: "RUN_TASKS", projectId: pending.projectId, taskIds: pending.taskIds });
-    notify(`已提交 ${pending.taskIds.length} 张图片任务`);
-  }
-
   function tabButton(id, label) {
     return `<button type="button" data-tab="${id}" class="${activeTab === id ? "is-active" : ""}">${label}</button>`;
   }
@@ -869,52 +730,6 @@
       : `<article class="pf-media-item pf-product-card" draggable="true" data-drag-kind="media" data-id="${item.id}"><button class="pf-product-thumb" data-action="media-apply" data-id="${item.id}" aria-label="从产品素材库添加 ${escapeHtml(item.name)}"><div data-thumb="${item.assetId}">载入中</div></button><strong title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</strong></article>`).join("") || "<p class=\"pf-empty\">还没有可调用的图片素材</p>"}</section>`;
   }
 
-  function templateUsageList(library, query) {
-    const items = library.templates.filter((item) => `${item.name} ${promptText(item)}`.toLowerCase().includes(query));
-    return `<section class="pf-usage-templates">${items.map((item) => `<article><strong>${escapeHtml(item.name)}</strong><p>${item.count} 张 · ${escapeHtml(item.aspectRatio)} · ${item.generationMode === "api" ? "API" : item.generationMode === "team" ? `Team Cloud · ${item.teamImageModel === "sunburst" ? "Sunburst" : "Flare"}` : item.generationMode === "team_web" ? "GPT Web · 团队" : "GPT Web · 本机"}</p><button data-action="template-use" data-id="${item.id}">创建任务</button></article>`).join("") || "<p class=\"pf-empty\">还没有已保存的生图模板</p>"}</section>`;
-  }
-
-  function templateList(library, query) {
-    const items = library.templates.filter((item) => `${item.name} ${promptText(item)}`.toLowerCase().includes(query));
-    return `<section class="pf-template-grid">${items.map((item) => `<article class="pf-template-item"><div class="pf-template-card-preview"><span>${escapeHtml(item.name.slice(0, 1) || "模")}</span><small>${item.count} 张</small></div><header class="pf-management-card-meta"><strong title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</strong><span><button data-action="template-edit" data-id="${item.id}" aria-label="编辑模板 ${escapeHtml(item.name)}" title="编辑">${libraryCardIcon("edit")}</button><button class="danger" data-action="template-delete" data-id="${item.id}" aria-label="删除模板 ${escapeHtml(item.name)}" title="删除">${libraryCardIcon("delete")}</button></span></header><div class="pf-template-card-tags"><span>${escapeHtml(item.aspectRatio)}</span><span>${item.generationMode === "api" ? "API" : item.generationMode === "team" ? "Team Cloud" : item.generationMode === "team_web" ? "GPT Web · 团队" : "GPT Web · 本机"}</span><span>${item.productIds.length + item.referenceIds.length} 张素材</span></div><p>${escapeHtml(promptText(item) || "尚未填写提示词内容")}</p></article>`).join("") || "<p class=\"pf-empty\">还没有生图模板，点击右上角新增模板</p>"}</section>`;
-  }
-
-  function templateEditor(library, includeSavedTemplates = true, templateNodeId = "", templateId = editingTemplateId) {
-    const template = library.templates.find((item) => item.id === templateId) || blankTemplate();
-    const presetOptions = (kind) => `<option value="">不选择（可自由填写）</option>${library.presets[kind].map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value.slice(0, 30))}</option>`).join("")}`;
-    const taggedPromptOptions = (tag) => `<option value="">不选择（可自由填写）</option>${library.prompts.filter((item) => (item.tags || []).includes(tag)).map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join("")}`;
-    const mediaChecks = (kind, field, selected) => library.media.filter((item) => item.kind === kind).map((item) => `<label class="pf-media-check"><input type="checkbox" name="${field}" value="${item.id}" ${selected.includes(item.id) ? "checked" : ""}><span data-thumb="${item.assetId}"></span><small>${escapeHtml(item.name)}</small></label>`).join("") || `<p class="pf-empty">请先导入${kind === "product" ? "产品素材" : "图库图片"}</p>`;
-    return `<form class="pf-template-form" data-template-id="${escapeHtml(template.id || templateId)}">
-      <label>模板名称<input name="name" value="${escapeHtml(template.name)}"></label>
-      <fieldset><legend>文案 <small>可选</small></legend><select data-action="choose-preset" data-kind="copy">${presetOptions("copy")}</select><textarea name="copy" placeholder="选择文案预设或自由填写，也可以留空">${escapeHtml(template.copy)}</textarea><button type="button" data-action="save-preset" data-kind="copy">存为文案预设</button></fieldset>
-      <fieldset><legend>构图 <small>可选</small></legend><select data-action="choose-tagged-prompt" data-kind="composition">${taggedPromptOptions("构图")}</select><textarea name="composition" placeholder="从“构图”标签中选择，或自由填写，也可以留空">${escapeHtml(template.composition)}</textarea></fieldset>
-      <fieldset><legend>背景 <small>可选</small></legend><select data-action="choose-tagged-prompt" data-kind="background">${taggedPromptOptions("背景")}</select><textarea name="background" placeholder="从“背景”标签中选择，或自由填写，也可以留空">${escapeHtml(template.background)}</textarea></fieldset>
-      <label>自由补充 <small>可选</small><textarea name="extra" placeholder="其他临时要求，也可以留空">${escapeHtml(template.extra)}</textarea></label>
-      <details class="pf-template-media-section"><summary><span>产品素材</span><small>已选 ${template.productIds.length} 张</small></summary><div class="pf-template-media">${mediaChecks("product", "productIds", template.productIds)}</div></details>
-      <details class="pf-template-media-section"><summary><span>图库</span><small>已选 ${template.referenceIds.length} 张</small></summary><div class="pf-template-media">${mediaChecks("reference", "referenceIds", template.referenceIds)}</div></details>
-      <div class="pf-template-row"><label>比例<select name="aspectRatio">${[["auto", "自适应"], ["1:1", "1:1"], ["3:4", "3:4"], ["9:16", "9:16"], ["16:9", "16:9"]].map(([value, label]) => `<option value="${value}" ${template.aspectRatio === value ? "selected" : ""}>${label}</option>`).join("")}</select></label><label>数量<select name="count">${[1,2,3,4].map((value) => `<option value="${value}" ${template.count === value ? "selected" : ""}>${value} 张</option>`).join("")}</select></label><label>模式<select name="generationProvider"><option value="gpt_web" ${templateProvider(template.generationMode) === "gpt_web" ? "selected" : ""}>GPT Web</option><option value="team_cloud" ${templateProvider(template.generationMode) === "team_cloud" ? "selected" : ""}>Team Cloud</option><option value="api" ${templateProvider(template.generationMode) === "api" ? "selected" : ""}>API</option></select></label></div>
-      <label data-web-location-field ${templateProvider(template.generationMode) === "gpt_web" ? "" : "hidden"}>GPT Web 位置<select name="webExecutionLocation"><option value="local" ${templateWebLocation(template.generationMode) === "local" ? "selected" : ""}>本机</option><option value="team" ${templateWebLocation(template.generationMode) === "team" ? "selected" : ""}>团队</option></select></label>
-      <label data-team-model-field ${templateProvider(template.generationMode) === "team_cloud" ? "" : "hidden"}>Team Cloud 模型<select name="teamImageModel"><option value="flare" ${template.teamImageModel !== "sunburst" ? "selected" : ""}>Flare · 快速生成</option><option value="sunburst" ${template.teamImageModel === "sunburst" ? "selected" : ""}>Sunburst · 精细生成与编辑</option></select></label>
-      <details><summary>查看最终提示词</summary><pre data-final-prompt>${escapeHtml(promptText(template)) || "填写后将在这里预览"}</pre></details>
-      <footer class="pf-template-actions">${includeSavedTemplates ? '<button type="button" data-action="template-new">新建</button>' : ""}<button type="button" data-action="template-save" data-template-node-id="${templateNodeId}">保存到模板库</button><button type="button" class="primary" data-action="template-run" data-template-node-id="${templateNodeId}">运行模板</button></footer>
-      ${includeSavedTemplates ? `<section class="pf-saved-templates"><h3>已保存模板</h3>${library.templates.map((item) => `<button type="button" data-action="template-edit" data-id="${item.id}"><strong>${escapeHtml(item.name)}</strong><small>${item.count} 张 · ${escapeHtml(item.aspectRatio)}</small></button>`).join("") || "<p class=\"pf-empty\">还没有保存的模板</p>"}</section>` : ""}
-    </form>`;
-  }
-
-  function openTemplateDialog(templateId = "") {
-    editingTemplateId = templateId;
-    const library = readLibrary();
-    const existing = library.templates.find((item) => item.id === templateId);
-    document.querySelector(".pf-template-dialog-backdrop")?.remove();
-    const backdrop = document.createElement("div");
-    backdrop.className = "pf-template-dialog-backdrop";
-    backdrop.innerHTML = `<section class="pf-template-dialog" role="dialog" aria-modal="true" aria-labelledby="pf-template-dialog-title"><header><div><strong id="pf-template-dialog-title">${existing ? "编辑生图模板" : "新增生图模板"}</strong><small>${existing ? "修改模板配置，保存后同步到模板库" : "配置一套可以重复调用的生图任务"}</small></div><button type="button" data-action="template-dialog-cancel" aria-label="关闭">×</button></header><div class="pf-template-dialog-content">${templateEditor(library, false)}</div></section>`;
-    backdrop.addEventListener("click", (event) => { if (event.target === backdrop) backdrop.remove(); });
-    backdrop.addEventListener("keydown", (event) => { if (event.key === "Escape") backdrop.remove(); });
-    document.body.append(backdrop);
-    void hydrateThumbs(backdrop);
-    requestAnimationFrame(() => backdrop.querySelector('[name="name"]')?.focus());
-  }
 
   function renderPanel() {
     if (!panel) return;
@@ -922,20 +737,13 @@
     const library = readLibrary();
     const query = searchQuery.trim().toLowerCase();
     let content = "";
-    if (panelMode === "template-editor") {
-      panel.innerHTML = `<header><div><strong>编辑生图模板</strong><small>配置后直接在当前画布运行</small></div><button class="pf-panel-collapse" data-action="panel-collapse" aria-label="收起模板编辑" title="收起模板编辑"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5"/></svg></button></header><div class="pf-library-content">${templateEditor(library)}</div>`;
-      rail?.querySelectorAll("[data-library-rail-tab]").forEach((button) => button.classList.toggle("is-active", button.dataset.libraryRailTab === "templates"));
-      void hydrateThumbs(panel);
-      return;
-    }
     if (panelMode === "usage") {
       if (activeTab === "prompts") content = promptUsageList(library, query);
       if (activeTab === "products") content = mediaUsageList(library, "product", query);
       if (activeTab === "references") content = mediaUsageList(library, "reference", query);
-      if (activeTab === "templates") content = templateUsageList(library, query);
-      const titles = { prompts: ["调用提示词", "选择提示词直接创建生图任务"], products: ["调用产品素材", "选择并放入当前画布"], references: ["调用图库", "点击调用，双击画布图片可收藏"], templates: ["模版库", "选择已保存模板创建画布执行任务"] };
+      const titles = { prompts: ["调用提示词", "选择提示词直接创建生图任务"], products: ["调用产品素材", "选择并放入当前画布"], references: ["调用图库", "点击调用，双击画布图片可收藏"] };
       const filterBar = ["prompts", "products", "references"].includes(activeTab) ? libraryTagFilters(library) : "";
-      const usageSearch = activeTab === "templates" ? `<input class="pf-library-search" data-library-search value="${escapeHtml(searchQuery)}" placeholder="搜索可调用内容">` : "";
+      const usageSearch = "";
       panel.innerHTML = `<header><div><strong>${titles[activeTab][0]}</strong><small>${titles[activeTab][1]}</small></div><button class="pf-panel-collapse" data-action="panel-collapse" aria-label="收起调用侧栏" title="收起调用侧栏"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5"/></svg></button></header>${usageSearch}${filterBar}<div class="pf-library-content">${content}</div><footer class="pf-usage-footer"><button data-action="open-library-management" data-library="${activeTab}">前往库管理</button></footer>`;
       rail?.querySelectorAll("[data-library-rail-tab]").forEach((button) => button.classList.toggle("is-active", button.dataset.libraryRailTab === activeTab));
       void hydrateThumbs(panel);
@@ -951,17 +759,16 @@
     }
     if (activeTab === "products") content = `<div class="pf-media-management-toolbar"><label class="pf-import"><input type="file" accept="image/*" multiple data-import-kind="product">导入产品素材</label></div>${mediaList(library, "product", query)}`;
     if (activeTab === "references") content = `<div class="pf-media-management-toolbar"><label class="pf-import"><input type="file" accept="image/*" multiple data-import-kind="reference">导入图片</label></div>${mediaList(library, "reference", query)}`;
-    if (activeTab === "templates") content = templateList(library, query);
-    const titles = { canvas: ["画布管理", "创建、整理与迁移画布"], prompts: ["提示词库", "新增、整理与删除完整提示词"], products: ["产品素材库", "导入、整理与删除产品图片"], references: ["图库", "沉淀、整理与删除视觉参考"], templates: ["模版库", "创建、整理与删除生图模板"] };
-    const backupLabels = { prompts: "提示词库", products: "产品素材库", references: "图库", templates: "模版库" };
+    const titles = { canvas: ["画布管理", "创建、整理与迁移画布"], prompts: ["提示词库", "新增、整理与删除完整提示词"], products: ["产品素材库", "导入、整理与删除产品图片"], references: ["图库", "沉淀、整理与删除视觉参考"] };
+    const backupLabels = { prompts: "提示词库", products: "产品素材库", references: "图库" };
     const backupLabel = backupLabels[activeTab] || "资产库";
     const backupActions = activeTab === "canvas" ? "" : `<div class="pf-library-backup-actions"><button data-action="asset-export" data-library-scope="${activeTab}">存储${backupLabel}</button><button data-action="asset-import" data-library-scope="${activeTab}">导入${backupLabel}</button><input type="file" accept="application/json,.json" data-asset-import-file data-library-scope="${activeTab}" hidden></div>`;
     const compactManagementTabs = ["prompts", "products", "references"];
-    const compactHeaderTabs = [...compactManagementTabs, "templates"];
+    const compactHeaderTabs = compactManagementTabs;
     const search = "";
     const filterBar = ["prompts", "products", "references"].includes(activeTab) ? libraryTagFilters(library) : "";
     const headerActions = compactHeaderTabs.includes(activeTab) ? backupActions : `<button class="pf-panel-collapse" data-action="panel-collapse" aria-label="返回画布列表" title="返回画布列表"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5"/></svg></button>`;
-    const managementToolbar = activeTab === "prompts" ? `<div class="pf-prompt-management-toolbar">${filterBar}<button class="primary" data-action="prompt-create">新增提示词</button></div>` : activeTab === "templates" ? `<div class="pf-prompt-management-toolbar pf-template-management-toolbar"><span></span><button class="primary" data-action="template-new">新增模板</button></div>` : filterBar;
+    const managementToolbar = activeTab === "prompts" ? `<div class="pf-prompt-management-toolbar">${filterBar}<button class="primary" data-action="prompt-create">新增提示词</button></div>` : filterBar;
     panel.innerHTML = `<header><div><strong>${titles[activeTab][0]}</strong><small>${titles[activeTab][1]}</small></div>${headerActions}</header>${compactHeaderTabs.includes(activeTab) ? "" : backupActions}${search}${managementToolbar}<div class="pf-library-content">${content}</div>`;
     rail?.querySelectorAll("[data-library-rail-tab]").forEach((button) => button.classList.toggle("is-active", button.dataset.libraryRailTab === activeTab));
     void hydrateThumbs(panel);
@@ -1050,16 +857,14 @@
     }
   }
 
-  function openPanel(tab = activeTab, templateId = "", templateNodeId = "") {
+  function openPanel(tab = activeTab) {
     if (tab === "canvas") { void openProjectGallery(); return; }
     if (document.body.classList.contains("pf-gallery-open")) { openLibraryManagement(tab); return; }
     closeProjectGallery();
-    panelMode = templateId ? "template-editor" : "usage";
+    panelMode = "usage";
     activeTab = tab;
     activeLibraryTag = "";
     searchQuery = "";
-    if (templateId) editingTemplateId = templateId;
-    editingTemplateNodeId = templateNodeId || "";
     if (!panel) {
       panel = document.createElement("aside");
       panel.className = "pf-library-panel";
@@ -1106,10 +911,8 @@
       <button data-library-rail-tab="prompts" data-label="提示词库" aria-label="展开提示词库"><svg viewBox="0 0 24 24"><path d="M5 5h14v11H9l-4 3V5Z"/><path d="M8 9h8M8 12h6"/></svg></button>
       <button data-library-rail-tab="products" data-label="产品素材库" aria-label="展开产品素材库"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="m7 16 3-4 3 3 2-2 3 3M9 9h.01"/></svg></button>
       <button data-library-rail-tab="references" data-label="图库" aria-label="展开图库"><svg viewBox="0 0 24 24"><rect x="7" y="4" width="13" height="13" rx="2"/><path d="M17 20H6a2 2 0 0 1-2-2V7M10 13l3-3 4 4"/></svg></button>
-      <button data-library-rail-tab="templates" data-label="模版库" aria-label="展开模版库"><svg viewBox="0 0 24 24"><path d="m12 3 1.4 4.1L17.5 8.5l-4.1 1.4L12 14l-1.4-4.1-4.1-1.4 4.1-1.4L12 3Z"/><path d="m18 14 .8 2.2L21 17l-2.2.8L18 20l-.8-2.2L15 17l2.2-.8L18 14Z"/></svg></button>
       <span class="pf-rail-spacer"></span>
-      <button data-action="open-api-settings" data-label="API 设置" aria-label="打开 API 设置"><svg viewBox="0 0 24 24"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/><circle cx="12" cy="12" r="3.5"/></svg></button>
-      <button data-action="save-memory" data-label="节省内存" aria-label="节省内存"><svg viewBox="0 0 24 24"><path d="M8 3v3M16 3v3M8 18v3M16 18v3M3 8h3M18 8h3M3 16h3M18 16h3"/><rect x="6" y="6" width="12" height="12" rx="3"/><path d="M9 10h6M9 14h4"/></svg></button>`;
+      <button data-action="open-api-settings" data-label="API 设置" aria-label="打开 API 设置"><svg viewBox="0 0 24 24"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/><circle cx="12" cy="12" r="3.5"/></svg></button>`;
     document.body.append(rail);
   }
 
@@ -1119,46 +922,9 @@
     mountLibraryRail();
   }
 
-  function enhanceCanvasToolbar() {
-    if (nativeCanvas) return;
-    if (!currentProjectId()) return;
-    const toolbar = document.querySelector(".canvas-toolbar");
-    if (!toolbar || toolbar.querySelector('[data-action="template-task-create"]')) return;
-    const button = document.createElement("button");
-    button.type = "button";
-    button.dataset.action = "template-task-create";
-    button.setAttribute("aria-label", "新增生图模板任务");
-    button.title = "新增生图模板任务";
-    button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5z"/><path d="M8 8h8M8 12h5M16.5 14.5v5M14 17h5"/></svg>';
-    toolbar.append(button);
-  }
-
-  async function enhanceTemplateNodes() {
-    if (nativeCanvas) return;
-    if (!currentProjectId()) return;
-    const project = await getProject().catch(() => null);
-    if (!project) return;
-    const library = readLibrary();
-    for (const node of project.graph.nodes.filter((item) => item.kind === "text" && item.text?.startsWith(MARKER))) {
-      const host = document.querySelector(`.react-flow__node-text[data-id="${CSS.escape(node.id)}"]`);
-      if (!host || host.querySelector(".pf-template-node")) continue;
-      const templateId = node.text.slice(MARKER.length);
-      const template = library.templates.find((item) => item.id === templateId);
-      const tasks = project.graph.nodes.filter((item) => item.kind === "task" && item.templateNodeId === node.id);
-      const completed = tasks.filter((item) => item.status === "completed").length;
-      const failed = tasks.filter((item) => item.status === "failed").length;
-      const running = tasks.filter((item) => activeStatuses.has(item.status)).length;
-      host.classList.add("pf-template-host");
-      const card = document.createElement("article");
-      card.className = "pf-template-node";
-      card.innerHTML = `<header><strong>${escapeHtml(template?.name || "生图模板任务")}</strong><span>${tasks.length} 张</span></header><p>${completed} 成功 · ${running} 进行中 · ${failed} 失败</p><div class="pf-template-node-form nodrag nowheel">${templateEditor(library, false, node.id, templateId)}</div><footer><button data-template-retry="${templateId}" data-template-node-id="${node.id}" ${failed ? "" : "disabled"}>重试失败</button></footer>`;
-      host.append(card);
-      void hydrateThumbs(card);
-    }
-  }
 
   document.addEventListener("click", async (event) => {
-    const target = event.target instanceof Element ? event.target.closest("[data-action],[data-tab],[data-library-rail-tab],[data-template-open],[data-template-run],[data-template-retry]") : null;
+    const target = event.target instanceof Element ? event.target.closest("[data-action],[data-tab],[data-library-rail-tab]") : null;
     if (!target) {
       if (nativeCanvas) return;
       const edgeElement = event.target instanceof Element ? event.target.closest(".react-flow__edge") : null;
@@ -1172,19 +938,7 @@
     }
     if (target.hasAttribute("data-library-rail-tab")) { searchQuery = ""; activeLibraryTag = ""; openPanel(target.dataset.libraryRailTab); return; }
     if (target.hasAttribute("data-tab")) { activeTab = target.getAttribute("data-tab"); searchQuery = ""; activeLibraryTag = ""; renderPanel(); return; }
-    if (target.hasAttribute("data-template-open")) return openPanel("templates", target.getAttribute("data-template-open"), target.dataset.templateNodeId || "");
-    if (target.hasAttribute("data-template-run")) {
-      const template = readLibrary().templates.find((item) => item.id === target.getAttribute("data-template-run"));
-      if (template) await runTemplate(template, false, target.dataset.templateNodeId || "");
-      return;
-    }
-    if (target.hasAttribute("data-template-retry")) {
-      const template = readLibrary().templates.find((item) => item.id === target.getAttribute("data-template-retry"));
-      if (template) await runTemplate(template, true);
-      return;
-    }
     const action = target.getAttribute("data-action");
-    if (action === "template-task-create") { notify("功能还没想好，开发中！"); return; }
     if (action === "panel-collapse") { collapsePanel(); return; }
     if (action === "open-library-management") { await openProjectGallery(); openLibraryManagement(target.dataset.library || activeTab); return; }
     if (action === "canvas-create") { document.querySelector('.project-picker button[aria-label="新建画布"],.project-picker button[title="新建画布"],.project button[title="新建画布"]')?.click(); closeProjectGallery(); return; }
@@ -1194,12 +948,6 @@
     if (action === "canvas-card-export") { await exportCurrentCanvas(target.dataset.projectId); return; }
     if (action === "canvas-delete") { await deleteCurrentCanvas(); return; }
     if (action === "open-api-settings") { document.querySelector(".api-settings-button")?.click(); return; }
-    if (action === "save-memory") {
-      document.querySelector(".memory-save-button")?.click();
-      notify("正在释放已完成任务占用的网页内存…");
-      setTimeout(() => { const result = document.querySelector(".topbar-memory-notice")?.textContent?.trim(); if (result) notify(result); }, 250);
-      return;
-    }
     if (action === "canvas-open") {
       window.dispatchEvent(new CustomEvent("pixel-flow:project-refresh", { detail: { projectId: target.dataset.projectId } }));
       closeProjectGallery();
@@ -1246,24 +994,6 @@
       if (media && result) { Object.assign(media, { name: result.name, tags: result.tags, updatedAt: now() }); saveLibrary(library); renderPanel(); notify("素材已更新"); }
       return;
     }
-    const templateFormRoot = target.closest?.(".pf-template-form") || panel;
-    if (action === "save-preset") savePreset(target.dataset.kind, templateFormRoot?.querySelector(`[name="${target.dataset.kind}"]`)?.value || "");
-    if (action === "template-new") { openTemplateDialog(); return; }
-    if (action === "template-dialog-cancel") { target.closest(".pf-template-dialog-backdrop")?.remove(); return; }
-    if (action === "template-save") { saveTemplate(formTemplate(templateFormRoot)); target.closest(".pf-template-dialog-backdrop")?.remove(); renderPanel(); window.dispatchEvent(new CustomEvent("pixel-flow:project-refresh", { detail: { projectId: currentProjectId() } })); }
-    if (action === "template-run") await runTemplate(formTemplate(templateFormRoot), false, target.dataset.templateNodeId || "");
-    if (action === "template-use") {
-      const template = readLibrary().templates.find((item) => item.id === target.dataset.id);
-      if (template) await createTemplateTask(template);
-    }
-    if (action === "template-edit") { openTemplateDialog(target.dataset.id); return; }
-    if (action === "template-delete") {
-      const library = readLibrary();
-      const template = library.templates.find((item) => item.id === target.dataset.id);
-      const confirmed = template ? await openCanvasDialog({ title: "删除生图模板", message: `确定删除“${template.name}”吗？已创建到画布的任务不会受影响。`, confirmLabel: "删除模板", tone: "danger" }) : false;
-      if (confirmed) { library.templates = library.templates.filter((item) => item.id !== target.dataset.id); saveLibrary(library); renderPanel(); notify("模板已删除"); }
-      return;
-    }
   });
 
   document.addEventListener("input", (event) => {
@@ -1275,11 +1005,6 @@
       const search = panel.querySelector("[data-library-search]");
       search?.focus();
       search?.setSelectionRange(caret, caret);
-    }
-    if (event.target?.closest?.(".pf-template-form")) {
-      const form = event.target.closest(".pf-template-form");
-      const preview = form?.querySelector("[data-final-prompt]");
-      if (preview) preview.textContent = promptText(formTemplate(form)) || "填写后将在这里预览";
     }
   });
 
@@ -1294,25 +1019,6 @@
     if (input instanceof HTMLInputElement && input.matches("[data-asset-import-file]") && input.files?.[0]) { void importAssetLibrary(input.files[0], input.dataset.libraryScope); input.value = ""; return; }
     if (input instanceof HTMLInputElement && input.matches("[data-legacy-asset-import-file]") && input.files?.[0]) { void importAssetLibrary(input.files[0], "all"); input.value = ""; return; }
     if (input instanceof HTMLInputElement && input.dataset.importKind && input.files?.length) void importMedia([...input.files], input.dataset.importKind);
-    if (input?.matches?.('[data-action="choose-tagged-prompt"]')) {
-      const prompt = readLibrary().prompts.find((item) => item.id === input.value);
-      const textarea = input.closest(".pf-template-form")?.querySelector(`[name="${input.dataset.kind}"]`);
-      if (prompt && textarea) textarea.value = prompt.content;
-    }
-    if (input?.matches?.('[data-action="choose-preset"]')) {
-      const textarea = input.closest(".pf-template-form")?.querySelector(`[name="${input.dataset.kind}"]`);
-      if (textarea && input.value) textarea.value = input.value;
-    }
-    if (input?.closest?.(".pf-template-form")) {
-      const form = input.closest(".pf-template-form");
-      const provider = form?.querySelector('[name="generationProvider"]')?.value;
-      const webLocationField = form?.querySelector("[data-web-location-field]");
-      const modelField = form?.querySelector("[data-team-model-field]");
-      if (webLocationField) webLocationField.hidden = provider !== "gpt_web";
-      if (modelField) modelField.hidden = provider !== "team_cloud";
-      const preview = form?.querySelector("[data-final-prompt]");
-      if (preview) preview.textContent = promptText(formTemplate(form)) || "填写后将在这里预览";
-    }
   });
 
   function addCanvasImageToGallery(canvasImage) {
@@ -1367,17 +1073,12 @@
     if (!raw || panel?.contains(event.target)) return;
     event.preventDefault(); event.stopImmediatePropagation();
     const item = JSON.parse(raw); const library = readLibrary(); const position = canvasPosition(event.clientX, event.clientY);
-    if (item.kind === "prompt") { const prompt = library.prompts.find((entry) => entry.id === item.id); if (prompt) await addTextNode(prompt.content, position); }
     if (item.kind === "media") { const media = library.media.find((entry) => entry.id === item.id); if (media) await addMediaNode(media, position); }
   }, true);
 
   window.addEventListener("pixel-flow:open-library-management", (event) => {
-    const tab = event instanceof CustomEvent && ["prompts", "products", "references", "templates"].includes(event.detail?.tab) ? event.detail.tab : "prompts";
+    const tab = event instanceof CustomEvent && ["prompts", "products", "references"].includes(event.detail?.tab) ? event.detail.tab : "prompts";
     openLibraryManagement(tab);
-  });
-  window.addEventListener("pixel-flow:open-template-library", () => {
-    openPanel("templates");
-    if (nativeCanvas) setTimeout(() => { panel?.classList.add("is-open"); document.body.classList.add("pf-library-expanded"); window.dispatchEvent(new CustomEvent("pixel-flow:native-management-active", { detail: { tab: "templates" } })); }, 0);
   });
   window.addEventListener("pixel-flow:open-legacy-library", (event) => {
     const tab = event instanceof CustomEvent && ["prompts", "products", "references"].includes(event.detail?.tab) ? event.detail.tab : "prompts";
@@ -1393,23 +1094,14 @@
 
   let enhanceFrame = 0;
   const observer = new MutationObserver((mutations) => {
-    if (!mutations.some((mutation) => [...mutation.addedNodes].some((node) => node instanceof Element && (node.matches(".topbar,.canvas-toolbar,.task-card,.text-node,.project-picker") || node.querySelector(".topbar,.canvas-toolbar,.task-card,.text-node,.project-picker"))))) return;
+    if (!mutations.some((mutation) => [...mutation.addedNodes].some((node) => node instanceof Element && (node.matches(".topbar,.task-card,.project-picker") || node.querySelector(".topbar,.task-card,.project-picker"))))) return;
     cancelAnimationFrame(enhanceFrame);
     enhanceFrame = requestAnimationFrame(() => {
       enhanceTopbar();
-      enhanceCanvasToolbar();
-      if (currentProjectId()) void enhanceTemplateNodes();
     });
   });
   observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
   document.addEventListener("DOMContentLoaded", () => {
     enhanceTopbar();
-    enhanceCanvasToolbar();
-    setTimeout(() => {
-      if (currentProjectId()) {
-        void enhanceTemplateNodes();
-        void consumePendingRun();
-      }
-    }, 1200);
   }, { once: true });
 })();

@@ -30,13 +30,13 @@
 
 ## 数据
 
-IndexedDB 名称为 `gpt-node-canvas`，版本 1：
+IndexedDB 名称为 `gpt-node-canvas`，当前 schema 版本 3：
 
 - `projects: id, updatedAt, name`
 - `assets: id, createdAt`
 - `runs: id, [projectId+taskId], startedAt`
 
-保持数据库名、版本和字段不变，是旧画布数据继续可用的必要条件。
+版本 2 曾为删除恢复引入 `deletedProjects`，版本 3 已移除该表并保留 `projects / assets / runs`。保持数据库名和现有字段兼容，是旧画布数据继续可用的必要条件。
 
 ## 发布前深链路门槛
 
@@ -58,8 +58,8 @@ IndexedDB 名称为 `gpt-node-canvas`，版本 1：
 
 第七阶段已删除未被正式入口加载的 `production/generation-mode.js` 及构建副本，API、Browser与团队模式共用一套输入、提示词和 Base64 请求准备。动态权限仅允许 HTTPS；`127.0.0.1:43130` 与 Quick Tunnel 权限暂时保留，因为旧本机 Team Gateway 仍是已发布路径，当前只有本机配置证据，尚无覆盖所有真实用户的迁移清单。
 
-第八阶段已增加 `generation-ui.ts` 作为运行配置与状态文案的唯一 UI 投影。当前任务卡显示 GPT Web、Team Cloud、API 三个主模式：GPT Web 再选择本机/团队，Team Cloud 再选择 Flare/Sunburst；内部继续映射到 `browser / team_web / team / api`。TaskNode 保存 `runtimeStatus` 兼容投影；活动任务支持取消，失败或取消任务支持重试，可恢复团队 Job 支持重新写回。普通任务、模板、图片容器批量和失败重试统一提交 `RUN_TASKS`。
+第八阶段已增加 `generation-ui.ts` 作为运行配置与状态文案的唯一 UI 投影。当前任务卡显示 GPT Web、Team Cloud、API 三个主模式：GPT Web 再选择本机/团队，Team Cloud 再选择 Flare/Sunburst；内部继续映射到 `browser / team_web / team / api`。TaskNode 保存 `runtimeStatus` 兼容投影；活动任务支持取消，失败或取消任务支持重试，可恢复团队 Job 支持重新写回。普通任务、图片容器批量和失败重试统一提交 `RUN_TASKS`。
 
-当前 v0.3.22 的功能事实以 `TaskRun`、三个主模式、四条底层执行链路和真实加载扩展为准。
+当前 v0.3.23 新增本地图片存储统计与安全清理，清理引用根覆盖画布、容器、放大历史、提示词示例、产品素材和图库，并为新写入图片保留 10 分钟保护期；旧模板、文字节点和手动释放标签入口已移除。功能事实以 `TaskRun`、三个主模式、四条底层执行链路和真实加载扩展为准。
 
 后续重点是批量运行模型迁移、资产管理端 TypeScript 化、ChatGPT DOM 探测、备份迁移测试及主包拆分。

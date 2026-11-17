@@ -7,7 +7,6 @@
     "CANCEL_TASK",
     "OPEN_TASK_TAB",
     "CLOSE_TASK_TAB",
-    "HIBERNATE_TASK_TABS",
     "TASK_STATUS",
     "TASK_RESULT",
     "TASK_ERROR",
@@ -22,9 +21,6 @@
   function isExtensionMessage(value) {
     if (!value || typeof value !== "object") return false;
     const message = value;
-    if (message.type === "HIBERNATE_TASK_TABS") {
-      return typeof message.projectId === "string" && Array.isArray(message.taskIds) && message.taskIds.every((taskId) => typeof taskId === "string");
-    }
     return typeof message.type === "string" && taskTypes.has(message.type) && typeof message.projectId === "string" && typeof message.taskId === "string";
   }
 

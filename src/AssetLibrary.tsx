@@ -27,10 +27,9 @@ function useAssetUrls(assetIds: string[]) {
 
 function PromptCard({item,selectedTaskId}:{item:PromptItem,selectedTaskId?:string}) {
   const s = useStore();
-  const drag = (event: React.DragEvent) => event.dataTransfer.setData(LIBRARY_DRAG_TYPE, JSON.stringify({kind:"prompt",content:item.content}));
-  return <article className="native-library-card" draggable onDragStart={drag}>
+  return <article className="native-library-card">
     <strong>{item.name}</strong><div className="native-library-tags">{(item.tags||[]).map(tag=><span key={tag}>{tag}</span>)}</div>
-    <footer><button disabled={!selectedTaskId} onClick={()=>selectedTaskId&&void s.applyPromptToTask(selectedTaskId,item.content,"replace")}>替换</button><button disabled={!selectedTaskId} onClick={()=>selectedTaskId&&void s.applyPromptToTask(selectedTaskId,item.content,"append")}>追加</button><button onClick={()=>void s.addTextContent(item.content,{x:300,y:220})}>放入画布</button></footer>
+    <footer><button disabled={!selectedTaskId} onClick={()=>selectedTaskId&&void s.applyPromptToTask(selectedTaskId,item.content,"replace")}>替换</button><button disabled={!selectedTaskId} onClick={()=>selectedTaskId&&void s.applyPromptToTask(selectedTaskId,item.content,"append")}>追加</button></footer>
   </article>;
 }
 

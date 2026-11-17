@@ -4,7 +4,6 @@ import "@xyflow/react/dist/style.css";
 import { ReactFlowProvider } from "@xyflow/react";
 import "./styles.css";
 import "./canvas-switcher.css";
-import "./memory-feedback.css";
 import { App, CanvasClipboardShortcuts } from "./App";
 import { PixelFlowCodexBridge } from "./codex-bridge";
 

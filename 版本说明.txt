@@ -1,25 +1,26 @@
 Pixel Flow｜像素流
-版本：0.3.22
-文档更新：2026-10-14
+版本：0.3.23
+文档更新：2026-11-17
 适用浏览器：Chrome / Edge（macOS 与 Windows）
 
-当前版本 v0.3.22
+当前版本 v0.3.23
 =================
-- 图片放大默认 API Sunburst（gpt-image-2.5-sunburst）、2倍；普通任务默认规则保持原有逻辑，已有任务不批量改写。
-- 放大支持2/4/8倍，自动带重叠分块、逐块处理、按原坐标融合并保留透明通道。
-- 任务卡仅显示分块缩略图；1px中性框表示完成、紫框生成中、红框失败。双击单块重生，其他成功块不变，完成后更新原大图。
-- AI新增一步放大与只读终态查询：pixel_flow_upscale_image、pixel_flow_get_upscale_task、pixel_flow_regenerate_upscale_tile；通用execute支持image.upscale。
-- 新工具可用本地绝对路径或已有图像节点作为输入；accepted与completed明确分开，最终图在finalResults，旧图在previousResults。
-- 使用说明、HTML指南与当前源码对齐：三种API模型、Worker/Bridge区别、实际备份范围、凭证与数据路径。
+- 左侧新增“存储空间”：统计图片数量、总占用、保留内容和可安全清理空间，删除前必须二次确认。
+- 安全清理只删除未被画布、图片容器、放大源图与分块历史、提示词示例图、产品素材或图库引用的图片；新写入图片保留10分钟保护期。
+- AI新增 pixel_flow_inspect_storage 与 pixel_flow_cleanup_storage，通用 execute 支持 storage.inspect / storage.cleanup。
+- 删除画布时同步清理该画布 TaskRun；数据库升级到 schema 3，并移除未正式启用的 deletedProjects 回收表。
+- 精简旧入口：移除模板库、文字节点、手动“节省内存”及对应后台协议；任务提示词统一由任务卡保存，输入连线只承载图片。
+- 图片放大、三种API模型、四条执行链路与原有任务恢复能力保持不变。
 
 当前完整能力
 ============
-- 无限画布：图片、文字、容器、普通任务、放大任务、图片/文字结果；连线输入、画布切换、命名和管理。
+- 无限画布：图片、容器、普通任务、放大任务和图片结果；连线输入、画布切换、命名和管理。
 - 三个主模式、四条执行链路：GPT Web本机/团队、Team Cloud、API。API可选GPT Image 2、Sunburst 2.5、Flare 2.5；各模型对应Key独立保存。
-- 容器批量：逐图子任务，共享参考图，失败项重试。素材库、提示词库、参考图库和左侧正式模板库可复用。
+- 容器批量：逐图子任务，共享参考图，失败项重试。素材库、提示词库、参考图库可复用。
 - TaskRun：每次运行独立记录，取消、重试、已保存对话/Job恢复、结果写回；有已有团队结果时优先恢复。
 - 画布复制/粘贴、撤销、单图系统剪贴板、图片下载；容器跨应用多图剪贴板受系统限制。
 - API Worker支持三模型并检查旧Worker更新；Bridge/MCP提供真实画布读写和运行终态回读。
+- AI放大工具继续提供 pixel_flow_upscale_image、pixel_flow_get_upscale_task、pixel_flow_regenerate_upscale_tile；存储工具提供 pixel_flow_inspect_storage、pixel_flow_cleanup_storage。
 
 使用边界
 ========
@@ -31,6 +32,7 @@ Pixel Flow｜像素流
 
 历史版本摘要
 ============
+v0.3.22（2026-10-14）：API Sunburst默认放大、一步结构化放大、分块重生与用户指南刷新。
 v0.3.21（2026-10-14）：一步结构化放大、权威状态查询、专用MCP工具；真实文件导入到大图下载与请求重放验收。
 v0.3.20（2026-10-14）：纯缩略图、细边框状态、双击单块重生；后续完成态调整为中性1px细框。
 v0.3.19（2026-10-14）：缩小缩略图、全部展开、拼合成功提示绿色。

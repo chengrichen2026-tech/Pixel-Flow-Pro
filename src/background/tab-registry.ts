@@ -113,12 +113,6 @@ export class TabRegistry {
     try { await this.tabs.remove(mapped.tabId); return true; } catch { return false; }
   }
 
-  async hibernateMany(taskIds: string[]): Promise<number> {
-    let released = 0;
-    for (const taskId of taskIds) if (await this.hibernate(taskId)) released += 1;
-    return released;
-  }
-
   pruneMappings(activeTaskIds: Set<string>): void {
     for (const taskId of this.taskTabs.keys()) if (!activeTaskIds.has(taskId)) this.taskTabs.delete(taskId);
   }

@@ -12,11 +12,11 @@ test("native canvas restores the original single left icon rail", async () => {
   assert.match(app, /function RailIcon/);
   assert.match(app, /<PixelFlowMark\/>/);
   assert.match(app, /<PixelIcon name="prompt"|<RailIcon kind="prompt"/);
-  assert.match(app, /<RailIcon kind="template"/);
+  assert.doesNotMatch(app, /<RailIcon kind="template"/);
   assert.match(icons, /export function PixelFlowMark/);
   assert.match(icons, /product: "product\.png"/);
   assert.match(icons, /reference: "reference\.png"/);
-  assert.match(icons, /templateTask: "template-task\.png"/);
+  assert.doesNotMatch(icons, /templateTask|template-task\.png/);
   assert.match(icons, /className=\{`pf-art-icon/);
   assert.doesNotMatch(app, /title="提示词库">词</);
   assert.match(styles, /\.native-library-rail\{top:0;bottom:0;left:0;width:60px/);
@@ -30,7 +30,7 @@ test("native canvas toolbar returns to the centered bottom position", async () =
   assert.match(styles, /\.toolbar\{top:auto;right:auto;bottom:16px/);
   assert.match(styles, /flex-direction:row/);
   assert.match(styles, /transform:translateX\(-50%\)/);
-  assert.match(app, /data-action="template-task-create"/);
+  assert.doesNotMatch(app, /data-action="template-task-create"/);
   assert.match(styles, /\.toolbar button\{flex-basis:44px;width:44px;height:44px\}/);
 });
 
@@ -100,8 +100,8 @@ test("native node chrome matches legacy measured dimensions", async () => {
   assert.match(app, /keepAspectRatio/);
   assert.match(app, /width:n\.width\?\?320,height:n\.height\?\?320/);
   assert.match(app, /naturalWidth\/image\.naturalHeight/);
-  assert.match(styles, /\.media-node__label,\.text-node__label\{position:absolute/);
-  assert.match(styles, /\.text-node\{width:260px\}/);
+  assert.match(styles, /\.media-node__label\{position:absolute/);
+  assert.doesNotMatch(styles, /\.text-node/);
   assert.match(styles, /\.media-resize-handle\.top,\.media-resize-handle\.bottom\.left\{display:none!important\}/);
 });
 

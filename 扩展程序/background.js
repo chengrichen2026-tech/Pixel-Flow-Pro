@@ -4232,6 +4232,13 @@ var NodeCanvasDatabase = class extends Dexie {
 			assets: "id, createdAt",
 			runs: "id, [projectId+taskId], startedAt"
 		});
+		this.version(2).stores({
+			projects: "id, updatedAt, name",
+			deletedProjects: "id, deletedAt",
+			assets: "id, createdAt",
+			runs: "id, [projectId+taskId], startedAt"
+		});
+		this.version(3).stores({ deletedProjects: null });
 	}
 };
 //#endregion
@@ -4378,7 +4385,6 @@ var taskTypes = /* @__PURE__ */ new Set([
 	"CANCEL_TASK",
 	"OPEN_TASK_TAB",
 	"CLOSE_TASK_TAB",
-	"HIBERNATE_TASK_TABS",
 	"TASK_STATUS",
 	"TASK_RESULT",
 	"TASK_ERROR",
@@ -4410,7 +4416,6 @@ function isExtensionMessage(value) {
 	if (!value || typeof value !== "object") return false;
 	const message = value;
 	if (message.type === "GET_API_CAPABILITIES") return true;
-	if (message.type === "HIBERNATE_TASK_TABS") return typeof message.projectId === "string" && Array.isArray(message.taskIds) && message.taskIds.every((taskId) => typeof taskId === "string");
 	if (message.type === "REGENERATE_UPSCALE_TILE") return typeof message.projectId === "string" && typeof message.taskId === "string" && typeof message.tileId === "string" && message.tileId.length > 0;
 	if (message.type === "RUN_TASKS") return typeof message.projectId === "string" && Array.isArray(message.taskIds) && message.taskIds.length > 0 && message.taskIds.every((taskId) => typeof taskId === "string");
 	if (message.type === "DOWNLOAD_ASSET") return typeof message.projectId === "string" && typeof message.taskId === "string" && typeof message.assetId === "string";
@@ -4638,11 +4643,6 @@ var TabRegistry = class {
 		} catch {
 			return false;
 		}
-	}
-	async hibernateMany(taskIds) {
-		let released = 0;
-		for (const taskId of taskIds) if (await this.hibernate(taskId)) released += 1;
-		return released;
 	}
 	pruneMappings(activeTaskIds) {
 		for (const taskId of this.taskTabs.keys()) if (!activeTaskIds.has(taskId)) this.taskTabs.delete(taskId);
@@ -5153,28 +5153,18 @@ var findTask = (graph, id) => {
 function getTaskInputs(graph, taskId) {
 	const task = findTask(graph, taskId);
 	let imageIndex = 0;
-	let textIndex = 0;
 	const inputs = [];
 	for (const edgeId of task.inputEdgeOrder) {
 		const edge = graph.edges.find((candidate) => candidate.id === edgeId && (candidate.target === taskId || candidate.target === task.batchParentTaskId));
 		if (!edge) continue;
 		const node = findNode(graph, edge.source);
-		if (node.kind === "task" || node.kind === "text_result") continue;
-		if (node.kind === "text") {
-			textIndex += 1;
-			inputs.push({
-				edgeId,
-				node,
-				label: `文字${textIndex}`
-			});
-		} else {
-			imageIndex += 1;
-			inputs.push({
-				edgeId,
-				node,
-				label: `图片${imageIndex}`
-			});
-		}
+		if (node.kind === "task" || node.kind === "text" || node.kind === "text_result") continue;
+		imageIndex += 1;
+		inputs.push({
+			edgeId,
+			node,
+			label: `图片${imageIndex}`
+		});
 	}
 	return inputs;
 }
@@ -6270,7 +6260,6 @@ async function recoverTeamTaskResult(projectId, taskId, requestedJobId) {
 }
 async function prepareTaskRequest(project, taskId, task) {
 	const inputs = getTaskInputs(project.graph, taskId);
-	const text = inputs.filter((input) => input.node.kind === "text").map((input) => input.node.kind === "text" ? input.node.text : "").filter(Boolean);
 	const images = await Promise.all(inputs.flatMap((input) => {
 		if (input.node.kind !== "image" && input.node.kind !== "result") return [];
 		const assetNode = input.node;
@@ -6285,7 +6274,7 @@ async function prepareTaskRequest(project, taskId, task) {
 	}));
 	const ratio = task.aspectRatio ?? "auto";
 	return {
-		prompt: appendAspectRatioPrompt([...text, task.prompt].filter(Boolean).join("\n\n"), ratio),
+		prompt: appendAspectRatioPrompt(task.prompt, ratio),
 		ratio,
 		images
 	};
@@ -7066,15 +7055,6 @@ chrome.runtime.onMessage.addListener((raw, sender, sendResponse) => {
 	if (message.type === "CLOSE_TASK_TAB") {
 		tabRegistry.close(createTaskScopeKey(message.projectId, message.taskId));
 		sendResponse({ accepted: true });
-		return true;
-	}
-	if (message.type === "HIBERNATE_TASK_TABS") {
-		(async () => {
-			await schedulerReady;
-			const protectedTaskKeys = /* @__PURE__ */ new Set([...queue.waiting, ...queue.running]);
-			const taskKeys = message.taskIds.map((taskId) => createTaskScopeKey(message.projectId, taskId)).filter((taskKey) => !protectedTaskKeys.has(taskKey));
-			sendResponse({ released: await tabRegistry.hibernateMany(taskKeys) });
-		})().catch(() => sendResponse({ error: "释放网页标签失败" }));
 		return true;
 	}
 	if (message.type === "DOWNLOAD_ASSET") {

@@ -27,20 +27,14 @@ const findTask = (graph: Graph, id: string): TaskNode => {
 export function getTaskInputs(graph: Graph, taskId: string): Array<{ edgeId: string; node: CanvasNode; label: string }> {
   const task = findTask(graph, taskId);
   let imageIndex = 0;
-  let textIndex = 0;
   const inputs: Array<{ edgeId: string; node: CanvasNode; label: string }> = [];
   for (const edgeId of task.inputEdgeOrder) {
     const edge = graph.edges.find(candidate => candidate.id === edgeId && (candidate.target === taskId || candidate.target === task.batchParentTaskId));
     if (!edge) continue;
     const node = findNode(graph, edge.source);
-    if (node.kind === "task" || node.kind === "text_result") continue;
-    if (node.kind === "text") {
-      textIndex += 1;
-      inputs.push({ edgeId, node, label: `文字${textIndex}` });
-    } else {
-      imageIndex += 1;
-      inputs.push({ edgeId, node, label: `图片${imageIndex}` });
-    }
+    if (node.kind === "task" || node.kind === "text" || node.kind === "text_result") continue;
+    imageIndex += 1;
+    inputs.push({ edgeId, node, label: `图片${imageIndex}` });
   }
   return inputs;
 }

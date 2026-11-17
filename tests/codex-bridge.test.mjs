@@ -23,6 +23,15 @@ test("structured cleanup deletes only explicitly requested unreferenced assets",
   assert.match(client, /db\.assets\.bulkDelete\(deletable\)/);
 });
 
+test("structured storage cleanup supports inspection and global safe cleanup", async () => {
+  const [client,mcp] = await Promise.all([readFile(new URL("src/codex-bridge.tsx", root), "utf8"),readFile(new URL("tools/pixel-flow-mcp/server.mjs", root), "utf8")]);
+  assert.match(client,/getStorage/);
+  assert.match(client,/op==="storage\.cleanup"/);
+  assert.doesNotMatch(client,/op==="trash\./);
+  assert.match(mcp,/pixel_flow_inspect_storage/);
+  assert.match(mcp,/pixel_flow_cleanup_storage/);
+});
+
 test("structured commands expose current-version TaskRun records", async () => {
   const client = await readFile(new URL("src/codex-bridge.tsx", root), "utf8");
   assert.match(client, /op==="run\.list"/);

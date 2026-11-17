@@ -2,7 +2,7 @@ import Dexie, { type EntityTable } from "dexie";
 import type { Project } from "./types";
 import type { TaskRunRecord } from "./storage/task-run-repository";
 
-type AssetRecord = { id: string; blob: Blob; createdAt: number };
+export type AssetRecord = { id: string; blob: Blob; createdAt: number };
 type RunRecord = Partial<TaskRunRecord> & { id: string; projectId: string; taskId: string; startedAt: number };
 
 export class PixelFlowDatabase extends Dexie {
@@ -12,6 +12,8 @@ export class PixelFlowDatabase extends Dexie {
   constructor() {
     super("gpt-node-canvas");
     this.version(1).stores({ projects: "id, updatedAt, name", assets: "id, createdAt", runs: "id, [projectId+taskId], startedAt" });
+    this.version(2).stores({ projects: "id, updatedAt, name", deletedProjects: "id, deletedAt", assets: "id, createdAt", runs: "id, [projectId+taskId], startedAt" });
+    this.version(3).stores({ deletedProjects: null });
   }
 }
 
