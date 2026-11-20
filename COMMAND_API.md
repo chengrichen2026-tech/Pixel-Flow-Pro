@@ -17,7 +17,7 @@ Pixel Flow 扩展通过 `ws://127.0.0.1:43128/canvas` 连接本机 Bridge，Code
 - `pixel_flow_upscale_image`：一步导入或选择图片，创建并默认启动分块放大；支持 sourceNodeId / filePath / imageDataUrl / assetId 四选一，2/4/8倍，默认API Sunburst。
 - `pixel_flow_get_upscale_task`：只读查询权威TaskRun状态、进度、目标尺寸和结果节点；只有completed时返回finalResults。
 - `pixel_flow_regenerate_upscale_tile`：指定taskId和tileId，重生单块并重新拼合。
-- `pixel_flow_create_task`：新建生图任务，可设提示词、`api / browser / team / team_web` 模式、团队模型 `flare / sunburst`、比例、位置和输入节点。
+- `pixel_flow_create_task`：新建生图任务，可设提示词、`api / browser / team / team_web / gemini` 模式、团队模型 `flare / sunburst`、比例、位置和输入节点。
 - `pixel_flow_run_task`：执行指定任务。
 - `pixel_flow_download_image`：将图片或生成结果写到指定的绝对路径。
 - `pixel_flow_execute`：执行一条或多条底层命令。
@@ -68,7 +68,7 @@ Agent 负责读取本地文件或表格、识别图片内容、生成名称和�
 
 直接把本地图片放入画布时，优先调用 `pixel_flow_import_image`。`filePath` 必须是绝对路径，且扩展名为 `png / jpg / jpeg / webp / gif`；`filePath`、`imageDataUrl`、`assetId` 必须且只能提供一个。命令返回新建图片节点的 `nodeId` 与 `assetId`，后续可直接传给 `pixel_flow_create_task.sourceNodeIds`。使用 `targetTaskId` 时，图片创建后会同时写入该任务的输入边。
 
-所有写操作必须使用唯一 `requestId`，并传入最近 `pixel_flow_get_state` 返回的 `expectedRevision`。如果 revision 冲突，先重新读取状态，不要盲目重试写操作。
+所有写操作必须使用唯一 `requestId`，并传入最近 `pixel_flow_get_state` 返回的 `expectedRevision`。如果 revision 冲突，先重新读取状态，不要盲目重试写操作。一个请求只能包含一条写命令；批量仅支持 `run.list`、`storage.inspect`、`upscale.capabilities` 和 `upscale.inspect` 等只读命令，避免部分写入后整体失败。
 
 `task.run` 只表示运行请求已被当前扩展接受；最终完成必须继续用 `pixel_flow_get_state` 和 `run.list` 回读 TaskRun 终态、结果节点、资产与输出边。`task.recoverTeamResult` 必须同时传入 `projectId`、`taskId` 和已知 `jobId`，只恢复已有团队结果，不新建生图请求。
 

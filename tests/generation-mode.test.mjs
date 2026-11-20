@@ -11,9 +11,9 @@ test("browser runs wait for an in-flight mode save", async () => {
   assert.match(source, /const pendingSettingsSave=useRef<Promise<void>>\(Promise\.resolve\(\)\)/);
   assert.match(source, /const trackSave=async\(saving:Promise<void>\)/);
   assert.match(source, /await pendingSettingsSave\.current/);
-  assert.match(source, /const currentTask=useStore\.getState\(\)\.project\?\.graph\.nodes\.find/);
+  assert.match(source, /let currentTask=useStore\.getState\(\)\.project\?\.graph\.nodes\.find/);
   assert.match(source, /aria-label="生图模式"/);
-  assert.match(source, /aria-label="GPT Web 执行位置"/);
+  assert.match(source, /aria-label="Web-img 执行方式"/);
   assert.match(source, /generationModeForProvider\('gpt_web',next\)/);
 });
 
@@ -47,9 +47,9 @@ test("manual-action errors prefer the concrete conversation URL reported by the 
 
 test("opening a task recovers from a stale tab mapping", async () => {
   const source = await readBackgroundSource();
-  assert.match(source, /expectedUrl === "https:\/\/chatgpt\.com\/" && liveConversationUrl/);
+  assert.match(source, /expectedUrl === baseUrl && liveConversationUrl/);
   assert.match(source, /if \(!\(error instanceof ConversationUnavailableError\)\) throw error/);
-  assert.match(source, /this\.taskTabs\.set\(taskId, \{ conversationUrl: conversationUrl \?\? previous\?\.conversationUrl \?\? "https:\/\/chatgpt\.com\/" \}\)/);
+  assert.match(source, /conversationUrl: conversationUrl \?\? previous\?\.conversationUrl \?\? safeBrowserUrl\(undefined, provider\)/);
 });
 
 test("waiting for a ChatGPT task tab fails closed on removal or timeout", async () => {
@@ -228,12 +228,12 @@ test("switching to browser mode clears inherited API job state", async () => {
   const modeUi = await readFile(new URL("src/App.tsx", root), "utf8");
   const background = await readBackgroundSource();
   assert.match(modeUi, /apiJobId:undefined,statusDetail:undefined/);
-  assert.match(modeUi, /next!==['"]browser['"]\?\{conversationUrl:undefined\}:\{\}/);
+  assert.match(modeUi, /!\['browser','gemini'\]\.includes\(next\)\?\{conversationUrl:undefined\}:\{\}/);
   assert.match(modeUi, /modeLocked\(n\.status\)/);
   assert.match(background, /providerJobId: event\.clearApiJobId \? null : event\.apiJobId/);
 });
 
-test("browser results preserve the latest-assistant fallback and collect all current carousel slides", async () => {
+test("browser results collect only the latest assistant carousel", async () => {
   const source = await readFile(new URL("public/contentScript.js", root), "utf8");
   const section = source.slice(source.indexOf("function generatedImageSource("), source.indexOf("function decodeImage("));
   const image = (id) => ({ src: `blob:${id}`, complete: false, naturalWidth: 0 });
@@ -241,19 +241,24 @@ test("browser results preserve the latest-assistant fallback and collect all cur
   const slides = images.map((asset) => ({ querySelector: () => asset }));
   const group = { querySelectorAll: () => slides };
   let turnState = "complete";
-  const exchange = {
+  const currentExchange = {
     contains: () => true,
     querySelector: () => ({ getAttribute: () => turnState }),
     querySelectorAll: (selector) => selector.includes("generated-image-preview") ? [images[0]] : [group],
   };
+  const oldImage = image("old");
+  const oldExchange = {
+    querySelector: () => ({ getAttribute: () => "complete" }),
+    querySelectorAll: () => [{ querySelectorAll: () => [{ querySelector: () => oldImage }] }],
+  };
   const latest = {
-    closest: () => exchange,
+    closest: () => currentExchange,
     querySelectorAll: () => [],
     cloneNode: () => ({ textContent: "ChatGPT 说：已生成 5 张", querySelectorAll: () => [] }),
   };
   const context = vm.createContext({
     assistantTurns: () => [latest],
-    userTurns: () => [{ closest: () => exchange }],
+    userTurns: () => [{ closest: () => oldExchange }],
     normalizeTurnText: (value) => value.trim(),
   });
   vm.runInContext(`${section}\nthis.extract = extractLatestResult; this.expects = expectsGeneratedImages; this.imageClaimed = responseIndicatesGeneratedImage;`, context);
@@ -269,9 +274,8 @@ test("browser results preserve the latest-assistant fallback and collect all cur
   slides[4] = { querySelector: () => null };
   assert.equal(context.extract().galleryReady, false);
   context.assistantTurns = () => [];
-  assert.equal(context.extract().hasCurrentGallery, true);
-  context.userTurns = () => [{ closest: () => null }];
-  context.assistantTurns = () => [{ ...latest, querySelectorAll: () => [image("legacy")] }];
+  assert.equal(context.extract().hasCurrentGallery, false);
+  context.assistantTurns = () => [{ ...latest, closest: () => null, querySelector: () => null, querySelectorAll: selector => selector.includes('role="group"') || selector.includes("generated-image-preview") ? [] : [image("legacy")] }];
   assert.deepEqual([...context.extract().images], ["blob:legacy"]);
 });
 
@@ -288,8 +292,8 @@ test("ChatGPT image progress percentages are not completed as text results", asy
 test("reinjected ChatGPT adapter replaces a stale page listener after extension reload", async () => {
   const content = await readFile(new URL("public/contentScript.js", root), "utf8");
   const background = await readBackgroundSource();
-  assert.match(content, /CHATGPT_ADAPTER_VERSION = 34/);
-  assert.match(background, /CHATGPT_ADAPTER_VERSION = 34/);
+  assert.match(content, /CHATGPT_ADAPTER_VERSION = 38/);
+  assert.match(background, /CHATGPT_ADAPTER_VERSION = 38/);
   assert.match(content, /__gptNodeCanvasMessageListener/);
   assert.match(content, /removeListener\(previousMessageListener\)/);
   assert.match(content, /addListener\(currentMessageListener\)/);
@@ -306,7 +310,7 @@ test("browser results are recovered by a service-worker alarm without opening th
   assert.match(background, /type: "RESUME_CHATGPT_RESULT"/);
   assert.match(background, /alarm\.name === BROWSER_RESULT_RECOVERY_ALARM/);
   assert.match(background, /if \(message\.phase !== "submitted" \|\| adapterState\?\.submitActive/);
-  assert.match(background, /const concreteUrl = concreteChatGptConversationUrl\(mapped\.conversationUrl\)/);
+  assert.match(background, /const concreteUrl = concreteBrowserConversationUrl\(mapped\.conversationUrl, provider\)/);
   assert.match(background, /Date\.now\(\) - \(message\.submittedAt \?\? message\.startedAt \?\? 0\) > 12e4/);
   assert.match(background, /await chrome\.tabs\.reload\(mapped\.tabId\)/);
   assert.match(content, /__gptNodeCanvasActiveResumeTasks/);
@@ -324,16 +328,36 @@ test("ChatGPT image responses wait for hydrated image DOM before completing", as
   const source = await readFile(new URL("public/contentScript.js", root), "utf8");
   assert.match(source, /function expectsGeneratedImages\(prompt\)/);
   assert.match(source, /function responseIndicatesGeneratedImage\(text\)/);
-  assert.match(source, /const imageReady = result\.galleryReady && \(result\.images\.length > 0 \|\| !imageClaimed/);
+  assert.match(source, /const imageReady = result\.imageFileCount === 0 && result\.galleryReady && \(result\.images\.length > 0 \|\| !imageClaimed/);
   assert.match(source, /waitForCompletion\(previousTurnCount, assertCompletionConversation, input\.prompt\)/);
   assert.match(source, /waitForCompletion\(0, assertCompletionConversation, input\.prompt\)/);
+  assert.match(source, /const hasNewTurn = turns\.length > previousTurnCount;/);
+  assert.doesNotMatch(source, /result\.images\.length > 0 && result\.hasCurrentGallery/);
+});
+
+test("ChatGPT image file cards open their real preview before result writeback", async () => {
+  const source = await readFile(new URL("public/contentScript.js", root), "utf8");
+  const detector = source.slice(source.indexOf("function imageFilePreviewButtons("), source.indexOf("function extractLatestResult("));
+  const buttons = [
+    { getAttribute: name => name === "aria-label" ? "打开 r3_c1_enhanced_1024.png 的预览" : "" },
+    { getAttribute: name => name === "aria-label" ? "Open preview for tile.webp" : "" },
+    { getAttribute: name => name === "aria-label" ? "下载文件" : "" }
+  ];
+  const context = vm.createContext({});
+  vm.runInContext(`${detector}\nthis.detectFiles = imageFilePreviewButtons;`, context);
+  assert.equal(context.detectFiles({ querySelectorAll: () => buttons }).length, 2);
+  assert.match(source, /img\[alt="\\u56FE\\u7247\\u9884\\u89C8"\], img\[alt\*="Image preview" i\]/);
+  assert.match(source, /const fileImages = await collectImageFileSources\(latest\)/);
+  assert.match(source, /fileImages\.length === result\.imageFileCount/);
+  assert.match(source, /result\.imageFileCount === 0 && result\.galleryReady/);
+  assert.match(source, /return \{ \.\.\.result, images: \[\.\.\.new Set\(\[\.\.\.result\.images, \.\.\.fileImages\]\)\]/);
 });
 
 test("browser results survive a lost tab mapping after extension reload", async () => {
   const background = await readBackgroundSource();
   assert.match(background, /if \(!ownsTab\) \{[\s\S]*taskRunRepository\.latest\(message\.projectId, message\.taskId\)/);
-  assert.match(background, /expectedChatGptConversationMatches\(senderTab\.url, expectedUrl\)/);
-  assert.match(background, /tabRegistry\.map\(key, senderTab\.id, senderTab\.url\)/);
+  assert.match(background, /expectedBrowserConversationMatches\(senderTab\.url, expectedUrl, provider\)/);
+  assert.match(background, /tabRegistry\.map\(key, senderTab\.id, senderTab\.url, provider\)/);
   assert.match(background, /if \(message\.type !== "TASK_RESULT" && message\.type !== "TASK_ERROR"\) return false/);
   assert.match(background, /if \(!run \|\| isTerminalRunStatus\(run\.status\)\) return false/);
 });
@@ -343,12 +367,12 @@ test("extension reload reconstructs recovery state for persisted generating brow
   assert.match(background, /for \(const project of await projectRepository\.listProjects\(\)\)/);
   assert.match(background, /const latestRuns = await taskRunRepository\.latestByProject\(project\.id\)/);
   assert.match(background, /!runtime\.active \|\| !\["sending", "submitted", "generating", "delivering"\]\.includes\(runtime\.status\)/);
-  assert.match(background, /const conversationUrl = concreteChatGptConversationUrl\(runtime\.conversationUrl\)/);
+  assert.match(background, /const conversationUrl = concreteBrowserConversationUrl\(runtime\.conversationUrl, provider\)/);
   assert.match(background, /const storedMessage = browserTaskMessages\.get\(key\)/);
   assert.match(background, /\.\.\.storedMessage/);
   assert.match(background, /phase: "submitted"/);
   assert.match(background, /if \(!queue\.running\.includes\(key\)\) queue\.running\.push\(key\)/);
-  assert.match(background, /tabRegistry\.map\(key, void 0, conversationUrl\)/);
+  assert.match(background, /tabRegistry\.map\(key, void 0, conversationUrl, provider\)/);
   assert.match(background, /pendingMessage\?\.phase === "submitted" && \["preparing_tab", "uploading", "sending"\]\.includes\(message\.status\)/);
 });
 
@@ -362,7 +386,7 @@ test("extension startup prunes stale scheduler slots before advancing live tasks
   assert.match(background, /activeTaskScopes[\s\S]*runningKeys\.has\(entry\[0\]\)/);
   assert.ok(background.includes("startupRecoveryReady = reconcileSchedulerSnapshot()"));
   assert.ok(background.includes("recoverInterruptedApiTasks()"));
-  assert.match(background, /task\.generationMode === "browser" && runtime\.status !== "queued" && !concreteChatGptConversationUrl\(runtime\.conversationUrl\)/);
+  assert.match(background, /isLocalWebMode\(task\.generationMode\) && runtime\.status !== "queued" && !concreteBrowserConversationUrl\(runtime\.conversationUrl, localWebProvider\(task\.generationMode\)\)/);
   assert.match(background, /reason: "browser_interrupted"/);
   assert.match(background, /ChatGPT任务在建立可恢复对话前被中断，请重新运行/);
   assert.match(background, /tabRegistry\.pruneMappings\(liveTaskKeys\)/);
@@ -442,7 +466,10 @@ test("ChatGPT counts the current remove-by-filename attachment controls exactly 
 
 test("ChatGPT upload selects the file input belonging to the active composer", async () => {
   const content = await readFile(new URL("public/contentScript.js", root), "utf8");
+  assert.match(content, /function isVisibleElement\(element\)/);
+  assert.match(content, /candidates\.filter\(isVisibleElement\)\.at\(-1\)/);
   assert.match(content, /function findUploadInputs\(\)/);
+  assert.match(content, /input instanceof HTMLInputElement && input\.isConnected/);
   assert.match(content, /\[data-testid="upload-photos-input"\][\s\S]*?\[data-testid="upload-media-input"\][\s\S]*?#upload-files/);
   assert.match(content, /const region = findComposerRegion\(\);[\s\S]*?region\.querySelector\(selector\)/);
   assert.match(content, /document\.querySelectorAll\(selector\)/);
@@ -451,7 +478,7 @@ test("ChatGPT upload selects the file input belonging to the active composer", a
 
 test("ChatGPT upload fails closed instead of redispatching one image across file inputs", async () => {
   const content = await readFile(new URL("public/contentScript.js", root), "utf8");
-  const section = content.slice(content.indexOf("async function uploadImages("), content.indexOf("async function waitForCompletion("));
+  const section = content.slice(content.indexOf("async function resolveUploadInput("), content.indexOf("async function waitForCompletion("));
   const dispatches = [0, 0, 0];
   const inputs = dispatches.map((_value, index) => ({
     files: [],
@@ -479,8 +506,52 @@ test("ChatGPT upload fails closed instead of redispatching one image across file
     signalBackgroundPageActivity: () => {}
   });
   vm.runInContext(`${section}\nthis.runUpload = uploadImages;`, context);
-  await assert.rejects(context.runUpload(inputs[0], [{ name: "product.png" }]), /第 1 张参考图没有出现在 ChatGPT 输入区/);
+  await assert.rejects(context.runUpload([{ name: "product.png" }]), /第 1 张参考图没有出现在 ChatGPT 输入区/);
   assert.deepEqual(dispatches, [1, 0, 0]);
+});
+
+test("repeated ChatGPT uploads re-resolve the live input instead of reusing a detached node", async () => {
+  const content = await readFile(new URL("public/contentScript.js", root), "utf8");
+  const section = content.slice(content.indexOf("async function resolveUploadInput("), content.indexOf("async function waitForCompletion("));
+  let attachmentCount = 0;
+  const dispatches = [];
+  const inputs = [0, 1].map(index => ({
+    isConnected: true,
+    value: "old",
+    files: [],
+    dispatchEvent: event => {
+      if (event.type !== "change") return;
+      dispatches.push(index);
+      attachmentCount += 1;
+      inputs[index].isConnected = false;
+    }
+  }));
+  const context = vm.createContext({
+    AdapterError: class AdapterError extends Error {
+      constructor(reason, message) { super(message); this.reason = reason; }
+    },
+    DataTransfer: class DataTransfer {
+      files = [];
+      items = { add: file => this.files.push(file) };
+    },
+    Date,
+    Event: class Event { constructor(type) { this.type = type; } },
+    decodeImage: image => image,
+    findUploadInput: () => inputs.find(input => input.isConnected),
+    findAttachmentButton: () => null,
+    countComposerAttachments: () => attachmentCount,
+    composerIsUploading: () => false,
+    waitForPageChange: async () => {},
+    waitForStableComposerAttachments: async () => {},
+    document: { hidden: false },
+    signalBackgroundPageActivity: () => {}
+  });
+  vm.runInContext(`${section}\nthis.runUpload = uploadImages;`, context);
+  await context.runUpload([{ name: "first.png" }]);
+  attachmentCount = 0;
+  await context.runUpload([{ name: "second.png" }]);
+  assert.deepEqual(dispatches, [0, 1]);
+  assert.deepEqual(inputs.map(input => input.value), ["", ""]);
 });
 
 test("browser tasks keep reference upload and prompt submission in one adapter transaction", async () => {
@@ -489,6 +560,12 @@ test("browser tasks keep reference upload and prompt submission in one adapter t
   assert.match(executeTask, /const request = await prepareTaskRequest[\s\S]*?prompt: request\.prompt,[\s\S]*?images: request\.images,[\s\S]*?startedAt: Date\.now\(\),[\s\S]*?phase: "preparing_tab"\s*\n\s*};/);
   assert.doesNotMatch(executeTask, /world: "MAIN"/);
   assert.doesNotMatch(executeTask, /images: \[\]/);
+  const content = await readFile(new URL("public/contentScript.js", root), "utf8");
+  assert.match(content, /await uploadImages\(input\.images\)/);
+  assert.match(content, /const currentComposer = findComposer\(\)/);
+  assert.match(content, /setComposerText\(currentComposer, input\.prompt\)/);
+  assert.doesNotMatch(content, /setComposerText\(page\.composer, input\.prompt\)/);
+  assert.doesNotMatch(content, /findUploadInput\(\) \?\? resolvedInput/);
 });
 
 test("images can be dropped onto the canvas at the pointer position", async () => {

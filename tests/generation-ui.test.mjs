@@ -6,24 +6,37 @@ import {
   generationModelLabel,
   generationProvider,
   gptWebLocation,
+  gptWebLocationsForTask,
   isActiveTaskRun,
+  normalizeTaskGenerationMode,
   taskStatusLabel
 } from "../src/domain/generation-ui.ts";
 
-test("three visible providers preserve the four persisted generation modes", () => {
+test("three visible providers preserve the five persisted generation modes", () => {
   assert.equal(generationProvider("browser"), "gpt_web");
   assert.equal(generationProvider("team_web"), "gpt_web");
+  assert.equal(generationProvider("gemini"), "gpt_web");
   assert.equal(generationProvider("team"), "team_cloud");
   assert.equal(generationProvider("api"), "api");
   assert.equal(gptWebLocation("browser"), "local");
   assert.equal(gptWebLocation("team_web"), "team");
+  assert.equal(gptWebLocation("gemini"), "gemini");
   assert.equal(generationModeForProvider("gpt_web", "local"), "browser");
   assert.equal(generationModeForProvider("gpt_web", "team"), "team_web");
+  assert.equal(generationModeForProvider("gpt_web", "gemini"), "gemini");
   assert.equal(generationModeForProvider("team_cloud"), "team");
   assert.equal(generationModeForProvider("api"), "api");
   assert.equal(generationModelLabel("api", "flare"), "gpt-image-2");
   assert.equal(generationModelLabel("api", "flare", "gpt-image-2.5-sunburst"), "gpt-image-2.5-sunburst");
   assert.equal(generationModelLabel("team", "sunburst"), "Sunburst");
+  assert.equal(generationModelLabel("gemini", "flare"), "Gemini Image");
+});
+
+test("upscale Web-img modes exclude Gemini without changing generation tasks", () => {
+  assert.deepEqual(gptWebLocationsForTask(true), ["local", "team"]);
+  assert.deepEqual(gptWebLocationsForTask(false), ["local", "team", "gemini"]);
+  assert.equal(normalizeTaskGenerationMode("gemini", true), "browser");
+  assert.equal(normalizeTaskGenerationMode("gemini", false), "gemini");
 });
 
 test("one status projection distinguishes every user-visible run phase", () => {

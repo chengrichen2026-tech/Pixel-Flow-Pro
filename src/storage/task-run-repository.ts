@@ -27,6 +27,7 @@ export interface TaskRunTable {
   toArray(): Promise<TaskRunRecord[]>;
   get(id: string): Promise<TaskRunRecord | undefined>;
   put(record: TaskRunRecord): Promise<unknown>;
+  where?(index: string): { equals(value: string): { toArray(): Promise<TaskRunRecord[]> } };
 }
 
 const runId = () => `run-${crypto.randomUUID()}`;
@@ -50,9 +51,14 @@ export class TaskRunRepository {
     this.now = now;
   }
 
+  private async projectRuns(projectId: string): Promise<TaskRunRecord[]> {
+    const indexed = this.table.where?.("projectId");
+    return indexed ? indexed.equals(projectId).toArray() : (await this.table.toArray()).filter(run => run.projectId === projectId);
+  }
+
   async list(projectId: string, taskId: string): Promise<TaskRunRecord[]> {
-    return (await this.table.toArray())
-      .filter(run => isCurrentRecord(run) && run.projectId === projectId && run.taskId === taskId)
+    return (await this.projectRuns(projectId))
+      .filter(run => isCurrentRecord(run) && run.taskId === taskId)
       .sort((left, right) => left.attempt - right.attempt);
   }
 
@@ -62,8 +68,8 @@ export class TaskRunRepository {
 
   async latestByProject(projectId: string): Promise<Map<string, TaskRunRecord>> {
     const latest = new Map<string, TaskRunRecord>();
-    for (const run of await this.table.toArray()) {
-      if (!isCurrentRecord(run) || run.projectId !== projectId) continue;
+    for (const run of await this.projectRuns(projectId)) {
+      if (!isCurrentRecord(run)) continue;
       const current = latest.get(run.taskId);
       if (!current || run.attempt > current.attempt) latest.set(run.taskId, structuredClone(run));
     }

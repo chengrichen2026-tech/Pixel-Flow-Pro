@@ -1,7 +1,8 @@
 "use strict";
+// @ts-check
 (() => {
   // src/shared/protocol.ts
-  var CHATGPT_ADAPTER_VERSION = 34;
+  var CHATGPT_ADAPTER_VERSION = 38;
   var taskTypes = /* @__PURE__ */ new Set([
     "RUN_TASK",
     "CANCEL_TASK",
@@ -66,15 +67,24 @@
   function pageText() {
     return document.body?.innerText || document.body?.textContent || "";
   }
+  function isVisibleElement(element) {
+    if (!(element instanceof HTMLElement) || !element.isConnected || element.hidden || element.closest('[hidden], [aria-hidden="true"]')) return false;
+    const style = getComputedStyle(element);
+    return style.display !== "none" && style.visibility !== "hidden" && style.visibility !== "collapse" && element.getClientRects().length > 0;
+  }
   function findComposer() {
-    return document.querySelector(
+    const candidates = [...document.querySelectorAll(
       '#prompt-textarea, [data-testid="composer-input"], textarea[placeholder*="Message" i], textarea[placeholder*="\u53D1\u9001"], [contenteditable="true"][role="textbox"]'
-    );
+    )];
+    return candidates.filter(isVisibleElement).at(-1) ?? null;
   }
   function findSendButton() {
-    return document.querySelector(
-      '[data-testid="send-button"], button[aria-label*="Send" i], button[aria-label*="\u53D1\u9001"]'
-    );
+    const selector = '[data-testid="send-button"], button[aria-label*="Send" i], button[aria-label*="\u53D1\u9001"]';
+    const region = findComposerRegion();
+    const regional = region ? [...region.querySelectorAll(selector)].filter(isVisibleElement).at(-1) : null;
+    if (regional instanceof HTMLButtonElement) return regional;
+    const global = [...document.querySelectorAll(selector)].filter(isVisibleElement).at(-1);
+    return global instanceof HTMLButtonElement ? global : null;
   }
   function findComposerRegion() {
     const composer = findComposer();
@@ -91,9 +101,10 @@
       "#upload-files",
       "#upload-media-files"
     ];
+    /** @type {HTMLInputElement[]} */
     const inputs = [];
     const addInput = (input) => {
-      if (input && !input.disabled && !input.hasAttribute("capture") && !inputs.includes(input)) inputs.push(input);
+      if (input instanceof HTMLInputElement && input.isConnected && !input.disabled && !input.hasAttribute("capture") && !inputs.includes(input)) inputs.push(input);
     };
     if (region) {
       for (const selector of knownSelectors) {
@@ -117,11 +128,11 @@
     return inputs.map((input, index) => ({ input, index, priority: priority(input) })).sort((a, b) => a.priority - b.priority || a.index - b.index).map(({ input }) => input);
   }
   function findAttachmentButton() {
-    const direct = document.querySelector(
-      '#composer-plus-btn, [data-testid="composer-plus-btn"], button[aria-label*="Attach" i], button[aria-label*="Upload" i], button[aria-label*="\u6DFB\u52A0\u6587\u4EF6"], button[aria-label*="\u4E0A\u4F20\u6587\u4EF6"]'
-    );
-    if (direct) return direct;
-    return [...document.querySelectorAll("button")].find(
+    const selector = '#composer-plus-btn, [data-testid="composer-plus-btn"], button[aria-label*="Attach" i], button[aria-label*="Upload" i], button[aria-label*="\u6DFB\u52A0\u6587\u4EF6"], button[aria-label*="\u4E0A\u4F20\u6587\u4EF6"]';
+    const region = findComposerRegion();
+    const direct = region ? [...region.querySelectorAll(selector)].filter(isVisibleElement).at(-1) : null;
+    if (direct instanceof HTMLButtonElement) return direct;
+    return [...document.querySelectorAll("button")].filter(isVisibleElement).find(
       (button) => /添加文件|上传文件|attach|upload/i.test((button.getAttribute("aria-label") || button.textContent || "").trim())
     );
   }
@@ -377,17 +388,20 @@
   function isResponseGenerating() {
     // ChatGPT keeps inactive composer controls mounted after generation ends.
     return [...document.querySelectorAll(stopSelector)].some((button) => {
-      if (button.hidden || button.closest('[hidden], [aria-hidden="true"]')) return false;
+      const element = /** @type {HTMLElement} */ (button);
+      if (element.hidden || element.closest('[hidden], [aria-hidden="true"]')) return false;
       const style = getComputedStyle(button);
       return style.display !== "none" && style.visibility !== "hidden" && style.visibility !== "collapse" && button.getClientRects().length > 0;
     });
   }
   function generatedImageSource(image) {
-    const src = image.currentSrc || image.src;
+    if (!image || typeof image !== "object") return false;
+    const element = /** @type {HTMLImageElement} */ (image);
+    const src = element.currentSrc || element.src;
     if (!src) return false;
     if (/files\.oaiusercontent\.com|oaidalleapiprodscus|backend-api\/(?:files|estuary\/content)|\/file-[^/]+/i.test(src)) return true;
     if (src.startsWith("blob:") || src.startsWith("data:image/")) return true;
-    return image.width >= 256 || image.naturalWidth >= 256;
+    return element.width >= 256 || element.naturalWidth >= 256;
   }
   function isTransientResponseText(text) {
     const normalized = normalizeTurnText(text);
@@ -402,11 +416,18 @@
     return /(?:已生成|生成了)\s*(?:[\d一二两三四五六七八九十]+\s*张|[^。！？\n]{0,48}(?:图片|图像))|(?:图片|图像)已(?:经)?生成/.test(normalized)
       || /\b(?:created|generated)\b[^.!?\n]{0,48}\b(?:images?|pictures?|photos?|illustrations?)\b|here(?:'s| is| are)\b[^.!?\n]{0,36}\bimages?\b/i.test(normalized);
   }
+  function imageFilePreviewButtons(turn) {
+    if (!turn) return [];
+    return [...turn.querySelectorAll('button[aria-label*=".png" i], button[aria-label*=".jpg" i], button[aria-label*=".jpeg" i], button[aria-label*=".webp" i]')].filter((button) => {
+      const label = typeof button.getAttribute === "function" ? button.getAttribute("aria-label") || "" : "";
+      return /(?:\u9884\u89C8|preview)/i.test(label) && /\.(?:png|jpe?g|webp)\b/i.test(label);
+    });
+  }
   function extractLatestResult() {
     const turns = assistantTurns();
     const latest = turns.at(-1);
     const exchangeSelector = "[data-turn-key], [data-content-search-turn-key]";
-    const exchange = userTurns().at(-1)?.closest(exchangeSelector);
+    const exchange = latest?.closest(exchangeSelector) ?? latest;
     const groups = [...(exchange?.querySelectorAll('[role="group"][aria-label="生成的图像"], [role="group"][aria-label="Generated images" i]') ?? [])];
     const slides = groups.flatMap((group) => [...group.querySelectorAll("button[aria-pressed]")]);
     // The main preview repeats the selected slide. Read one source per slide.
@@ -417,12 +438,11 @@
       : previews.length ? previews
       : [...(latest?.querySelectorAll("img") ?? [])];
     const images = [...new Set(imageElements.filter(generatedImageSource).map((image) => image.currentSrc || image.src))];
+    const imageFileCount = imageFilePreviewButtons(latest).length;
     // Lazy thumbnails can have readable Blob URLs before the browser decodes them.
     const exchangeState = exchange?.querySelector("[data-talvt-turn-state]")?.getAttribute("data-talvt-turn-state");
     const galleryReady = images.length >= slides.length && (!hasCurrentGallery || !exchangeState || exchangeState === "complete");
-    if (!latest || (exchange && latest.closest(exchangeSelector) && !exchange.contains(latest))) {
-      return { images: hasCurrentGallery ? images : [], responseText: "", galleryReady, hasCurrentGallery };
-    }
+    if (!latest) return { images: [], responseText: "", galleryReady: false, hasCurrentGallery: false, imageFileCount: 0 };
     const textSource = latest.cloneNode(true);
     textSource.querySelectorAll([
       "button",
@@ -443,8 +463,32 @@
       images,
       galleryReady,
       hasCurrentGallery,
+      imageFileCount,
       responseText: isTransientResponseText(responseText) ? "" : responseText
     };
+  }
+  async function collectImageFileSources(turn) {
+    const sources = [];
+    for (const button of imageFilePreviewButtons(turn)) {
+      button.click();
+      await waitUntil(
+        () => [...document.querySelectorAll('img[alt="\u56FE\u7247\u9884\u89C8"], img[alt*="Image preview" i]')].some(generatedImageSource),
+        3e4,
+        new AdapterError("network_error", "ChatGPT \u56FE\u7247\u6587\u4EF6\u9884\u89C8\u52A0\u8F7D\u8D85\u65F6")
+      );
+      const previewCandidate = [...document.querySelectorAll('img[alt="\u56FE\u7247\u9884\u89C8"], img[alt*="Image preview" i]')].find((image) => image instanceof HTMLImageElement && generatedImageSource(image));
+      const preview = previewCandidate instanceof HTMLImageElement ? previewCandidate : undefined;
+      const source = preview?.currentSrc || preview?.src;
+      if (source) sources.push(source);
+      const close = [...document.querySelectorAll('button[aria-label]')].find((candidate) => /^(?:\u5173\u95ED\u67E5\u770B\u5668|Close viewer)$/i.test(candidate.getAttribute("aria-label") || ""));
+      if (close instanceof HTMLButtonElement) close.click();
+      if (close) await waitUntil(
+        () => ![...document.querySelectorAll('img[alt="\u56FE\u7247\u9884\u89C8"], img[alt*="Image preview" i]')].some(generatedImageSource),
+        1e4,
+        new AdapterError("selector_missing", "ChatGPT \u56FE\u7247\u6587\u4EF6\u67E5\u770B\u5668\u65E0\u6CD5\u5173\u95ED")
+      );
+    }
+    return [...new Set(sources)];
   }
   function decodeImage(input) {
     const binary = atob(input.base64);
@@ -469,7 +513,7 @@
         settled = true;
         observer.disconnect();
         clearTimeout(timer);
-        resolve();
+        resolve(undefined);
       }
       if (document.body) observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["src", "aria-busy"] });
       timer = setTimeout(finish, timeoutMs);
@@ -480,30 +524,33 @@
     window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: false }));
     document.dispatchEvent(new Event("visibilitychange"));
   }
-  async function uploadImages(fileInput, images) {
+  async function resolveUploadInput() {
+    const direct = findUploadInput();
+    if (direct) return direct;
+    const attachmentButton = findAttachmentButton();
+    if (!attachmentButton) throw new AdapterError("upload_failed", "\u627E\u4E0D\u5230 ChatGPT \u56FE\u7247\u4E0A\u4F20\u5165\u53E3");
+    attachmentButton.click();
+    await waitUntil(
+      () => Boolean(findUploadInput()),
+      5e3,
+      new AdapterError("upload_failed", "\u6253\u5F00\u9644\u4EF6\u83DC\u5355\u540E\u4ECD\u627E\u4E0D\u5230\u56FE\u7247\u4E0A\u4F20\u63A7\u4EF6")
+    );
+    const mounted = findUploadInput();
+    if (!mounted) throw new AdapterError("upload_failed", "\u627E\u4E0D\u5230 ChatGPT \u56FE\u7247\u4E0A\u4F20\u63A7\u4EF6");
+    return mounted;
+  }
+  async function uploadImages(images) {
     if (images.length === 0) return;
-    let resolvedInput = fileInput ?? findUploadInput();
-    if (!resolvedInput) {
-      const attachmentButton = findAttachmentButton();
-      if (!attachmentButton) throw new AdapterError("upload_failed", "\u627E\u4E0D\u5230 ChatGPT \u56FE\u7247\u4E0A\u4F20\u5165\u53E3");
-      attachmentButton.click();
-      await waitUntil(
-        () => Boolean(findUploadInput()),
-        5e3,
-        new AdapterError("upload_failed", "\u6253\u5F00\u9644\u4EF6\u83DC\u5355\u540E\u4ECD\u627E\u4E0D\u5230\u56FE\u7247\u4E0A\u4F20\u63A7\u4EF6")
-      );
-      resolvedInput = findUploadInput();
-    }
-    if (!resolvedInput) throw new AdapterError("upload_failed", "\u627E\u4E0D\u5230 ChatGPT \u56FE\u7247\u4E0A\u4F20\u63A7\u4EF6");
     if (typeof DataTransfer === "undefined") throw new AdapterError("upload_failed", "\u6D4F\u89C8\u5668\u4E0D\u652F\u6301\u56FE\u7247\u4F20\u9012");
     let expectedAttachmentCount = countComposerAttachments();
     if (expectedAttachmentCount > 0) {
       throw new AdapterError("upload_failed", "ChatGPT 输入区在任务开始前已有附件，已停止发送以避免混入上一次参考图");
     }
     for (const [index, image] of images.entries()) {
-      resolvedInput = findUploadInput() ?? resolvedInput;
+      const resolvedInput = await resolveUploadInput();
       const transfer = new DataTransfer();
       transfer.items.add(decodeImage(image));
+      resolvedInput.value = "";
       resolvedInput.files = transfer.files;
       resolvedInput.dispatchEvent(new Event("input", { bubbles: true }));
       resolvedInput.dispatchEvent(new Event("change", { bubbles: true }));
@@ -543,7 +590,7 @@
       const latest = turns.at(-1) ?? null;
       const result = extractLatestResult();
       const signature = JSON.stringify(result);
-      const hasNewTurn = turns.length > previousTurnCount || result.images.length > 0 && result.hasCurrentGallery;
+      const hasNewTurn = turns.length > previousTurnCount;
       const isGenerating = isResponseGenerating();
       const hasMeaningfulResult = Boolean(result.responseText || result.images.length > 0);
       const imageExpected = expectsGeneratedImages(prompt);
@@ -563,7 +610,13 @@
         await new Promise((resolve) => setTimeout(resolve, 1e3));
         continue;
       }
-      const imageReady = result.galleryReady && (result.images.length > 0 || !imageClaimed && (!imageExpected || Date.now() - started > 20e3));
+      if (hasNewTurn && !isGenerating && result.imageFileCount > 0) {
+        const fileImages = await collectImageFileSources(latest);
+        if (fileImages.length === result.imageFileCount) {
+          return { ...result, images: [...new Set([...result.images, ...fileImages])], galleryReady: true, hasCurrentGallery: true };
+        }
+      }
+      const imageReady = result.imageFileCount === 0 && result.galleryReady && (result.images.length > 0 || !imageClaimed && (!imageExpected || Date.now() - started > 20e3));
       if (hasNewTurn && !isGenerating && !isTemporaryRetryError(latest) && hasMeaningfulResult && imageReady) {
         stableChecks = signature === previousSignature ? stableChecks + 1 : 0;
         if (stableChecks >= 3) return result;
@@ -596,9 +649,11 @@
     const previousTurnCount = assistantTurns().length;
     assertExpectedConversation(input.expectedConversationUrl);
     await input.onPhase?.("uploading");
-    await uploadImages(page.fileInput, input.images);
+    await uploadImages(input.images);
     assertExpectedConversation(input.expectedConversationUrl);
-    setComposerText(page.composer, input.prompt);
+    const currentComposer = findComposer();
+    if (!currentComposer) throw new AdapterError("selector_missing", "\u53C2\u8003\u56FE\u4E0A\u4F20\u540E\u627E\u4E0D\u5230 ChatGPT \u8F93\u5165\u533A");
+    setComposerText(currentComposer, input.prompt);
     await input.onPhase?.("sending");
     await waitUntil(
       () => {

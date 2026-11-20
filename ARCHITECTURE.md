@@ -4,6 +4,8 @@
 
 `ChatGPT Web：React 画布 → background 调度队列 → ChatGPT 标签页 → contentScript → IndexedDB → React 画布`
 
+`Gemini Web：React 画布 → background 调度队列 → Gemini 标签页 → geminiContentScript → IndexedDB → React 画布`
+
 `API Key：React 画布 → background 提交本机任务 → 127.0.0.1:43129 常驻 API Worker → 本地任务结果 → background 轮询/重连 → IndexedDB → React 画布`
 
 `Team Cloud：同伴 React 画布 → background 携成员令牌访问固定 Cloudflare 中继 → 中继注入平台 Key → 妙搭任务箱 → Cloudflare Queue/Worker → Codex OAuth 生图 → 鉴权结果下载 → 同伴 IndexedDB → React 画布`
@@ -25,18 +27,19 @@
 - 扩展权限和产品信息：`public/manifest.json`
 - 后台调度源码：`src/background/service-worker.ts` 及其 `src/background/`、`src/domain/` 模块
 - 后台构建产物：`public/background.js`
-- ChatGPT DOM 适配：`public/contentScript.js`
+- ChatGPT DOM 适配源码：`src/adapters/chatgpt-content-script.js`，经 TypeScript `checkJs` 后生成 `public/contentScript.js`
+- Gemini DOM 适配源码：`src/adapters/gemini-content-script.js`，经 TypeScript `checkJs` 后生成 `public/geminiContentScript.js`
 - 构建产物：`扩展程序/`
 
 ## 数据
 
-IndexedDB 名称为 `gpt-node-canvas`，当前 schema 版本 3：
+IndexedDB 名称为 `gpt-node-canvas`，当前 schema 版本 4：
 
 - `projects: id, updatedAt, name`
 - `assets: id, createdAt`
-- `runs: id, [projectId+taskId], startedAt`
+- `runs: id, projectId, [projectId+taskId], startedAt`
 
-版本 2 曾为删除恢复引入 `deletedProjects`，版本 3 已移除该表并保留 `projects / assets / runs`。保持数据库名和现有字段兼容，是旧画布数据继续可用的必要条件。
+版本 2 曾为删除恢复引入 `deletedProjects`，版本 3 已移除该表；版本 4 为 `runs` 增加 `projectId` 索引，以便项目级删除直接清理运行记录而不扫描全表。保持数据库名和现有字段兼容，是旧画布数据继续可用的必要条件。
 
 ## 发布前深链路门槛
 
@@ -44,11 +47,12 @@ IndexedDB 名称为 `gpt-node-canvas`，当前 schema 版本 3：
 
 1. 真实产品图连入任务，界面回读输入图片数正确。
 2. 本机 ChatGPT Web 真实上传附件、发送提示词、进入对话、完成生成并写回结果。
-3. API 模式真实提交 Worker job、完成生成并写回结果。
-4. 团队模式真实通过成员令牌提交 Gateway job、由 Codex OAuth 完成生成并写回同伴画布。
-5. Team Web 模式必须由另一台已配对设备领取任务，复用现有 ChatGPT adapter 生成并回传任务箱，再写回同伴画布。
-6. 受影响路径均回读 `completed`、`runCount` 增加、结果节点/资产存在，完成后活动任务映射已清理。
-7. 删除临时画布与本地验收资产，回读不存在后才收尾。
+3. 本机 Gemini Web 真实上传附件、发送提示词、进入独立对话、完成生成并写回结果。
+4. API 模式真实提交 Worker job、完成生成并写回结果。
+5. 团队模式真实通过成员令牌提交 Gateway job、由 Codex OAuth 完成生成并写回同伴画布。
+6. Team Web 模式必须由另一台已配对设备领取任务，复用现有 ChatGPT adapter 生成并回传任务箱，再写回同伴画布。
+7. 受影响路径均回读 `completed`、`runCount` 增加、结果节点/资产存在，完成后活动任务映射已清理。
+8. 删除临时画布与本地验收资产，回读不存在后才收尾。
 
 任一真实闭环未运行或未取得上述证据时，结论必须标记为“代码验证通过，深链路未验收”。
 
@@ -58,8 +62,8 @@ IndexedDB 名称为 `gpt-node-canvas`，当前 schema 版本 3：
 
 第七阶段已删除未被正式入口加载的 `production/generation-mode.js` 及构建副本，API、Browser与团队模式共用一套输入、提示词和 Base64 请求准备。动态权限仅允许 HTTPS；`127.0.0.1:43130` 与 Quick Tunnel 权限暂时保留，因为旧本机 Team Gateway 仍是已发布路径，当前只有本机配置证据，尚无覆盖所有真实用户的迁移清单。
 
-第八阶段已增加 `generation-ui.ts` 作为运行配置与状态文案的唯一 UI 投影。当前任务卡显示 GPT Web、Team Cloud、API 三个主模式：GPT Web 再选择本机/团队，Team Cloud 再选择 Flare/Sunburst；内部继续映射到 `browser / team_web / team / api`。TaskNode 保存 `runtimeStatus` 兼容投影；活动任务支持取消，失败或取消任务支持重试，可恢复团队 Job 支持重新写回。普通任务、图片容器批量和失败重试统一提交 `RUN_TASKS`。
+第八阶段已增加 `generation-ui.ts` 作为运行配置与状态文案的唯一 UI 投影。当前任务卡显示 Web-img、Team Cloud、API 三个主模式：Web-img 再选择 GPT/Gpt-T/Gemini，Team Cloud 再选择 Flare/Sunburst；内部映射到 `browser / team_web / gemini / team / api`。TaskNode 保存 `runtimeStatus` 兼容投影；活动任务支持取消，失败或取消任务支持重试，可恢复团队 Job 支持重新写回。普通任务、图片容器批量和失败重试统一提交 `RUN_TASKS`。
 
-当前 v0.3.23 新增本地图片存储统计与安全清理，清理引用根覆盖画布、容器、放大历史、提示词示例、产品素材和图库，并为新写入图片保留 10 分钟保护期；旧模板、文字节点和手动释放标签入口已移除。功能事实以 `TaskRun`、三个主模式、四条底层执行链路和真实加载扩展为准。
+当前 v0.3.23 新增本地图片存储统计与安全清理，清理引用根覆盖画布、容器、放大历史、提示词示例、产品素材和图库，并为新写入图片保留 10 分钟保护期；旧模板、文字节点和手动释放标签入口已移除。功能事实以 `TaskRun`、三个主模式、五条底层执行链路和真实加载扩展为准。
 
 后续重点是批量运行模型迁移、资产管理端 TypeScript 化、ChatGPT DOM 探测、备份迁移测试及主包拆分。

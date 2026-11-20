@@ -85,4 +85,11 @@ export class ProjectRepository {
       return { conversationUrl: task.conversationUrl, onlineConversationDeleted: false };
     });
   }
+
+  async deleteProject(projectId: string): Promise<void> {
+    await this.database.transaction("rw", this.database.projects, this.database.runs, async () => {
+      await this.database.projects.delete(projectId);
+      await this.database.runs.where("projectId").equals(projectId).delete();
+    });
+  }
 }

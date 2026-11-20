@@ -10,7 +10,8 @@ test("rebuilt nodes rely on one measured size source", async () => {
   assert.doesNotMatch(app, /initialHeight:/);
   assert.doesNotMatch(app, / fitView fitViewOptions=/);
   assert.match(app, /requestAnimationFrame\(\(\)=>requestAnimationFrame\(\(\)=>void instance\.fitView/);
-  assert.match(app, /previous\?\.measured/);
+  assert.doesNotMatch(app, /measured:previous\?\.measured/);
+  assert.match(app, /useUpdateNodeInternals\(\)/);
 });
 
 test("canvas actions share one per-project graph history", async () => {

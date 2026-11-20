@@ -12,11 +12,11 @@ Pixel Flow 是一个运行在 Chrome / Edge 中的本地 AI 创意任务画布�
 
 | 主模式 | 二级选择 | 底层兼容值 |
 | --- | --- | --- |
-| GPT Web | 本机 / 团队 | `browser / team_web` |
+| Web-img | GPT / Gpt-T / Gemini | `browser / team_web / gemini` |
 | Team Cloud | Flare / Sunburst | `team` + `teamImageModel` |
 | API | GPT Image 2 / Sunburst 2.5 / Flare 2.5 | `api` |
 
-GPT Web 选择“团队”即原 Team Web 链路。已有画布继续读取 `api / browser / team / team_web`，无需迁移。
+Web-img 的 GPT 与 Gpt-T 分别对应原 GPT Web 本机与团队链路；Gemini 使用当前浏览器的 Gemini 登录态。已有画布继续读取 `api / browser / team / team_web`，新增任务可保存 `gemini`，无需迁移旧数据。
 
 ### 任务运行
 
@@ -44,11 +44,12 @@ GPT Web 选择“团队”即原 Team Web 链路。已有画布继续读取 `api
 - 提示词、产品和图库支持名称、标签、示例图或素材维护；各库支持独立备份与导入。
 - 存储空间统计当前浏览器中的图片数量与占用；清理操作仅删除未被画布、容器、放大任务历史、提示词示例图、产品素材或图库引用的图片，并在删除前二次确认。
 
-### 三个模式、四条执行链路
+### 三个模式、五条执行链路
 
 - **API**：通过本机 `127.0.0.1:43129` API Worker 调用 `aihub.rbmanon.cn`，可选 `gpt-image-2`、`gpt-image-2.5-sunburst`、`gpt-image-2.5-flare`；质量 `medium`。纯文字走 `generations`，参考图走 JSON Base64 `edits`。
-- **GPT Web · 本机**：使用当前浏览器已登录的 ChatGPT，新建或恢复真实对话，上传参考图、发送提示词并把结果写回画布。
-- **GPT Web · 团队**：成员任务直接进入妙搭任务箱，由团队中任意一台已配对且在线的远端 Pixel Flow 执行机领取；提交电脑本身无需配对。该模式与 Team Cloud 统一计入成员每日团队生图用量与额度。协议 v10 使用对象存储逐图直传：执行机取得上传地址后并行上传原图，任务箱只保存结果清单，提交方从签名地址并行下载并校验 SHA-256；旧 bundle / chunks 任务保持兼容，协议 v8 取消仍可用。
+- **Web-img · GPT**：使用当前浏览器已登录的 ChatGPT，新建或恢复真实对话，上传参考图、发送提示词并把结果写回画布。
+- **Web-img · Gpt-T**：成员任务直接进入妙搭任务箱，由团队中任意一台已配对且在线的远端 Pixel Flow 执行机领取；提交电脑本身无需配对。该模式与 Team Cloud 统一计入成员每日团队生图用量与额度。协议 v10 使用对象存储逐图直传：执行机取得上传地址后并行上传原图，任务箱只保存结果清单，提交方从签名地址并行下载并校验 SHA-256；旧 bundle / chunks 任务保持兼容，协议 v8 取消仍可用。
+- **Web-img · Gemini**：使用当前浏览器已登录的 Gemini，每个任务建立独立对话，上传参考图、发送提示词，识别真实 AI 生成图片后立即写回画布。
 - **Team Cloud**：通过妙搭任务箱、Cloudflare Queue / Worker 和服务端 Codex OAuth 生图；可选 Flare / Sunburst，成员浏览器只保存成员令牌，平台访问 Key 由中继托管。
 
 Team Web 的性能与验收记录见 [TEAM_WEB_PERFORMANCE.md](TEAM_WEB_PERFORMANCE.md)。旧本机 Team Gateway / Quick Tunnel 仍是兼容路径，不是新伙伴的推荐方案。
@@ -63,7 +64,7 @@ Team Web 的性能与验收记录见 [TEAM_WEB_PERFORMANCE.md](TEAM_WEB_PERFORMA
 3. 选择“加载已解压的扩展”，指向 `扩展程序/`。
 4. 点击 Pixel Flow 图标打开画布。
 5. 放入图片或文字，新建任务并连接输入。
-6. 在任务卡选择 GPT Web、Team Cloud 或 API；再按模式选择 GPT Web 的本机/团队或 Team Cloud 的 Flare/Sunburst，并设置比例与提示词。
+6. 在任务卡选择 Web-img、Team Cloud 或 API；Web-img 可选 GPT、Gpt-T、Gemini，Team Cloud 可选 Flare/Sunburst，然后设置比例与提示词。
 7. 点击“运行任务”，按任务卡状态等待结果写回。
 
 首次配置统一从顶部 **生图设置** 进入：个人 API、团队成员令牌和本机网页生图机配对分别保存，凭证只保存在当前浏览器本地。网页生图机名称由任务箱管理员统一设置，执行机配对后自动同步。团队任务箱地址已内置，团队应用级访问配置由构建提供，个人成员授权由成员令牌承担；普通成员无需把本机配对成执行机。

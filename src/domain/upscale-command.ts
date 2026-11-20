@@ -6,7 +6,7 @@ export function validateUpscaleCommand(command:Record<string,unknown>){
   const sources=['sourceNodeId','imageDataUrl','assetId'].filter(k=>typeof command[k]==='string'&&String(command[k]).trim());
   if(sources.length!==1)throw new Error('Provide exactly one of sourceNodeId, imageDataUrl, or assetId');
   const generationMode=String(command.generationMode??DEFAULT_UPSCALE_OPTIONS.generationMode) as GenerationMode;
-  if(!['browser','api','team','team_web'].includes(generationMode))throw new Error('Invalid generationMode');
+  if(!['browser','api','team','team_web','gemini'].includes(generationMode))throw new Error('Invalid generationMode');
   const teamImageModel=String(command.teamImageModel??'sunburst') as TeamImageModel;
   if(!['flare','sunburst'].includes(teamImageModel))throw new Error('Invalid teamImageModel');
   const apiImageModel=String(command.apiImageModel??DEFAULT_UPSCALE_OPTIONS.apiImageModel) as ApiImageModel;

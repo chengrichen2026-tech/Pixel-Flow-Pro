@@ -353,16 +353,20 @@ var TaskRunRepository = class {
 		this.table = table;
 		this.now = now;
 	}
+	async projectRuns(projectId) {
+		const indexed = this.table.where?.("projectId");
+		return indexed ? indexed.equals(projectId).toArray() : (await this.table.toArray()).filter((run) => run.projectId === projectId);
+	}
 	async list(projectId, taskId) {
-		return (await this.table.toArray()).filter((run) => isCurrentRecord(run) && run.projectId === projectId && run.taskId === taskId).sort((left, right) => left.attempt - right.attempt);
+		return (await this.projectRuns(projectId)).filter((run) => isCurrentRecord(run) && run.taskId === taskId).sort((left, right) => left.attempt - right.attempt);
 	}
 	async latest(projectId, taskId) {
 		return (await this.list(projectId, taskId)).at(-1);
 	}
 	async latestByProject(projectId) {
 		const latest = /* @__PURE__ */ new Map();
-		for (const run of await this.table.toArray()) {
-			if (!isCurrentRecord(run) || run.projectId !== projectId) continue;
+		for (const run of await this.projectRuns(projectId)) {
+			if (!isCurrentRecord(run)) continue;
 			const current = latest.get(run.taskId);
 			if (!current || run.attempt > current.attempt) latest.set(run.taskId, structuredClone(run));
 		}
@@ -4239,6 +4243,7 @@ var NodeCanvasDatabase = class extends Dexie {
 			runs: "id, [projectId+taskId], startedAt"
 		});
 		this.version(3).stores({ deletedProjects: null });
+		this.version(4).stores({ runs: "id, projectId, [projectId+taskId], startedAt" });
 	}
 };
 //#endregion
@@ -4337,6 +4342,12 @@ var ProjectRepository = class {
 			};
 		});
 	}
+	async deleteProject(projectId) {
+		await this.database.transaction("rw", this.database.projects, this.database.runs, async () => {
+			await this.database.projects.delete(projectId);
+			await this.database.runs.where("projectId").equals(projectId).delete();
+		});
+	}
 };
 //#endregion
 //#region src/background/keyed-serial-queue.ts
@@ -4394,7 +4405,10 @@ var taskTypes = /* @__PURE__ */ new Set([
 	"RESUME_CHATGPT_RESULT",
 	"EXECUTE_IN_CHATGPT",
 	"EXECUTE_IN_CHATGPT_V2",
-	"EXECUTE_IN_CHATGPT_V3"
+	"EXECUTE_IN_CHATGPT_V3",
+	"CHECK_GEMINI_ADAPTER",
+	"RESUME_GEMINI_RESULT",
+	"EXECUTE_IN_GEMINI"
 ]);
 var taskStatuses = /* @__PURE__ */ new Set([
 	"idle",
@@ -4416,6 +4430,7 @@ function isExtensionMessage(value) {
 	if (!value || typeof value !== "object") return false;
 	const message = value;
 	if (message.type === "GET_API_CAPABILITIES") return true;
+	if (message.type === "DELETE_PROJECT") return typeof message.projectId === "string" && message.projectId.length > 0;
 	if (message.type === "REGENERATE_UPSCALE_TILE") return typeof message.projectId === "string" && typeof message.taskId === "string" && typeof message.tileId === "string" && message.tileId.length > 0;
 	if (message.type === "RUN_TASKS") return typeof message.projectId === "string" && Array.isArray(message.taskIds) && message.taskIds.length > 0 && message.taskIds.every((taskId) => typeof taskId === "string");
 	if (message.type === "DOWNLOAD_ASSET") return typeof message.projectId === "string" && typeof message.taskId === "string" && typeof message.assetId === "string";
@@ -4434,6 +4449,29 @@ var comparableChatGptUrl = (url) => {
 	return `${parsed.origin}${pathname}`;
 };
 var expectedChatGptConversationMatches = (actualUrl, expectedUrl) => actualUrl?.startsWith("https://chatgpt.com/") === true && comparableChatGptUrl(actualUrl) === comparableChatGptUrl(expectedUrl);
+var safeGeminiUrl = (url) => url?.startsWith("https://gemini.google.com/app") ? url : "https://gemini.google.com/app";
+var comparableGeminiUrl = (url) => {
+	const parsed = new URL(safeGeminiUrl(url));
+	const pathname = parsed.pathname.replace(/\/+$/, "") || "/app";
+	return `${parsed.origin}${pathname}`;
+};
+var expectedGeminiConversationMatches = (actualUrl, expectedUrl) => {
+	if (!actualUrl?.startsWith("https://gemini.google.com/app")) return false;
+	const expected = comparableGeminiUrl(expectedUrl);
+	return expected === "https://gemini.google.com/app" || comparableGeminiUrl(actualUrl) === expected;
+};
+function concreteGeminiConversationUrl(url) {
+	if (!url?.startsWith("https://gemini.google.com/app/")) return void 0;
+	try {
+		const parsed = new URL(url);
+		return /^\/app\/[^/?#]+\/?$/.test(parsed.pathname) ? `${parsed.origin}${parsed.pathname}` : void 0;
+	} catch {
+		return;
+	}
+}
+var safeBrowserUrl = (url, provider) => provider === "gemini" ? safeGeminiUrl(url) : safeChatGptUrl(url);
+var expectedBrowserConversationMatches = (actualUrl, expectedUrl, provider) => provider === "gemini" ? expectedGeminiConversationMatches(actualUrl, expectedUrl) : expectedChatGptConversationMatches(actualUrl, expectedUrl);
+var concreteBrowserConversationUrl = (url, provider) => provider === "gemini" ? concreteGeminiConversationUrl(url) : concreteChatGptConversationUrl(url);
 function concreteChatGptConversationUrl(url) {
 	if (!url?.startsWith("https://chatgpt.com/")) return void 0;
 	try {
@@ -4447,9 +4485,14 @@ function resolveTaskConversationUrl(message, senderUrl) {
 	if (message.type === "TASK_ERROR" && message.reason === "conversation_unavailable") return void 0;
 	return concreteChatGptConversationUrl(message.conversationUrl) ?? concreteChatGptConversationUrl(senderUrl) ?? (senderUrl?.startsWith("https://chatgpt.com/") ? senderUrl : message.conversationUrl);
 }
+function resolveBrowserTaskConversationUrl(message, senderUrl, provider) {
+	if (provider === "chatgpt") return resolveTaskConversationUrl(message, senderUrl);
+	if (message.type === "TASK_ERROR" && message.reason === "conversation_unavailable") return void 0;
+	return concreteGeminiConversationUrl(message.conversationUrl) ?? concreteGeminiConversationUrl(senderUrl) ?? (senderUrl?.startsWith("https://gemini.google.com/app") ? senderUrl : message.conversationUrl);
+}
 //#endregion
 //#region src/background/chatgpt-adapter-bridge.ts
-var isCurrentAdapter = (value) => Boolean(value && typeof value === "object" && value.adapterVersion === 34);
+var isCurrentAdapter$1 = (value) => Boolean(value && typeof value === "object" && value.adapterVersion === 38);
 async function probeAdapter(tabs, tabId, message) {
 	try {
 		const state = await tabs.sendMessage(tabId, {
@@ -4457,7 +4500,7 @@ async function probeAdapter(tabs, tabId, message) {
 			projectId: message.projectId,
 			taskId: message.taskId
 		});
-		return isCurrentAdapter(state) ? state : void 0;
+		return isCurrentAdapter$1(state) ? state : void 0;
 	} catch {
 		return;
 	}
@@ -4473,6 +4516,32 @@ async function sendWithCurrentChatGptAdapter(tabs, scripting, tabId, message) {
 	return tabs.sendMessage(tabId, {
 		...message,
 		type: "EXECUTE_IN_CHATGPT_V3"
+	});
+}
+var isCurrentAdapter = (value) => Boolean(value && typeof value === "object" && value.adapterVersion === 4);
+async function probeGeminiAdapter(tabs, tabId, message) {
+	try {
+		const state = await tabs.sendMessage(tabId, {
+			type: "CHECK_GEMINI_ADAPTER",
+			projectId: message.projectId,
+			taskId: message.taskId
+		});
+		return isCurrentAdapter(state) ? state : void 0;
+	} catch {
+		return;
+	}
+}
+async function sendWithCurrentGeminiAdapter(tabs, scripting, tabId, message) {
+	if (!await probeGeminiAdapter(tabs, tabId, message)) {
+		await scripting.executeScript({
+			target: { tabId },
+			files: ["geminiContentScript.js"]
+		});
+		if (!await probeGeminiAdapter(tabs, tabId, message)) throw new Error("Gemini 页面脚本重新连接失败，请刷新该标签页后重试");
+	}
+	return tabs.sendMessage(tabId, {
+		...message,
+		type: "EXECUTE_IN_GEMINI"
 	});
 }
 //#endregion
@@ -4512,8 +4581,8 @@ var TaskTabGrouper = class {
 //#endregion
 //#region src/background/tab-registry.ts
 var ConversationUnavailableError = class extends Error {
-	constructor() {
-		super("保存的 ChatGPT 对话已失效，或标签页已切换到其他对话");
+	constructor(provider = "chatgpt") {
+		super(`保存的 ${provider === "gemini" ? "Gemini" : "ChatGPT"} 对话已失效，或标签页已切换到其他对话`);
 		this.name = "ConversationUnavailableError";
 	}
 };
@@ -4530,25 +4599,32 @@ var TabRegistry = class {
 			await this.grouping?.group?.(tabId);
 		} catch {}
 	}
-	map(taskId, tabId, conversationUrl) {
+	map(taskId, tabId, conversationUrl, provider = "chatgpt") {
 		this.taskTabs.set(taskId, {
 			tabId,
-			conversationUrl: safeChatGptUrl(conversationUrl)
+			conversationUrl: safeBrowserUrl(conversationUrl, provider),
+			provider
 		});
 	}
 	async restoreProject(tasks) {
-		for (const task of tasks) this.taskTabs.set(task.taskId, { conversationUrl: task.conversationUrl });
+		for (const task of tasks) this.taskTabs.set(task.taskId, {
+			conversationUrl: task.conversationUrl,
+			provider: "chatgpt"
+		});
 	}
-	async ensure(taskId, conversationUrl) {
+	async ensure(taskId, conversationUrl, requestedProvider) {
 		const mapped = this.taskTabs.get(taskId);
-		const expectedUrl = safeChatGptUrl(conversationUrl ?? mapped?.conversationUrl);
+		const provider = requestedProvider ?? mapped?.provider ?? "chatgpt";
+		const expectedUrl = safeBrowserUrl(conversationUrl ?? mapped?.conversationUrl, provider);
 		if (mapped?.tabId !== void 0) try {
 			const tab = await this.tabs.get(mapped.tabId);
-			const liveConversationUrl = concreteChatGptConversationUrl(tab.url);
-			if (tab.id !== void 0 && expectedUrl === "https://chatgpt.com/" && liveConversationUrl) {
+			const liveConversationUrl = concreteBrowserConversationUrl(tab.url, provider);
+			const baseUrl = safeBrowserUrl(void 0, provider);
+			if (tab.id !== void 0 && expectedUrl === baseUrl && liveConversationUrl) {
 				this.taskTabs.set(taskId, {
 					tabId: tab.id,
-					conversationUrl: liveConversationUrl
+					conversationUrl: liveConversationUrl,
+					provider
 				});
 				await this.groupTab(tab.id);
 				return {
@@ -4556,25 +4632,29 @@ var TabRegistry = class {
 					conversationUrl: liveConversationUrl
 				};
 			}
-			if (tab.id !== void 0 && expectedChatGptConversationMatches(tab.url, expectedUrl)) {
+			if (tab.id !== void 0 && expectedBrowserConversationMatches(tab.url, expectedUrl, provider)) {
 				await this.groupTab(tab.id);
 				return {
 					tabId: tab.id,
 					conversationUrl: tab.url ?? mapped.conversationUrl
 				};
 			}
-			if (tab.id !== void 0) throw new ConversationUnavailableError();
+			if (tab.id !== void 0) throw new ConversationUnavailableError(provider);
 		} catch (error) {
 			if (error instanceof ConversationUnavailableError) throw error;
-			this.taskTabs.set(taskId, { conversationUrl: mapped.conversationUrl });
+			this.taskTabs.set(taskId, {
+				conversationUrl: mapped.conversationUrl,
+				provider
+			});
 		}
-		if (this.tabs.query && expectedUrl !== "https://chatgpt.com/") try {
+		if (this.tabs.query && expectedUrl !== safeBrowserUrl(void 0, provider)) try {
 			const claimedTabIds = new Set([...this.taskTabs.values()].flatMap((entry) => entry.tabId === void 0 ? [] : [entry.tabId]));
-			const existing = (await this.tabs.query({ url: ["https://chatgpt.com/*"] })).find((candidate) => candidate.id !== void 0 && !claimedTabIds.has(candidate.id) && expectedChatGptConversationMatches(candidate.url, expectedUrl));
+			const existing = (await this.tabs.query({ url: [provider === "gemini" ? "https://gemini.google.com/app*" : "https://chatgpt.com/*"] })).find((candidate) => candidate.id !== void 0 && !claimedTabIds.has(candidate.id) && expectedBrowserConversationMatches(candidate.url, expectedUrl, provider));
 			if (existing?.id !== void 0) {
 				this.taskTabs.set(taskId, {
 					tabId: existing.id,
-					conversationUrl: existing.url ?? expectedUrl
+					conversationUrl: existing.url ?? expectedUrl,
+					provider
 				});
 				await this.groupTab(existing.id);
 				return {
@@ -4590,7 +4670,8 @@ var TabRegistry = class {
 		if (tab.id === void 0) throw new Error("浏览器没有返回新标签页编号");
 		this.taskTabs.set(taskId, {
 			tabId: tab.id,
-			conversationUrl: tab.url ?? expectedUrl
+			conversationUrl: tab.url ?? expectedUrl,
+			provider
 		});
 		await this.groupTab(tab.id);
 		return {
@@ -4598,28 +4679,35 @@ var TabRegistry = class {
 			conversationUrl: tab.url ?? expectedUrl
 		};
 	}
-	async assertExpected(tabId, conversationUrl) {
+	async assertExpected(tabId, conversationUrl, provider = "chatgpt") {
 		const tab = await this.tabs.get(tabId);
-		if (tab.id !== tabId || !expectedChatGptConversationMatches(tab.url, conversationUrl)) throw new ConversationUnavailableError();
+		if (tab.id !== tabId || !expectedBrowserConversationMatches(tab.url, conversationUrl, provider)) throw new ConversationUnavailableError(provider);
 	}
-	async open(taskId, conversationUrl) {
+	async open(taskId, conversationUrl, provider = "chatgpt") {
 		let mapped;
 		try {
-			mapped = await this.ensure(taskId, conversationUrl);
+			mapped = await this.ensure(taskId, conversationUrl, provider);
 		} catch (error) {
 			if (!(error instanceof ConversationUnavailableError)) throw error;
 			const previous = this.taskTabs.get(taskId);
-			this.taskTabs.set(taskId, { conversationUrl: conversationUrl ?? previous?.conversationUrl ?? "https://chatgpt.com/" });
-			mapped = await this.ensure(taskId, conversationUrl ?? previous?.conversationUrl);
+			this.taskTabs.set(taskId, {
+				conversationUrl: conversationUrl ?? previous?.conversationUrl ?? safeBrowserUrl(void 0, provider),
+				provider
+			});
+			mapped = await this.ensure(taskId, conversationUrl ?? previous?.conversationUrl, provider);
 		}
 		await this.tabs.update(mapped.tabId, { active: true });
 		return mapped;
 	}
-	updateConversation(taskId, conversationUrl) {
-		const mapped = this.taskTabs.get(taskId) ?? { conversationUrl: "https://chatgpt.com/" };
+	updateConversation(taskId, conversationUrl, provider = "chatgpt") {
+		const mapped = this.taskTabs.get(taskId) ?? {
+			conversationUrl: safeBrowserUrl(void 0, provider),
+			provider
+		};
 		this.taskTabs.set(taskId, {
 			...mapped,
-			conversationUrl: safeChatGptUrl(conversationUrl)
+			provider,
+			conversationUrl: safeBrowserUrl(conversationUrl, provider)
 		});
 	}
 	ownsTab(taskId, tabId) {
@@ -4636,7 +4724,10 @@ var TabRegistry = class {
 	async hibernate(taskId) {
 		const mapped = this.taskTabs.get(taskId);
 		if (!mapped || mapped.tabId === void 0) return false;
-		this.taskTabs.set(taskId, { conversationUrl: mapped.conversationUrl });
+		this.taskTabs.set(taskId, {
+			conversationUrl: mapped.conversationUrl,
+			provider: mapped.provider
+		});
 		try {
 			await this.tabs.remove(mapped.tabId);
 			return true;
@@ -5223,10 +5314,12 @@ function updateBatchParent(project, childTaskId, status, detail) {
 		const failed = items.filter((item) => ["failed", "manual_action"].includes(item.status)).length;
 		const completed = items.filter((item) => item.status === "completed").length;
 		const parentStatus = running ? "generating" : failed ? "failed" : "completed";
+		const parentRuntimeStatus = running ? "generating" : failed ? items.some((item) => item.status === "manual_action") ? "needs_action" : "failed" : "completed";
 		return {
 			...parent,
 			batchItems: items,
 			status: parentStatus,
+			runtimeStatus: parentRuntimeStatus,
 			statusDetail: failed ? `${completed}/${items.length} 完成，${failed} 项失败` : void 0,
 			runCount: parentStatus === "completed" ? parent.runCount + 1 : parent.runCount
 		};
@@ -5306,6 +5399,35 @@ async function applyTaskMessage(project, message, saveAsset, run) {
 	})), message.taskId, projection.status, projection.statusDetail);
 }
 //#endregion
+//#region src/domain/project-deletion.ts
+function planProjectDeletion(project, latestRuns) {
+	const tasks = project.graph.nodes.filter((node) => node.kind === "task");
+	const activeTaskIds = [];
+	const providerCancellations = [];
+	const seenJobs = /* @__PURE__ */ new Set();
+	for (const task of tasks) {
+		const runtime = resolveTaskRuntime({
+			status: task.status,
+			apiJobId: task.apiJobId,
+			conversationUrl: task.conversationUrl,
+			statusDetail: task.statusDetail
+		}, latestRuns.get(task.id));
+		if (!runtime.active) continue;
+		activeTaskIds.push(task.id);
+		if (!runtime.providerJobId || seenJobs.has(runtime.providerJobId)) continue;
+		seenJobs.add(runtime.providerJobId);
+		providerCancellations.push({
+			provider: task.generationMode ?? "browser",
+			jobId: runtime.providerJobId
+		});
+	}
+	return {
+		taskIds: tasks.map((task) => task.id),
+		activeTaskIds,
+		providerCancellations
+	};
+}
+//#endregion
 //#region src/background/service-worker.ts
 var database = new NodeCanvasDatabase();
 var projectRepository = new ProjectRepository(database);
@@ -5326,6 +5448,9 @@ var resumedBrowserUrls = /* @__PURE__ */ new Map();
 var browserRecoveryReloadedAt = /* @__PURE__ */ new Map();
 var lastBrowserLaunchAt = 0;
 var startupRecoveryReady = Promise.resolve();
+var localWebProvider = (mode) => mode === "gemini" ? "gemini" : "chatgpt";
+var isLocalWebMode = (mode) => mode === "browser" || mode === "gemini";
+var normalizedGenerationMode = (mode) => mode === "api" ? "api" : mode === "team" ? "team" : mode === "team_web" ? "team_web" : mode === "gemini" ? "gemini" : "browser";
 var schedulerReady = chrome.storage.session.get([
 	"schedulerState",
 	"activeTaskTabs",
@@ -5351,7 +5476,7 @@ var schedulerReady = chrome.storage.session.get([
 	for (const project of await projectRepository.listProjects()) {
 		const latestRuns = await taskRunRepository.latestByProject(project.id);
 		for (const task of project.graph.nodes) {
-			if (task.kind !== "task" || task.generationMode !== "browser") continue;
+			if (task.kind !== "task" || !isLocalWebMode(task.generationMode)) continue;
 			const runtime = resolveTaskRuntime(task, latestRuns.get(task.id));
 			if (!runtime.active || ![
 				"sending",
@@ -5359,13 +5484,15 @@ var schedulerReady = chrome.storage.session.get([
 				"generating",
 				"delivering"
 			].includes(runtime.status)) continue;
-			const conversationUrl = concreteChatGptConversationUrl(runtime.conversationUrl);
+			const provider = localWebProvider(task.generationMode);
+			const conversationUrl = concreteBrowserConversationUrl(runtime.conversationUrl, provider);
 			if (!conversationUrl) continue;
 			const key = createTaskScopeKey(project.id, task.id);
 			const storedMessage = browserTaskMessages.get(key);
 			browserTaskMessages.set(key, recoveryMessage({
 				...storedMessage,
-				type: "EXECUTE_IN_CHATGPT_V3",
+				type: provider === "gemini" ? "EXECUTE_IN_GEMINI" : "EXECUTE_IN_CHATGPT_V3",
+				browserProvider: provider,
 				projectId: project.id,
 				taskId: task.id,
 				prompt: appendAspectRatioPrompt(task.prompt, task.aspectRatio ?? "auto"),
@@ -5380,7 +5507,7 @@ var schedulerReady = chrome.storage.session.get([
 				projectId: project.id,
 				taskId: task.id
 			});
-			tabRegistry.map(key, void 0, conversationUrl);
+			tabRegistry.map(key, void 0, conversationUrl, provider);
 		}
 	}
 	await saveBrowserTaskMessages();
@@ -5465,7 +5592,7 @@ async function persistAndBroadcast(message) {
 			const task = project.graph.nodes.find((node) => node.id === message.taskId && node.kind === "task");
 			if (!task) return project;
 			let run = await taskRunRepository.latest(message.projectId, message.taskId);
-			if (!run) run = await taskRunRepository.start(message.projectId, message.taskId, task.generationMode === "api" ? "api" : task.generationMode === "team" ? "team" : task.generationMode === "team_web" ? "team_web" : "browser");
+			if (!run) run = await taskRunRepository.start(message.projectId, message.taskId, normalizedGenerationMode(task.generationMode));
 			const status = runEventStatus(message);
 			if (!status || isDuplicateTerminalRunEvent(run.status, status)) return project;
 			run = await taskRunRepository.advance(run.id, status, runEventPatch(message));
@@ -5522,7 +5649,7 @@ async function reconcileTaskRunProjections() {
 async function startTaskRun(projectId, taskId) {
 	const task = (await projectRepository.loadProject(projectId))?.graph.nodes.find((node) => node.id === taskId && node.kind === "task");
 	if (!task) throw new Error("找不到本地任务");
-	return taskRunRepository.start(projectId, taskId, task.generationMode === "api" ? "api" : task.generationMode === "team" ? "team" : task.generationMode === "team_web" ? "team_web" : "browser");
+	return taskRunRepository.start(projectId, taskId, normalizedGenerationMode(task.generationMode));
 }
 async function removeActiveScope(key) {
 	await activeTabWrites.run("active-tabs", async () => {
@@ -5548,12 +5675,55 @@ async function rememberActiveTab(key, tabId) {
 var API_RECOVERY_ALARM = "pixel-flow-api-recovery";
 var BROWSER_RESULT_RECOVERY_ALARM = "pixel-flow-browser-result-recovery";
 var TEAM_WEB_WORKER_ALARM = "pixel-flow-team-web-worker";
+var PROJECT_PROVIDER_CANCEL_ALARM = "pixel-flow-project-provider-cancel";
+var PROJECT_PROVIDER_CANCEL_STORAGE = "pixelFlowPendingProjectProviderCancels";
 var TEAM_WEB_PROJECT_ID = "pixel-flow-team-web-worker";
 var TEAM_WEB_ACTIVE_STORAGE = "pixelFlowTeamWebWorkerActiveJob";
 var TEAM_WEB_ACTIVE_JOBS_STORAGE = "pixelFlowTeamWebWorkerActiveJobs";
 var TEAM_WEB_MAX_CONCURRENCY = 5;
 var activeTeamWebJobs = /* @__PURE__ */ new Map();
 var teamWebDeliveries = /* @__PURE__ */ new Map();
+var projectProviderCancelDrain;
+async function enqueueProjectProviderCancellations(cancellations) {
+	if (!cancellations.length) return;
+	const state = await chrome.storage.local.get(PROJECT_PROVIDER_CANCEL_STORAGE);
+	const existing = Array.isArray(state[PROJECT_PROVIDER_CANCEL_STORAGE]) ? state[PROJECT_PROVIDER_CANCEL_STORAGE] : [];
+	const byJob = new Map([...existing, ...cancellations].map((item) => [item.jobId, item]));
+	await chrome.storage.local.set({ [PROJECT_PROVIDER_CANCEL_STORAGE]: [...byJob.values()] });
+	chrome.alarms.create(PROJECT_PROVIDER_CANCEL_ALARM, { delayInMinutes: .05 });
+	drainProjectProviderCancellations();
+}
+async function drainProjectProviderCancellations() {
+	if (projectProviderCancelDrain) return projectProviderCancelDrain;
+	projectProviderCancelDrain = (async () => {
+		const state = await chrome.storage.local.get(PROJECT_PROVIDER_CANCEL_STORAGE);
+		const pending = Array.isArray(state[PROJECT_PROVIDER_CANCEL_STORAGE]) ? state[PROJECT_PROVIDER_CANCEL_STORAGE] : [];
+		if (!pending.length) {
+			await chrome.alarms.clear(PROJECT_PROVIDER_CANCEL_ALARM);
+			return;
+		}
+		const failed = [];
+		await Promise.all(pending.map(async (item) => {
+			try {
+				if (["team", "team_web"].includes(item.provider)) await cancelTeamGatewayJob(item.jobId);
+				else await apiWorkerRequest(`/jobs/${item.jobId}`, { method: "DELETE" });
+				teamResultDownloads.delete(item.jobId);
+			} catch {
+				failed.push(item);
+			}
+		}));
+		if (failed.length) {
+			await chrome.storage.local.set({ [PROJECT_PROVIDER_CANCEL_STORAGE]: failed });
+			chrome.alarms.create(PROJECT_PROVIDER_CANCEL_ALARM, { delayInMinutes: 1 });
+		} else {
+			await chrome.storage.local.remove(PROJECT_PROVIDER_CANCEL_STORAGE);
+			await chrome.alarms.clear(PROJECT_PROVIDER_CANCEL_ALARM);
+		}
+	})().finally(() => {
+		projectProviderCancelDrain = void 0;
+	});
+	return projectProviderCancelDrain;
+}
 var teamResultDownloads = /* @__PURE__ */ new Map();
 var teamWebTickPromise;
 function singleFlight(map, key, run) {
@@ -5616,20 +5786,21 @@ async function reconcileBrowserTaskResults() {
 	for (const [key, message] of browserTaskMessages) {
 		if (!queue.running.includes(key) && ![...activeTeamWebJobs.values()].some((active) => createTaskScopeKey(TEAM_WEB_PROJECT_ID, active.job.id) === key)) continue;
 		try {
-			const mapped = await tabRegistry.ensure(key, message.expectedConversationUrl);
-			let adapterState = await probeAdapter(chrome.tabs, mapped.tabId, message);
+			const provider = message.browserProvider === "gemini" ? "gemini" : "chatgpt";
+			const mapped = await tabRegistry.ensure(key, message.expectedConversationUrl, provider);
+			let adapterState = provider === "gemini" ? await probeGeminiAdapter(chrome.tabs, mapped.tabId, message) : await probeAdapter(chrome.tabs, mapped.tabId, message);
 			if (!adapterState) {
 				await chrome.scripting.executeScript({
 					target: { tabId: mapped.tabId },
-					files: ["contentScript.js"]
+					files: [provider === "gemini" ? "geminiContentScript.js" : "contentScript.js"]
 				});
-				adapterState = await probeAdapter(chrome.tabs, mapped.tabId, message);
+				adapterState = provider === "gemini" ? await probeGeminiAdapter(chrome.tabs, mapped.tabId, message) : await probeAdapter(chrome.tabs, mapped.tabId, message);
 			}
 			if (message.phase !== "submitted" || adapterState?.submitActive || teamWebDeliveries.has(message.taskId)) continue;
-			if (!concreteChatGptConversationUrl(mapped.conversationUrl)) continue;
+			if (!concreteBrowserConversationUrl(mapped.conversationUrl, provider)) continue;
 			await chrome.tabs.sendMessage(mapped.tabId, {
 				...message,
-				type: "RESUME_CHATGPT_RESULT",
+				type: provider === "gemini" ? "RESUME_GEMINI_RESULT" : "RESUME_CHATGPT_RESULT",
 				images: []
 			});
 			const lastReloadedAt = browserRecoveryReloadedAt.get(key) ?? 0;
@@ -6491,7 +6662,8 @@ async function executeTask(projectId, taskId) {
 			detail: void 0,
 			clearApiJobId: true
 		});
-		const mapped = await tabRegistry.ensure(key, runtimeTask.conversationUrl);
+		const provider = localWebProvider(runtimeTask.generationMode);
+		const mapped = await tabRegistry.ensure(key, runtimeTask.conversationUrl, provider);
 		await rememberActiveTab(key, mapped.tabId);
 		await persistAndBroadcast({
 			type: "TASK_STATUS",
@@ -6500,10 +6672,11 @@ async function executeTask(projectId, taskId) {
 			status: "sending"
 		});
 		await waitForTabReady(mapped.tabId);
-		await tabRegistry.assertExpected(mapped.tabId, runtimeTask.conversationUrl);
+		await tabRegistry.assertExpected(mapped.tabId, runtimeTask.conversationUrl, provider);
 		const request = await prepareTaskRequest(project, taskId, runtimeTask);
 		const message = {
-			type: "EXECUTE_IN_CHATGPT",
+			type: provider === "gemini" ? "EXECUTE_IN_GEMINI" : "EXECUTE_IN_CHATGPT",
+			browserProvider: provider,
 			projectId,
 			taskId,
 			expectedConversationUrl: runtimeTask.conversationUrl,
@@ -6515,7 +6688,8 @@ async function executeTask(projectId, taskId) {
 		browserTaskMessages.set(key, recoveryMessage(message));
 		await saveBrowserTaskMessages();
 		scheduleBrowserResultRecoveryAlarm();
-		await sendWithCurrentChatGptAdapter(chrome.tabs, chrome.scripting, mapped.tabId, message);
+		if (provider === "gemini") await sendWithCurrentGeminiAdapter(chrome.tabs, chrome.scripting, mapped.tabId, message);
+		else await sendWithCurrentChatGptAdapter(chrome.tabs, chrome.scripting, mapped.tabId, message);
 	} catch (error) {
 		const reason = error instanceof ConversationUnavailableError ? "conversation_unavailable" : "selector_missing";
 		if (!await updateScheduler(async () => {
@@ -6542,7 +6716,7 @@ async function startWaitingTasks() {
 		if (active.has(key)) continue;
 		const scope = pendingScopes.get(key);
 		if (!scope) continue;
-		if (await taskGenerationMode(key) === "browser") {
+		if (isLocalWebMode(await taskGenerationMode(key))) {
 			const waitMs = Math.max(0, BROWSER_LAUNCH_GAP_MS - (Date.now() - lastBrowserLaunchAt));
 			if (waitMs) await new Promise((resolve) => setTimeout(resolve, waitMs));
 			lastBrowserLaunchAt = Date.now();
@@ -6556,13 +6730,13 @@ async function taskGenerationMode(key) {
 	const scope = pendingScopes.get(key) ?? parseTaskScopeKey(key);
 	if (!scope) return "browser";
 	const task = (await projectRepository.loadProject(scope.projectId))?.graph.nodes.find((node) => node.id === scope.taskId && node.kind === "task");
-	return task?.generationMode === "api" ? "api" : task?.generationMode === "team" ? "team" : task?.generationMode === "team_web" ? "team_web" : "browser";
+	return normalizedGenerationMode(task?.generationMode);
 }
 async function advanceQueueByMode() {
 	let slots = Math.max(0, 5 - queue.running.length);
 	if (!slots || !queue.waiting.length) return;
 	let browserRunning = activeTeamWebJobs.size;
-	for (const key of queue.running) if (await taskGenerationMode(key) === "browser") browserRunning += 1;
+	for (const key of queue.running) if (isLocalWebMode(await taskGenerationMode(key))) browserRunning += 1;
 	const promoted = [];
 	const waiting = [];
 	for (const key of queue.waiting) {
@@ -6571,13 +6745,13 @@ async function advanceQueueByMode() {
 			continue;
 		}
 		const mode = await taskGenerationMode(key);
-		if (mode === "browser" && browserRunning >= 5) {
+		if (isLocalWebMode(mode) && browserRunning >= 5) {
 			waiting.push(key);
 			continue;
 		}
 		promoted.push(key);
 		slots -= 1;
-		if (mode === "browser") browserRunning += 1;
+		if (isLocalWebMode(mode)) browserRunning += 1;
 	}
 	queue = {
 		...queue,
@@ -6595,6 +6769,46 @@ async function updateScheduler(work) {
 		return result;
 	});
 }
+async function deleteProjectFast(projectId) {
+	const project = await projectRepository.loadProject(projectId);
+	if (!project) return {
+		deleted: false,
+		taskCount: 0,
+		activeTaskCount: 0,
+		providerCancelCount: 0
+	};
+	const plan = planProjectDeletion(project, await taskRunRepository.latestByProject(projectId));
+	const projectKeys = new Set(plan.taskIds.map((taskId) => createTaskScopeKey(projectId, taskId)));
+	for (const [key, scope] of pendingScopes) if (scope.projectId === projectId) projectKeys.add(key);
+	for (const key of browserTaskMessages.keys()) if (parseTaskScopeKey(key)?.projectId === projectId) projectKeys.add(key);
+	await updateScheduler(async () => {
+		for (const key of projectKeys) {
+			queue = cancelTask(queue, key);
+			pendingScopes.delete(key);
+			browserTaskMessages.delete(key);
+			resumedBrowserUrls.delete(key);
+			browserRecoveryReloadedAt.delete(key);
+		}
+		await saveBrowserTaskMessages();
+		if (browserTaskMessages.size === 0) await chrome.alarms.clear(BROWSER_RESULT_RECOVERY_ALARM);
+		const state = await chrome.storage.session.get(["activeTaskScopes", "activeTaskTabs"]);
+		const activeTaskScopes = (Array.isArray(state.activeTaskScopes) ? state.activeTaskScopes : []).filter((entry) => Array.isArray(entry) && !projectKeys.has(entry[0]));
+		const activeTaskTabs = (Array.isArray(state.activeTaskTabs) ? state.activeTaskTabs : []).filter((entry) => Array.isArray(entry) && !projectKeys.has(entry[0]));
+		await chrome.storage.session.set({
+			activeTaskScopes,
+			activeTaskTabs
+		});
+		await Promise.allSettled([...projectKeys].map((key) => tabRegistry.close(key)));
+	});
+	await projectRepository.deleteProject(projectId);
+	await enqueueProjectProviderCancellations(plan.providerCancellations);
+	return {
+		deleted: true,
+		taskCount: plan.taskIds.length,
+		activeTaskCount: plan.activeTaskIds.length,
+		providerCancelCount: plan.providerCancellations.length
+	};
+}
 async function reconcileSchedulerSnapshot() {
 	await schedulerReady;
 	const liveScopes = /* @__PURE__ */ new Map();
@@ -6605,7 +6819,7 @@ async function reconcileSchedulerSnapshot() {
 			if (task.kind !== "task" || task.upscale) continue;
 			const runtime = resolveTaskRuntime(task, latestRuns.get(task.id));
 			if (!runtime.active) continue;
-			if (task.generationMode === "browser" && runtime.status !== "queued" && !concreteChatGptConversationUrl(runtime.conversationUrl)) {
+			if (isLocalWebMode(task.generationMode) && runtime.status !== "queued" && !concreteBrowserConversationUrl(runtime.conversationUrl, localWebProvider(task.generationMode))) {
 				interruptedBrowserTasks.push({
 					projectId: project.id,
 					taskId: task.id
@@ -6787,15 +7001,16 @@ async function handlePageTaskMessage(message, senderTab) {
 	if (message.projectId === TEAM_WEB_PROJECT_ID) return handleTeamWebPageTaskMessage(message, senderTab);
 	await schedulerReady;
 	const key = createTaskScopeKey(message.projectId, message.taskId);
+	const task = (await projectRepository.loadProject(message.projectId))?.graph.nodes.find((node) => node.id === message.taskId && node.kind === "task");
+	const provider = localWebProvider(task?.generationMode);
 	if (!tabRegistry.ownsTab(key, senderTab?.id)) {
-		const task = (await projectRepository.loadProject(message.projectId))?.graph.nodes.find((node) => node.id === message.taskId && node.kind === "task");
 		const run = task ? await taskRunRepository.latest(message.projectId, message.taskId) : void 0;
-		const expectedUrl = concreteChatGptConversationUrl(run?.conversationUrl ?? task?.conversationUrl);
-		if (!task || !run || isTerminalRunStatus(run.status) || !senderTab?.id || !expectedUrl || !expectedChatGptConversationMatches(senderTab.url, expectedUrl)) return false;
-		tabRegistry.map(key, senderTab.id, senderTab.url);
+		const expectedUrl = concreteBrowserConversationUrl(run?.conversationUrl ?? task?.conversationUrl, provider);
+		if (!task || !run || isTerminalRunStatus(run.status) || !senderTab?.id || !expectedUrl || !expectedBrowserConversationMatches(senderTab.url, expectedUrl, provider)) return false;
+		tabRegistry.map(key, senderTab.id, senderTab.url, provider);
 	}
-	const conversationUrl = resolveTaskConversationUrl(message, senderTab?.url);
-	if (conversationUrl) tabRegistry.updateConversation(key, conversationUrl);
+	const conversationUrl = resolveBrowserTaskConversationUrl(message, senderTab?.url, provider);
+	if (conversationUrl) tabRegistry.updateConversation(key, conversationUrl, provider);
 	if (!await updateScheduler(async () => {
 		if (!queue.running.includes(key)) {
 			if (message.type !== "TASK_RESULT" && message.type !== "TASK_ERROR") return false;
@@ -6929,6 +7144,16 @@ chrome.runtime.onMessage.addListener((raw, sender, sendResponse) => {
 		}));
 		return true;
 	}
+	if (message.type === "DELETE_PROJECT") {
+		startupRecoveryReady.then(() => deleteProjectFast(message.projectId)).then((result) => sendResponse({
+			accepted: true,
+			...result
+		}), (error) => sendResponse({
+			accepted: false,
+			error: error instanceof Error ? error.message : String(error)
+		}));
+		return true;
+	}
 	if (message.type === "REGENERATE_UPSCALE_TILE") {
 		startupRecoveryReady.then(() => updateScheduler(async () => {
 			const childId = await projectWrites.run(message.projectId, () => upscaleController.regenerateTile(message.projectId, message.taskId, message.tileId));
@@ -7047,7 +7272,7 @@ chrome.runtime.onMessage.addListener((raw, sender, sendResponse) => {
 	if (message.type === "OPEN_TASK_TAB") {
 		Promise.all([projectRepository.loadProject(message.projectId), taskRunRepository.latest(message.projectId, message.taskId)]).then(([project, run]) => {
 			const task = project?.graph.nodes.find((node) => node.id === message.taskId && node.kind === "task");
-			return tabRegistry.open(createTaskScopeKey(message.projectId, message.taskId), run?.conversationUrl ?? (task?.kind === "task" ? task.conversationUrl : void 0));
+			return tabRegistry.open(createTaskScopeKey(message.projectId, message.taskId), run?.conversationUrl ?? (task?.kind === "task" ? task.conversationUrl : void 0), localWebProvider(task?.kind === "task" ? task.generationMode : void 0));
 		});
 		sendResponse({ accepted: true });
 		return true;
@@ -7114,6 +7339,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 	if (alarm.name === API_RECOVERY_ALARM) reconcileCompletedApiTasks();
 	if (alarm.name === BROWSER_RESULT_RECOVERY_ALARM) reconcileBrowserTaskResults();
 	if (alarm.name === TEAM_WEB_WORKER_ALARM) teamWebWorkerTick();
+	if (alarm.name === PROJECT_PROVIDER_CANCEL_ALARM) drainProjectProviderCancellations();
 });
 chrome.notifications.onClicked.addListener((notificationId) => {
 	const url = notificationIdToCanvasUrl(notificationId, chrome.runtime.getURL("index.html"));

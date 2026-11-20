@@ -24,6 +24,23 @@ test("production build no longer ships a legacy rollback entry", async () => {
   await assert.rejects(access(new URL("扩展程序/generation-mode.js", root)));
 });
 
+test("content scripts come from type-checked adapter sources", async () => {
+  const [config, build, packageSource, chatSource, geminiSource] = await Promise.all([
+    readFile(new URL("../tsconfig.adapters.json", import.meta.url), "utf8"),
+    readFile(new URL("scripts/build-content-scripts.mjs", root), "utf8"),
+    readFile(new URL("package.json", root), "utf8"),
+    readFile(new URL("src/adapters/chatgpt-content-script.js", root), "utf8"),
+    readFile(new URL("src/adapters/gemini-content-script.js", root), "utf8")
+  ]);
+  assert.match(config, /"checkJs": true/);
+  assert.match(config, /"strict": true/);
+  assert.match(build, /src\/adapters\/chatgpt-content-script\.js/);
+  assert.match(build, /src\/adapters\/gemini-content-script\.js/);
+  assert.match(packageSource, /npm run build:adapters/);
+  assert.match(chatSource, /\/\/ @ts-check/);
+  assert.match(geminiSource, /\/\/ @ts-check/);
+});
+
 test("production build splits heavyweight UI dependencies out of the main entry", async () => {
   const config = await readFile(new URL("../vite.config.ts", import.meta.url), "utf8");
   assert.match(config, /cssCodeSplit:\s*false/);

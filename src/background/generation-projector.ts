@@ -1,5 +1,5 @@
 import { projectRunToLegacyTask, type RunProjectionRecord } from "../domain/run-projection.ts";
-import type { LegacyTaskStatus } from "../domain/task-run.ts";
+import type { LegacyTaskStatus, RunStatus } from "../domain/task-run.ts";
 import type { CanvasNode, Project, TaskNode, TaskStatus } from "../types.ts";
 import { decodeBase64 } from "./binary.ts";
 
@@ -64,7 +64,8 @@ function updateBatchParent(project: Project, childTaskId: string, status: Legacy
     const failed = items.filter(item => ["failed", "manual_action"].includes(item.status)).length;
     const completed = items.filter(item => item.status === "completed").length;
     const parentStatus: TaskStatus = running ? "generating" : failed ? "failed" : "completed";
-    return { ...parent, batchItems: items, status: parentStatus, statusDetail: failed ? `${completed}/${items.length} 完成，${failed} 项失败` : undefined, runCount: parentStatus === "completed" ? parent.runCount + 1 : parent.runCount };
+    const parentRuntimeStatus: RunStatus = running ? "generating" : failed ? items.some(item => item.status === "manual_action") ? "needs_action" : "failed" : "completed";
+    return { ...parent, batchItems: items, status: parentStatus, runtimeStatus: parentRuntimeStatus, statusDetail: failed ? `${completed}/${items.length} 完成，${failed} 项失败` : undefined, runCount: parentStatus === "completed" ? parent.runCount + 1 : parent.runCount };
   });
 }
 

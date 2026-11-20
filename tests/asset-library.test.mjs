@@ -30,8 +30,9 @@ test("template and text creation functionality is removed", async () => {
 test("prompt library can create tasks and apply copy to a selected task", async () => {
   const [source] = await readSources();
   assert.match(source,/async function createTaskFromPrompt/);
-  assert.match(source,/generationMode: "api"/);
+  assert.match(source,/type: "task\.createFromPrompt"/);
   assert.match(source,/async function applyPrompt/);
+  assert.match(source,/type: "task\.applyPrompt"/);
   assert.match(source,/prompt-create-task/);
   assert.match(source,/prompt-edit/);
   assert.match(source,/prompt-delete/);
@@ -61,7 +62,10 @@ test("canvas management keeps portable export, import, rename, and deletion", as
   assert.match(source,/async function importCanvas/);
   assert.match(source,/canvas-card-rename/);
   assert.match(source,/async function deleteCanvasById/);
-  assert.match(source,/transaction\(\["projects", "runs"\]/);
+  assert.match(source,/type: "project\.import"/);
+  assert.match(source,/type: "project\.rename"/);
+  assert.match(source,/type: "project\.delete"/);
+  assert.doesNotMatch(source,/objectStore\("projects", "readwrite"\)|putProject\(/);
 });
 
 test("library thumbnails are lazy and object URLs are released", async () => {

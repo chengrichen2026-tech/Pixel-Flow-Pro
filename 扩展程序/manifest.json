@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
   "name": "Pixel Flow｜像素流",
-  "description": "AI 创意任务画布：支持 ChatGPT Web、API Key、Team Cloud 与 Team Web 生图。",
+  "description": "AI 创意任务画布：支持 ChatGPT Web、Gemini Web、API Key、Team Cloud 与 Team Web 生图。",
   "version": "0.3.23",
   "permissions": ["storage", "tabs", "tabGroups", "notifications", "downloads", "clipboardWrite", "scripting", "alarms"],
-  "host_permissions": ["https://chatgpt.com/*", "https://*.oaiusercontent.com/*", "https://aihub.rbmanon.cn/*", "https://*.feishuapp.com/*", "http://127.0.0.1:43129/*", "http://127.0.0.1:43128/*", "ws://127.0.0.1:43128/*"],
+  "host_permissions": ["https://chatgpt.com/*", "https://gemini.google.com/*", "https://*.googleusercontent.com/*", "https://*.oaiusercontent.com/*", "https://aihub.rbmanon.cn/*", "https://*.feishuapp.com/*", "http://127.0.0.1:43129/*", "http://127.0.0.1:43128/*", "ws://127.0.0.1:43128/*"],
   "optional_host_permissions": ["https://*/*"],
   "action": {
     "default_title": "打开 Pixel Flow",
@@ -19,6 +19,11 @@
     {
       "matches": ["https://chatgpt.com/*"],
       "js": ["contentScript.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://gemini.google.com/*"],
+      "js": ["geminiContentScript.js"],
       "run_at": "document_idle"
     }
   ]

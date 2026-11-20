@@ -8,7 +8,7 @@ test("rebuilt tasks own generation mode instead of requiring DOM injection", asy
   const app = await readFile(new URL("src/App.tsx", root), "utf8");
   const types = await readFile(new URL("src/types.ts", root), "utf8");
   const store = await readFile(new URL("src/store.ts", root), "utf8");
-  assert.match(types, /export type GenerationMode = "browser" \| "api" \| "team" \| "team_web"/);
+  assert.match(types, /export type GenerationMode = "browser" \| "api" \| "team" \| "team_web" \| "gemini"/);
   assert.match(types, /generationMode\?: GenerationMode/);
   assert.match(types, /export type TeamImageModel = "flare" \| "sunburst"/);
   assert.match(types, /teamImageModel\?: TeamImageModel/);
@@ -17,13 +17,16 @@ test("rebuilt tasks own generation mode instead of requiring DOM injection", asy
   assert.match(types, /apiJobId\?: string/);
   assert.match(store, /await hasTeamGateway\(\)\?"team_web":"api"/);
   assert.match(app, /aria-label="生图模式"/);
-  assert.match(app, /<option value="gpt_web">GPT Web<\/option>/);
+  assert.match(app, /<option value="gpt_web">Web-img<\/option>/);
   assert.match(app, /<option value="team_cloud">Team Cloud<\/option>/);
   assert.match(app, /<option value="api">API<\/option>/);
-  assert.match(app, /n\.generationMode==='api'\?'api':n\.generationMode==='team'\?'team':n\.generationMode==='team_web'\?'team_web':'browser'/);
+  assert.match(app, /n\.generationMode==='api'\?'api':n\.generationMode==='team'\?'team':n\.generationMode==='team_web'\?'team_web':n\.generationMode==='gemini'\?'gemini':'browser'/);
   assert.match(app, /generationProvider\(mode\),webLocation=gptWebLocation\(mode\)/);
   assert.match(app, /generationModeForProvider\('gpt_web',next\)/);
-  assert.match(app, /aria-label="GPT Web 执行位置"/);
+  assert.match(app, /aria-label="Web-img 执行方式"/);
+  assert.match(app, /gptWebLocationsForTask\(Boolean\(n\.upscale\)\)/);
+  assert.match(app, /webLocations\.map\(\(value:GptWebLocation\)/);
+  assert.match(app, /value==='local'\?'GPT':value==='team'\?'Gpt-T':'Gemini'/);
   assert.match(app, /className="task-segmented-toggle"/);
   assert.match(app, /value==='flare'\?'Flare':'Sunburst'/);
   assert.match(app, /aria-label="Team Cloud 模型"/);
@@ -45,8 +48,8 @@ test("rebuilt mode switching preserves production safety rules", async () => {
   assert.match(app, /const pendingSettingsSave=useRef<Promise<void>>\(Promise\.resolve\(\)\)/);
   assert.match(app, /pendingSettingsSave\.current=saving;await saving/);
   assert.match(app, /const run=async\(\)=>\{setConfigurationError\(''\);await pendingSettingsSave\.current/);
-  assert.match(app, /const currentTask=useStore\.getState\(\)\.project/);
-  assert.match(app, /currentTask\?\.generationMode==='team'\?'team':currentTask\?\.generationMode==='team_web'\?'team_web':'browser'/);
+  assert.match(app, /let currentTask=useStore\.getState\(\)\.project/);
+  assert.match(app, /currentTask\?\.generationMode==='team'\?'team':currentTask\?\.generationMode==='team_web'\?'team_web':currentTask\?\.generationMode==='gemini'\?'gemini':'browser'/);
 });
 
 test("task cards expose explicit cancel, retry and cloud recovery actions", async () => {

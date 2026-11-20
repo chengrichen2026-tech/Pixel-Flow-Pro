@@ -3,6 +3,7 @@ import test from "node:test";
 import { readBackgroundSource } from "./helpers/background-source.mjs";
 import { readFile } from "node:fs/promises";
 import { BROWSER_LAUNCH_GAP_MS, MAX_BROWSER_CONCURRENCY, MAX_CONCURRENCY } from "../src/domain/queue.ts";
+import { applyTaskMessage } from "../src/background/generation-projector.ts";
 
 const root = new URL("..", import.meta.url);
 const source = async (path) => readFile(new URL(path, root), "utf8");
@@ -17,7 +18,7 @@ test("image containers are native canvas nodes and fan out into hidden independe
   assert.match(app, /image-container-card/);
 });
 
-test("container children keep five slots and stagger up to five ChatGPT Web launches", async () => {
+test("container children keep five slots and stagger up to five local web launches", async () => {
   const background = await readBackgroundSource();
   assert.equal(MAX_CONCURRENCY, 5);
   assert.equal(MAX_BROWSER_CONCURRENCY, 5);
@@ -26,9 +27,36 @@ test("container children keep five slots and stagger up to five ChatGPT Web laun
   assert.match(background, /const TEAM_WEB_MAX_CONCURRENCY = 5/);
   assert.match(background, /BROWSER_LAUNCH_GAP_MS - \(Date\.now\(\) - lastBrowserLaunchAt\)/);
   assert.match(background, /async function advanceQueueByMode\(\)/);
-  assert.match(background, /mode === "browser" && browserRunning >= MAX_BROWSER_CONCURRENCY/);
+  assert.match(background, /isLocalWebMode\(mode\) && browserRunning >= MAX_BROWSER_CONCURRENCY/);
   assert.match(background, /function updateBatchParent\(/);
   assert.match(background, /task\.batchParentTaskId \? findTask\(graph, task\.batchParentTaskId\)/);
+});
+
+test("completed container children project the batch parent to a completed runtime", async () => {
+  const parent = {
+    id: "parent", kind: "task", name: "批量任务", prompt: "", position: { x: 0, y: 0 }, inputEdgeOrder: [], runCount: 0,
+    status: "generating", runtimeStatus: "queued",
+    batchItems: [
+      { id: "item-1", title: "一", status: "completed", taskId: "child-1" },
+      { id: "item-2", title: "二", status: "queued", taskId: "child-2" },
+    ],
+  };
+  const child = {
+    id: "child-2", kind: "task", name: "子任务", prompt: "", position: { x: 0, y: 0 }, inputEdgeOrder: [], runCount: 0,
+    status: "generating", runtimeStatus: "generating", batchParentTaskId: "parent",
+  };
+  const project = { id: "project", name: "测试", createdAt: 1, updatedAt: 1, graph: { nodes: [parent, child], edges: [] } };
+  const next = await applyTaskMessage(
+    project,
+    { type: "TASK_RESULT", projectId: "project", taskId: "child-2", images: [{ base64: "YQ==", mimeType: "image/png" }] },
+    async () => "asset-result",
+    { status: "completed" },
+  );
+  const updated = next.graph.nodes.find(node => node.id === "parent");
+  assert.equal(updated.status, "completed");
+  assert.equal(updated.runtimeStatus, "completed");
+  assert.equal(updated.runCount, 1);
+  assert.deepEqual(updated.batchItems.map(item => item.status), ["completed", "completed"]);
 });
 
 test("failed batch items expose their details and can be retried without rerunning completed items", async () => {
@@ -37,6 +65,7 @@ test("failed batch items expose their details and can be retried without rerunni
   assert.match(store, /item\.status==="failed"\|\|item\.status==="manual_action"/);
   assert.match(app, /task-batch-errors/);
   assert.match(app, /只重试失败项/);
+  assert.match(store, /runtimeStatus = completed === items\.length \? "completed"/);
 });
 
 test("duplicated tasks retain ordered image inputs and are placed without overlap", async () => {
@@ -114,20 +143,22 @@ test("selected image containers receive clicked product and gallery assets", asy
 });
 
 test("repeated product clicks keep the connected task selected after each project refresh", async () => {
-  const [legacyLibrary, store] = await Promise.all([
+  const [legacyLibrary, commandBridge, store] = await Promise.all([
     source("production/asset-library.js"),
+    source("src/canvas-command-bridge.tsx"),
     source("src/store.ts"),
   ]);
   assert.match(
     legacyLibrary,
-    /selectedNodeIds: targetTaskId \? \[targetTaskId\] : \[nodeId\]/,
-    "a connected media insert must preserve the task selection so the next product also connects",
+    /type: "media\.add"/,
+    "legacy media calls must enter the typed canvas command bridge",
   );
   assert.match(
-    legacyLibrary,
-    /task\.inputEdgeOrder = \[\.\.\.\(task\.inputEdgeOrder \|\| \[\]\), edgeId\]/,
-    "each repeated media insert must append its input edge to the task order",
+    commandBridge,
+    /case "media\.add":[\s\S]*addExistingAsset/,
+    "the typed command bridge must delegate media writes to the store",
   );
+  assert.doesNotMatch(legacyLibrary, /putProject\(|objectStore\("projects", "readwrite"\)/);
   assert.match(store, /let projectReadQueue: Promise<void> = Promise\.resolve\(\)/);
   assert.match(store, /async refresh\(projectId\) \{ return serializeProjectRead/);
   assert.match(store, /async openProject\(projectId\)\{return serializeProjectRead/);
@@ -140,5 +171,9 @@ test("canvas retries edge rendering after newly inserted nodes are measured", as
   ]);
   assert.match(main, /<ReactFlowProvider><App \/><\/ReactFlowProvider>/);
   assert.match(app, /const nodesInitialized=useNodesInitialized\(\)/);
+  assert.match(app, /useUpdateNodeInternals\(\)/);
+  assert.match(app, /updateNodeInternals\(nodeIds\)/);
+  assert.match(app, /secondFrame=requestAnimationFrame/);
+  assert.doesNotMatch(app, /measured:previous\?\.measured/);
   assert.match(app, /\[s\.project,edgeMenu\?\.id,nodesInitialized\]/);
 });

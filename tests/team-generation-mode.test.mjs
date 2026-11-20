@@ -97,9 +97,9 @@ test("Team Cloud and GPT Web team request ids stay within the taskbox limit for 
 });
 
 test("structured commands can create team generation tasks", () => {
-  assert.match(bridge, /command\.generationMode==="team"\?"team":command\.generationMode==="team_web"\?"team_web":"api"/);
+  assert.match(bridge, /command\.generationMode==="gemini"\?"gemini":command\.generationMode==="team"\?"team":command\.generationMode==="team_web"\?"team_web":"api"/);
   assert.match(bridge, /command\.teamImageModel==="sunburst"\?"sunburst":"flare"/);
-  assert.match(mcp, /enum:\["api","browser","team","team_web"\]/);
+  assert.match(mcp, /enum:\["api","browser","team","team_web","gemini"\]/);
   assert.match(mcp, /teamImageModel:\{type:"string",enum:\["flare","sunburst"\]\}/);
 });
 

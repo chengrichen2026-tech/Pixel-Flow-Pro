@@ -33,6 +33,7 @@ test("storage UI stays manual and does not ship a recycle bin", async () => {
     readFile(new URL("src/db.ts",root),"utf8"),readFile(new URL("src/store.ts",root),"utf8"),readFile(new URL("src/codex-bridge.tsx",root),"utf8"),readFile(new URL("src/StorageManager.tsx",root),"utf8"),readFile(new URL("src/App.tsx",root),"utf8"),readFile(new URL("src/background/protocol.ts",root),"utf8"),readFile(new URL("tools/pixel-flow-mcp/server.mjs",root),"utf8")
   ]);
   assert.match(database,/version\(3\)\.stores\(\{ deletedProjects: null \}\)/);
+  assert.match(database,/version\(4\)\.stores\(\{ runs: "id, projectId, \[projectId\+taskId\], startedAt" \}\)/);
   assert.doesNotMatch(store,/cleanupUnusedAssets/);
   assert.doesNotMatch(bridge,/trash\.(list|restore|delete|empty)/);
   assert.match(bridge,/op==="storage\.cleanup"/);

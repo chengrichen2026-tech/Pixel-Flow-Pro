@@ -24,5 +24,6 @@ export class NodeCanvasDatabase extends Dexie {
       runs: "id, [projectId+taskId], startedAt"
     });
     this.version(3).stores({ deletedProjects: null });
+    this.version(4).stores({ runs: "id, projectId, [projectId+taskId], startedAt" });
   }
 }

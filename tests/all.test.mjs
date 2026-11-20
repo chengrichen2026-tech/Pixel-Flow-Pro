@@ -6,6 +6,7 @@ import "./background-domain.test.mjs";
 import "./background-infrastructure.test.mjs";
 import "./generation-mode.test.mjs";
 import "./generation-ui.test.mjs";
+import "./gemini-generation-mode.test.mjs";
 import "./documentation-consistency.test.mjs";
 import "./asset-library.test.mjs";
 import "./asset-cleanup.test.mjs";
@@ -19,6 +20,8 @@ import "./native-ui-parity.test.mjs";
 import "./task-prompt-input.test.mjs";
 import "./image-container.test.mjs";
 import "./codex-bridge.test.mjs";
+import "./command-batch.test.mjs";
+import "./project-deletion.test.mjs";
 import "./team-generation-mode.test.mjs";
 
 import "./team-web-delivery.test.mjs";

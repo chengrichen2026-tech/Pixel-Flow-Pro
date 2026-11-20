@@ -20,7 +20,7 @@ test("user-facing documentation matches the packaged version and task model", as
   for (const document of [readme, releaseNotes, usage, html]) {
     assert.match(document, new RegExp(`v?${packageJson.version.replaceAll(".", "\\.")}`));
   }
-  assert.match(readme, /GPT Web[\s\S]+本机 \/ 团队[\s\S]+Team Cloud[\s\S]+Flare \/ Sunburst[\s\S]+API/);
+  assert.match(readme, /Web-img[\s\S]+GPT \/ Gpt-T \/ Gemini[\s\S]+Team Cloud[\s\S]+Flare \/ Sunburst[\s\S]+API/);
   for (const term of ["TaskRun", "取消", "重试", "恢复结果"]) assert.match(usage, new RegExp(term));
   for (const mode of ["GPT Web · 本机", "GPT Web · 团队", "Team Cloud", "API"]) {
     assert.match(usage, new RegExp(mode));

@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { base64ToBytes, bytesToBase64, decodeBase64, sha256Hex } from "../src/background/binary.ts";
 import { KeyedSerialQueue } from "../src/background/keyed-serial-queue.ts";
-import { concreteChatGptConversationUrl, expectedChatGptConversationMatches, resolveTaskConversationUrl } from "../src/background/chatgpt-url.ts";
+import { concreteChatGptConversationUrl, concreteGeminiConversationUrl, expectedChatGptConversationMatches, expectedGeminiConversationMatches, resolveTaskConversationUrl } from "../src/background/chatgpt-url.ts";
 import { isExtensionMessage } from "../src/background/protocol.ts";
 import { ConversationUnavailableError, TabRegistry } from "../src/background/tab-registry.ts";
 
@@ -37,9 +37,18 @@ test("ChatGPT URL helpers preserve only concrete matching conversations", () => 
   assert.equal(resolveTaskConversationUrl({ type: "TASK_ERROR", reason: "conversation_unavailable" }, "https://chatgpt.com/c/b"), undefined);
 });
 
+test("Gemini URL helpers preserve app conversations and accept a fresh app route", () => {
+  assert.equal(concreteGeminiConversationUrl("https://gemini.google.com/app/abc"), "https://gemini.google.com/app/abc");
+  assert.equal(concreteGeminiConversationUrl("https://gemini.google.com/app"), undefined);
+  assert.equal(expectedGeminiConversationMatches("https://gemini.google.com/app/abc", "https://gemini.google.com/app"), true);
+  assert.equal(expectedGeminiConversationMatches("https://gemini.google.com/app/other", "https://gemini.google.com/app/abc"), false);
+});
+
 test("extension protocol rejects incomplete task messages", () => {
   assert.equal(isExtensionMessage({ type: "RUN_TASK", projectId: "p", taskId: "t" }), true);
   assert.equal(isExtensionMessage({ type: "GET_API_CAPABILITIES" }), true);
+  assert.equal(isExtensionMessage({ type: "DELETE_PROJECT", projectId: "p" }), true);
+  assert.equal(isExtensionMessage({ type: "DELETE_PROJECT" }), false);
   assert.equal(isExtensionMessage({ type: "RUN_TASKS", projectId: "p", taskIds: ["a", "b"] }), true);
   assert.equal(isExtensionMessage({ type: "RUN_TASKS", projectId: "p", taskIds: [] }), false);
   assert.equal(isExtensionMessage({ type: "RUN_TASK", projectId: "p" }), false);
@@ -76,4 +85,23 @@ test("tab registry owns, validates, hibernates, and rejects switched conversatio
   await assert.rejects(registry.assertExpected(created.tabId, "https://chatgpt.com/c/a"), ConversationUnavailableError);
   assert.equal(await registry.hibernate("task-a"), true);
   assert.equal(records.size, 0);
+});
+
+test("tab registry creates and validates Gemini task tabs independently", async () => {
+  const records = new Map();
+  const tabs = {
+    async create({ url }) { const tab = { id: 7, url, windowId: 1 }; records.set(tab.id, tab); return tab; },
+    async get(id) { return records.get(id); },
+    async query() { return [...records.values()]; },
+    async update(id, patch) { Object.assign(records.get(id), patch); return records.get(id); },
+    async remove() {}
+  };
+  const registry = new TabRegistry(tabs);
+  const created = await registry.ensure("gemini-task", undefined, "gemini");
+  assert.equal(created.conversationUrl, "https://gemini.google.com/app");
+  records.get(created.tabId).url = "https://gemini.google.com/app/conversation-1";
+  await registry.assertExpected(created.tabId, "https://gemini.google.com/app", "gemini");
+  registry.updateConversation("gemini-task", records.get(created.tabId).url, "gemini");
+  records.get(created.tabId).url = "https://gemini.google.com/app/conversation-2";
+  await assert.rejects(registry.assertExpected(created.tabId, "https://gemini.google.com/app/conversation-1", "gemini"), ConversationUnavailableError);
 });

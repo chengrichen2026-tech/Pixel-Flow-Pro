@@ -2,26 +2,34 @@ import { legacyTaskStatusToRunStatus, type RunStatus } from "./task-run.ts";
 import type { ApiImageModel, GenerationMode, TeamImageModel } from "../types.ts";
 
 export type GenerationProvider = "gpt_web" | "team_cloud" | "api";
-export type GptWebLocation = "local" | "team";
+export type GptWebLocation = "local" | "team" | "gemini";
+
+export function gptWebLocationsForTask(isUpscale: boolean): GptWebLocation[] {
+  return isUpscale ? ["local", "team"] : ["local", "team", "gemini"];
+}
+
+export function normalizeTaskGenerationMode(mode: GenerationMode, isUpscale: boolean): GenerationMode {
+  return isUpscale && mode === "gemini" ? "browser" : mode;
+}
 
 export function generationProvider(mode: GenerationMode): GenerationProvider {
-  if (mode === "browser" || mode === "team_web") return "gpt_web";
+  if (mode === "browser" || mode === "team_web" || mode === "gemini") return "gpt_web";
   return mode === "team" ? "team_cloud" : "api";
 }
 
 export function gptWebLocation(mode: GenerationMode): GptWebLocation {
-  return mode === "team_web" ? "team" : "local";
+  return mode === "gemini" ? "gemini" : mode === "team_web" ? "team" : "local";
 }
 
 export function generationModeForProvider(provider: GenerationProvider, location: GptWebLocation = "local"): GenerationMode {
-  if (provider === "gpt_web") return location === "team" ? "team_web" : "browser";
+  if (provider === "gpt_web") return location === "gemini" ? "gemini" : location === "team" ? "team_web" : "browser";
   return provider === "team_cloud" ? "team" : "api";
 }
 
 export function generationModelLabel(mode: GenerationMode, teamImageModel: TeamImageModel, apiImageModel: ApiImageModel = "gpt-image-2"): string {
   if (mode === "api") return apiImageModel;
   if (mode === "team") return teamImageModel === "sunburst" ? "Sunburst" : "Flare";
-  return "ChatGPT Image";
+  return mode === "gemini" ? "Gemini Image" : "ChatGPT Image";
 }
 
 const runStatusLabels: Record<RunStatus, string> = {

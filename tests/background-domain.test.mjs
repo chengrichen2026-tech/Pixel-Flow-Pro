@@ -15,7 +15,7 @@ test("production build compiles and atomically publishes the TypeScript service 
   const source = await readFile(new URL("src/background/service-worker.ts", root), "utf8");
   const database = await readFile(new URL("src/storage/database.ts", root), "utf8");
   const repository = await readFile(new URL("src/storage/project-repository.ts", root), "utf8");
-  assert.match(packageJson.scripts.build, /npm run check && npm run build:background && npm run build:rebuild-preview/);
+  assert.match(packageJson.scripts.build, /npm run check && npm run build:adapters && npm run build:background && npm run build:rebuild-preview/);
   assert.equal(packageJson.scripts["build:background"], "node scripts/build-background.mjs");
   assert.match(buildScript, /src", "background", "service-worker\.ts"/);
   assert.match(buildScript, /\.runtime", "background-build"/);

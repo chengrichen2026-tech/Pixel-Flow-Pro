@@ -96,3 +96,25 @@ test("project recovery loads one latest run per task", async () => {
   assert.equal(latest.get("task-a").attempt, 2);
   assert.equal(latest.has("task-c"), false);
 });
+
+test("project queries use the projectId index when available", async () => {
+  let fullScans = 0;
+  let indexedReads = 0;
+  const records = [
+    { schemaVersion: 2, id: "a", projectId: "project", taskId: "task-a", attempt: 1, provider: "api", status: "completed", startedAt: 1, updatedAt: 1 },
+    { schemaVersion: 2, id: "b", projectId: "other", taskId: "task-b", attempt: 1, provider: "api", status: "completed", startedAt: 1, updatedAt: 1 }
+  ];
+  const table = {
+    async toArray() { fullScans += 1; return records; },
+    async get(id) { return records.find(record => record.id === id); },
+    async put() {},
+    where(index) {
+      assert.equal(index, "projectId");
+      return { equals(projectId) { return { async toArray() { indexedReads += 1; return records.filter(record => record.projectId === projectId); } }; } };
+    }
+  };
+  const latest = await new TaskRunRepository(table).latestByProject("project");
+  assert.equal(latest.size, 1);
+  assert.equal(indexedReads, 1);
+  assert.equal(fullScans, 0);
+});

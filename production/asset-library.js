@@ -29,6 +29,9 @@
   const now = () => Date.now();
   const emptyLibrary = () => ({ prompts: [], media: [] });
   const normalizeTags = (tags) => [...new Set((Array.isArray(tags) ? tags : []).map((tag) => String(tag || "").trim()).filter(Boolean))];
+  const runCanvasCommand = (command) => new Promise((resolve, reject) => {
+    window.dispatchEvent(new CustomEvent("pixel-flow:canvas-command", { detail: { command, resolve, reject } }));
+  });
   const promptTags = (item) => {
     if (Array.isArray(item.tags)) return normalizeTags(item.tags);
     const text = `${item.name || ""} ${item.content || ""}`;
@@ -244,16 +247,6 @@
     });
   }
 
-  async function putProject(project) {
-    project.updatedAt = now();
-    const db = await openDatabase();
-    return new Promise((resolve, reject) => {
-      const request = db.transaction("projects", "readwrite").objectStore("projects").put(project);
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
-    });
-  }
-
   async function putAsset(record) {
     const db = await openDatabase();
     return new Promise((resolve, reject) => {
@@ -317,7 +310,7 @@
     }
     const importedAt = now();
     const project = { ...payload.project, id: projectId, name: `${payload.project.name || "导入画布"}（导入）`, graph: { ...payload.project.graph, nodes: payload.project.graph.nodes.map((node) => assetIdMap.has(node.assetId) ? { ...node, assetId: assetIdMap.get(node.assetId) } : node), edges: payload.project.graph.edges.map((edge) => ({ ...edge })) }, createdAt: importedAt, updatedAt: importedAt };
-    await putProject(project);
+    await runCanvasCommand({ type: "project.import", project });
     window.dispatchEvent(new CustomEvent("pixel-flow:projects-refresh"));
     setTimeout(() => {
       window.dispatchEvent(new CustomEvent("pixel-flow:project-refresh", { detail: { projectId } }));
@@ -330,36 +323,7 @@
     const project = await getProject();
     if (!project) return notify("找不到当前画布", "error");
     if (!await openCanvasDialog({ title: `删除“${project.name}”`, message: "此操作无法撤销，但不会删除在线 ChatGPT 对话。删除后可在存储空间中一键清理未使用图片。", confirmLabel: "删除画布", tone: "danger" })) return;
-    for (const task of project.graph.nodes.filter((node) => node.kind === "task")) {
-      await chrome.runtime?.sendMessage({ type: "CANCEL_TASK", projectId: project.id, taskId: task.id }).catch(() => {});
-    }
-    const db = await openDatabase();
-    const transaction = db.transaction(["projects", "runs"], "readwrite");
-    transaction.objectStore("projects").delete(project.id);
-    const runs = await new Promise((resolve, reject) => {
-      const request = transaction.objectStore("runs").getAll();
-      request.onsuccess = () => resolve(request.result || []);
-      request.onerror = () => reject(request.error);
-    });
-    for (const run of runs.filter((item) => item.projectId === project.id)) transaction.objectStore("runs").delete(run.id);
-    await new Promise((resolve, reject) => {
-      transaction.oncomplete = resolve;
-      transaction.onerror = () => reject(transaction.error);
-      transaction.onabort = () => reject(transaction.error);
-    });
-    const remaining = await new Promise((resolve, reject) => {
-      const request = db.transaction("projects", "readonly").objectStore("projects").getAll();
-      request.onsuccess = () => resolve(request.result || []);
-      request.onerror = () => reject(request.error);
-    });
-    if (!remaining.length) {
-      const createdAt = now();
-      await new Promise((resolve, reject) => {
-        const request = db.transaction("projects", "readwrite").objectStore("projects").add({ id: makeId("project"), name: "我的第一个画布", graph: { nodes: [], edges: [] }, createdAt, updatedAt: createdAt });
-        request.onsuccess = resolve;
-        request.onerror = () => reject(request.error);
-      });
-    }
+    await runCanvasCommand({ type: "project.delete", projectId: project.id });
     collapsePanel();
     window.dispatchEvent(new CustomEvent("pixel-flow:projects-refresh"));
     if (document.body.classList.contains("pf-gallery-open")) setTimeout(() => void renderProjectGallery(), 80);
@@ -371,22 +335,7 @@
     if (projectId === activeId) return deleteCurrentCanvas();
     const project = await getProject(projectId);
     if (!project || !await openCanvasDialog({ title: `删除“${project.name}”`, message: "此操作无法撤销。删除后可在存储空间中一键清理未使用图片。", confirmLabel: "删除画布", tone: "danger" })) return;
-    for (const task of project.graph.nodes.filter((node) => node.kind === "task")) {
-      await chrome.runtime?.sendMessage({ type: "CANCEL_TASK", projectId: project.id, taskId: task.id }).catch(() => {});
-    }
-    const db = await openDatabase();
-    await new Promise((resolve, reject) => {
-      const transaction = db.transaction(["projects", "runs"], "readwrite");
-      transaction.objectStore("projects").delete(projectId);
-      const request = transaction.objectStore("runs").getAll();
-      request.onsuccess = () => {
-        for (const run of (request.result || []).filter((item) => item.projectId === projectId)) transaction.objectStore("runs").delete(run.id);
-      };
-      request.onerror = () => reject(request.error);
-      transaction.oncomplete = resolve;
-      transaction.onerror = () => reject(transaction.error);
-      transaction.onabort = () => reject(transaction.error);
-    });
+    await runCanvasCommand({ type: "project.delete", projectId });
     window.dispatchEvent(new CustomEvent("pixel-flow:projects-refresh"));
     await renderProjectGallery();
     notify(`画布“${project.name}”已删除`);
@@ -563,68 +512,35 @@
   }
 
   async function addMediaNode(media, position, targetTaskId = "") {
-    const project = await getProject();
-    if (!project) throw new Error("找不到当前画布");
-    const nodeId = makeId("image");
-    project.graph.nodes.push({ id: nodeId, kind: "image", assetId: media.assetId, title: media.name, position });
-    if (targetTaskId) {
-      const task = project.graph.nodes.find((node) => node.id === targetTaskId && node.kind === "task");
-      if (task) {
-        const edgeId = makeId("edge");
-        project.graph.edges.push({ id: edgeId, source: nodeId, target: targetTaskId, kind: "input" });
-        task.inputEdgeOrder = [...(task.inputEdgeOrder || []), edgeId];
-      }
-    }
-    await putProject(project);
-    window.dispatchEvent(new CustomEvent("pixel-flow:project-refresh", {
-      detail: { projectId: project.id, selectedNodeIds: targetTaskId ? [targetTaskId] : [nodeId] }
-    }));
-    return nodeId;
+    const result = await runCanvasCommand({ type: "media.add", assetId: media.assetId, title: media.name, position, targetTaskId: targetTaskId || undefined });
+    return result?.selectedNodeIds?.[0];
   }
 
   async function applyPrompt(prompt, mode) {
     const taskId = selectedTaskId();
     if (!taskId) return notify("请先选中一个生图任务", "error");
-    const project = await getProject();
-    const task = project?.graph.nodes.find((node) => node.id === taskId && node.kind === "task");
-    if (!task) return notify("找不到选中的生图任务", "error");
-    task.prompt = mode === "append" && task.prompt?.trim() ? `${task.prompt.trim()}\n\n${prompt.content}` : prompt.content;
-    await putProject(project);
+    await runCanvasCommand({ type: "task.applyPrompt", taskId, content: prompt.content, mode });
     notify(mode === "append" ? "提示词已追加" : "提示词已替换");
     setTimeout(() => location.reload(), 350);
   }
 
   async function createTaskFromPrompt(prompt) {
-    const project = await getProject();
-    if (!project) return notify("找不到当前画布", "error");
-    const taskCount = project.graph.nodes.filter((node) => node.kind === "task").length;
     const position = canvasPosition(window.innerWidth / 2, window.innerHeight / 2);
-    const taskId = makeId("task");
-    const task = { id: taskId, kind: "task", name: `生图任务 ${String(taskCount + 1).padStart(2, "0")}`, prompt: prompt.content, position, inputEdgeOrder: [], runCount: 0, status: "idle", aspectRatio: "auto", generationMode: "api" };
     const selectedIds = selectedCanvasNodeIds();
-    const selectedSources = selectedIds.map((selectedId) => project.graph.nodes.find((node) => node.id === selectedId && (node.kind === "image" || node.kind === "result" || node.kind === "image_container"))).filter(Boolean);
-    const inputEdges = selectedSources.map((source) => ({ id: makeId("edge"), source: source.id, target: taskId, kind: "input" }));
-    project.graph.edges.push(...inputEdges);
-    task.inputEdgeOrder.push(...inputEdges.map((edge) => edge.id));
-    project.graph.nodes.push(task);
-    await putProject(project);
-    window.dispatchEvent(new CustomEvent("pixel-flow:project-refresh", { detail: { projectId: project.id } }));
-    notify(selectedSources.length ? `已创建生图任务并连接 ${selectedSources.length} 个选中图片来源` : "已从提示词创建独立生图任务");
+    await runCanvasCommand({ type: "task.createFromPrompt", prompt: prompt.content, position, sourceNodeIds: selectedIds });
+    notify(selectedIds.length ? `已创建生图任务并连接 ${selectedIds.length} 个选中图片来源` : "已从提示词创建独立生图任务");
   }
 
   async function applyMedia(media) {
     const taskId = selectedTaskId();
     const containerId = selectedImageContainerId();
-    const project = await getProject();
-    if (!project) return notify("找不到当前画布", "error");
-    const container = project.graph.nodes.find((node) => node.id === containerId && node.kind === "image_container");
-    if (container) {
-      container.items = [...(container.items || []), { id: makeId("container-item"), assetId: media.assetId, title: media.name }];
-      await putProject(project);
-      window.dispatchEvent(new CustomEvent("pixel-flow:project-refresh", { detail: { projectId: project.id, selectedNodeIds: [container.id] } }));
+    if (containerId) {
+      await runCanvasCommand({ type: "container.addAsset", assetId: media.assetId, title: media.name, containerId });
       notify("已将素材放入选中的图片容器");
       return;
     }
+    const project = await getProject();
+    if (!project) return notify("找不到当前画布", "error");
     const task = project.graph.nodes.find((node) => node.id === taskId && node.kind === "task");
     const position = task ? { x: task.position.x - 380, y: task.position.y + (task.inputEdgeOrder?.length || 0) * 96 } : canvasPosition(window.innerWidth / 2, window.innerHeight / 2);
     await addMediaNode(media, position, task?.id || "");
@@ -657,17 +573,8 @@
   }
 
   async function disconnectEdge(edgeId) {
-    const project = await getProject();
-    const edge = project?.graph?.edges?.find((item) => item.id === edgeId);
-    if (!project || !edge || edge.kind === "output") return notify("找不到可断开的输入连线", "error");
-    project.graph.edges = project.graph.edges.filter((item) => item.id !== edgeId);
-    project.graph.nodes = project.graph.nodes.map((node) => node.id === edge.target && node.kind === "task" ? {
-      ...node,
-      inputEdgeOrder: (node.inputEdgeOrder || []).filter((id) => id !== edgeId)
-    } : node);
-    await putProject(project);
+    await runCanvasCommand({ type: "edge.disconnect", edgeId });
     closeEdgeDisconnect();
-    window.dispatchEvent(new CustomEvent("pixel-flow:project-refresh", { detail: { projectId: project.id } }));
     notify("连接已断开");
   }
 
@@ -962,7 +869,7 @@
     if (action === "canvas-card-rename") {
       const project = await getProject(target.dataset.projectId);
       const name = project ? await openCanvasDialog({ title: "重命名画布", message: "输入一个容易识别的画布名称。", confirmLabel: "保存名称", inputValue: project.name || "" }) : false;
-      if (project && name) { await putProject({ ...project, name }); window.dispatchEvent(new CustomEvent("pixel-flow:projects-refresh")); await renderProjectGallery(); notify(`画布已重命名为“${name}”`); }
+      if (project && name) { await runCanvasCommand({ type: "project.rename", projectId: project.id, name }); await renderProjectGallery(); notify(`画布已重命名为“${name}”`); }
       return;
     }
     if (action === "canvas-card-delete") { await deleteCanvasById(target.dataset.projectId); return; }
