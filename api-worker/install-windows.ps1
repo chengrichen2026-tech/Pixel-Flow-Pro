@@ -4,9 +4,10 @@ $projectDir = Split-Path -Parent $PSScriptRoot
 $startupDir = [Environment]::GetFolderPath("Startup")
 $launcherPath = Join-Path $startupDir "Pixel Flow API Worker.cmd"
 $startScript = Join-Path $PSScriptRoot "start-windows.ps1"
+$bundledNodePath = Join-Path $PSScriptRoot "node-runtime\node.exe"
 
-if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
-  throw "Node.js was not found. Install Node.js 20 or newer and reopen PowerShell."
+if (-not (Test-Path -LiteralPath $bundledNodePath) -and -not (Get-Command node -ErrorAction SilentlyContinue)) {
+  throw "Node.js was not found. Use the partner package with api-worker\node-runtime, or install Node.js 20 or newer."
 }
 
 $launcher = @"

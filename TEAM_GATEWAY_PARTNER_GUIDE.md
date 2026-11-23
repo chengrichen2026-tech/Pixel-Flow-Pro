@@ -28,7 +28,16 @@
 
 成员作为任务发起方不需要配置“本机作为网页生图执行机”；该区域只用于真正承担 GPT Web 团队生图的 ChatGPT 执行机。
 
-## 4. 运行第一张图
+## 4. 启动本机 API Worker（仅个人 API 模式需要）
+
+Team Cloud 和 GPT Web 团队模式不需要启动 API Worker。只有使用自己的 API Key 时才执行本节：
+
+- Windows：双击 `api-worker/start-api-worker.cmd`。
+- macOS（Apple 芯片或 Intel）：双击 `api-worker/start-api-worker.command`。
+
+伙伴发布包已内置对应系统的便携版 Node.js，不需要单独安装。启动成功后会显示 `API Worker is ready at http://127.0.0.1:43129/health`。如果 macOS 首次打开时提示安全限制，请在 Finder 中右键该文件并选择“打开”；不要移动或单独复制启动脚本，必须保留整个解压目录。
+
+## 5. 运行第一张图
 
 1. 新建生图任务。
 2. 生图模式选择“Team Cloud”，或选择“GPT Web → 团队”。新建任务在已保存成员令牌时默认选择 GPT Web 团队。
@@ -43,7 +52,7 @@
 - 任务右侧出现“生成结果1”；
 - 结果图片可以下载。
 
-## 5. 常见问题
+## 6. 常见问题
 
 - `无法连接团队生图服务`：确认网络正常，并检查固定团队中继是否可访问。
 - `团队令牌无效或已撤销`：检查 token 是否完整，或请管理员重新创建成员令牌。

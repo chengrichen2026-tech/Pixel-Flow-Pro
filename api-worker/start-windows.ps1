@@ -11,6 +11,7 @@ $pidPath = Join-Path $runtimeDir "api-worker.windows.pid"
 $stdoutPath = Join-Path $runtimeDir "api-worker.windows.log"
 $stderrPath = Join-Path $runtimeDir "api-worker.windows.error.log"
 $healthUrl = "http://127.0.0.1:43129/health"
+$bundledNodePath = Join-Path $PSScriptRoot "node-runtime\node.exe"
 
 New-Item -ItemType Directory -Force -Path $runtimeDir | Out-Null
 
@@ -63,7 +64,15 @@ if ($runningHealth -and $runningHealth.ok) {
   Remove-Item -Path $pidPath -Force -ErrorAction SilentlyContinue
 }
 
-$node = (Get-Command node -ErrorAction Stop).Source
+if (Test-Path -LiteralPath $bundledNodePath) {
+  $node = $bundledNodePath
+} else {
+  $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
+  if (-not $nodeCommand) {
+    throw "Node.js was not found. Use the partner package with api-worker\node-runtime, or install Node.js 20 or newer."
+  }
+  $node = $nodeCommand.Source
+}
 $process = Start-Process -FilePath $node `
   -ArgumentList @($serverPath) `
   -WorkingDirectory $projectDir `

@@ -5,7 +5,19 @@ script_dir="$(cd "$(dirname "$0")" && pwd)"
 project_dir="$(cd "$script_dir/.." && pwd)"
 runtime_dir="$project_dir/runtime"
 service_plist="$runtime_dir/com.pixel-flow.api-worker.plist"
-node_bin="$(command -v node)"
+case "$(uname -m)" in
+  arm64) bundled_node="$script_dir/node-runtime/macos-arm64/node" ;;
+  x86_64) bundled_node="$script_dir/node-runtime/macos-x64/node" ;;
+  *) bundled_node="" ;;
+esac
+if [[ -n "$bundled_node" && -x "$bundled_node" ]]; then
+  node_bin="$bundled_node"
+elif command -v node >/dev/null 2>&1; then
+  node_bin="$(command -v node)"
+else
+  echo "Node.js was not found. Use the Mac partner package with api-worker/node-runtime, or install Node.js 20 or newer." >&2
+  exit 1
+fi
 user_domain="gui/$(id -u)"
 mkdir -p "$runtime_dir"
 cat > "$service_plist" <<PLIST

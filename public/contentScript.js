@@ -2,7 +2,7 @@
 // @ts-check
 (() => {
   // src/shared/protocol.ts
-  var CHATGPT_ADAPTER_VERSION = 39;
+  var CHATGPT_ADAPTER_VERSION = 40;
   var taskTypes = /* @__PURE__ */ new Set([
     "RUN_TASK",
     "CANCEL_TASK",
@@ -470,7 +470,7 @@
     ].join(",")).forEach((element) => element.remove());
     textSource.querySelectorAll("br").forEach((element) => element.replaceWith("\n"));
     textSource.querySelectorAll("p, li, h1, h2, h3, h4, h5, h6, pre, blockquote, tr").forEach((element) => element.append("\n"));
-    const responseText = (textSource.textContent || "").split("\n").map((line) => line.trim().replace(/^ChatGPT\s*(?:说|said)\s*[:：]?\s*/i, "").replace(/^Worked for\s+(?:\d+\s*(?:s|m|h|sec(?:ond)?s?|min(?:ute)?s?|hours?)\s*)+/i, "").replace(/^思考了\s*(?:\d+\s*(?:秒|分钟|小时)\s*)+/i, "").trim()).filter((line) => !/^(?:编辑|复制|edit|copy)$/i.test(line)).filter(Boolean).join("\n").trim();
+    const responseText = (textSource.textContent || "").split("\n").map((line) => line.trim().replace(/^ChatGPT\s*(?:说|said)\s*[:：]?\s*/i, "").replace(/^Worked for\s+(?:\d+\s*(?:s|m|h|sec(?:ond)?s?|min(?:ute)?s?|hours?)\s*)+/i, "").replace(/^思考了\s*(?:\d+\s*(?:秒|分钟|小时)\s*)+/i, "").trim()).filter((line) => !/^(?:ChatGPT|Assistant|编辑|复制|edit|copy)$/i.test(line)).filter(Boolean).join("\n").trim();
     return {
       images,
       galleryReady,
@@ -582,7 +582,7 @@
       await waitForStableComposerAttachments(expectedAttachmentCount, index + 1);
     }
   }
-  async function waitForCompletion(previousTurnCount, assertConversation, prompt = "", timeoutMs = 10 * 6e4) {
+  async function waitForCompletion(previousTurnCount, assertConversation, prompt = "", expectsImages = false, timeoutMs = 10 * 6e4) {
     const started = Date.now();
     let previousSignature = "";
     let stableChecks = 0;
@@ -605,7 +605,7 @@
       const hasNewTurn = turns.length > previousTurnCount;
       const isGenerating = isResponseGenerating();
       const hasMeaningfulResult = Boolean(result.responseText || result.images.length > 0);
-      const imageExpected = expectsGeneratedImages(prompt);
+      const imageExpected = expectsImages || expectsGeneratedImages(prompt);
       const imageClaimed = responseIndicatesGeneratedImage(result.responseText);
       if (hasNewTurn && !isGenerating && isContentPolicyRefusal(latest)) {
         throw new AdapterError("content_policy", "ChatGPT 因内容政策拒绝生成图片");
@@ -628,7 +628,7 @@
           return { ...result, images: [...new Set([...result.images, ...fileImages])], galleryReady: true, hasCurrentGallery: true };
         }
       }
-      const imageReady = result.imageFileCount === 0 && result.galleryReady && (result.images.length > 0 || !imageClaimed && (!imageExpected || Date.now() - started > 20e3));
+      const imageReady = result.imageFileCount === 0 && result.galleryReady && (result.images.length > 0 || !imageExpected && !imageClaimed);
       if (hasNewTurn && !isGenerating && !isTemporaryRetryError(latest) && hasMeaningfulResult && imageReady) {
         stableChecks = signature === previousSignature ? stableChecks + 1 : 0;
         if (stableChecks >= 3) return result;
@@ -716,7 +716,7 @@
       previousUserTurnCount,
       input.prompt
     );
-    const result = await waitForCompletion(previousTurnCount, assertCompletionConversation, input.prompt);
+    const result = await waitForCompletion(previousTurnCount, assertCompletionConversation, input.prompt, input.expectsImages === true || input.images.length > 0);
     if (!assertCompletionConversation()) {
       throw new AdapterError("conversation_unavailable", "\u7B49\u5F85\u671F\u95F4\u6807\u7B7E\u9875\u5207\u6362\u5230\u4E86\u5176\u4ED6 ChatGPT \u5BF9\u8BDD");
     }
@@ -732,7 +732,7 @@
       new AdapterError("conversation_unavailable", "ChatGPT 对话已打开，但没有找到已发送的任务消息")
     );
     const assertCompletionConversation = createCompletionConversationCheck(void 0, 0, input.prompt);
-    const result = await waitForCompletion(0, assertCompletionConversation, input.prompt);
+    const result = await waitForCompletion(0, assertCompletionConversation, input.prompt, input.expectsImages === true);
     return {
       images: await Promise.all(result.images.map(imageUrlToBase64)),
       responseText: result.responseText
@@ -776,7 +776,7 @@
         if (activeSubmitTasks.has(resumeKey) || activeResumeTasks.has(resumeKey)) return true;
         activeResumeTasks.add(resumeKey);
         taskPhases.set(resumeKey, "collecting_result");
-        void resumeTask({ prompt: message.prompt }).then((result) => report({
+        void resumeTask({ prompt: message.prompt, expectsImages: message.expectsImages }).then((result) => report({
           type: "TASK_RESULT",
           projectId: message.projectId,
           taskId: message.taskId,
@@ -810,6 +810,7 @@
       void submitTask({
         prompt: message.prompt,
         images: message.images,
+        expectsImages: message.expectsImages,
         expectedConversationUrl: message.expectedConversationUrl,
         onPhase: async (phase) => {
           taskPhases.set(taskKey, phase);

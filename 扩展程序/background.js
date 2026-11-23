@@ -4498,7 +4498,7 @@ var ChatGptAdapterReconnectError = class extends Error {
 		this.name = "ChatGptAdapterReconnectError";
 	}
 };
-var isCurrentAdapter$1 = (value) => Boolean(value && typeof value === "object" && value.adapterVersion === 39);
+var isCurrentAdapter$1 = (value) => Boolean(value && typeof value === "object" && value.adapterVersion === 40);
 async function probeAdapter(tabs, tabId, message) {
 	try {
 		const state = await tabs.sendMessage(tabId, {
@@ -5546,6 +5546,7 @@ var schedulerReady = chrome.storage.session.get([
 				taskId: task.id,
 				prompt: appendAspectRatioPrompt(task.prompt, task.aspectRatio ?? "auto"),
 				images: [],
+				expectsImages: true,
 				expectedConversationUrl: conversationUrl,
 				startedAt: latestRuns.get(task.id)?.startedAt ?? Date.now(),
 				submittedAt: latestRuns.get(task.id)?.updatedAt ?? Date.now(),
@@ -5823,6 +5824,7 @@ var teamWebWorkerReady = Promise.all([schedulerReady, chrome.storage.local.get([
 			taskId: active.job.id,
 			prompt: active.job.prompt,
 			images: [],
+			expectsImages: true,
 			expectedConversationUrl: conversationUrl,
 			startedAt: active.startedAt,
 			submittedAt: active.submittedAt ?? active.startedAt,
@@ -6315,6 +6317,7 @@ async function startActiveTeamWebJob(active) {
 		expectedConversationUrl: active.conversationUrl,
 		prompt: appendAspectRatioPrompt(active.job.prompt, active.job.ratio ?? "auto"),
 		images,
+		expectsImages: true,
 		startedAt: active.startedAt,
 		phase: "preparing_tab"
 	};
@@ -6757,6 +6760,7 @@ async function executeTask(projectId, taskId) {
 			expectedConversationUrl: runtimeTask.conversationUrl,
 			prompt: request.prompt,
 			images: request.images,
+			expectsImages: true,
 			startedAt: Date.now(),
 			phase: "preparing_tab"
 		};

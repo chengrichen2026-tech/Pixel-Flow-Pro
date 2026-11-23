@@ -268,6 +268,9 @@ test("browser results collect only the latest assistant carousel", async () => {
   assert.deepEqual([...context.extract().images], images.map((asset) => asset.src));
   assert.equal(context.extract().responseText, "已生成 5 张");
   assert.equal(context.extract().galleryReady, true);
+  context.assistantTurns = () => [{ ...latest, cloneNode: () => ({ textContent: "ChatGPT", querySelectorAll: () => [] }) }];
+  assert.equal(context.extract().responseText, "", "standalone role headings are not task results");
+  context.assistantTurns = () => [latest];
   turnState = "streaming";
   assert.equal(context.extract().galleryReady, false);
   turnState = "complete";
@@ -292,8 +295,8 @@ test("ChatGPT image progress percentages are not completed as text results", asy
 test("reinjected ChatGPT adapter replaces a stale page listener after extension reload", async () => {
   const content = await readFile(new URL("public/contentScript.js", root), "utf8");
   const background = await readBackgroundSource();
-  assert.match(content, /CHATGPT_ADAPTER_VERSION = 39/);
-  assert.match(background, /CHATGPT_ADAPTER_VERSION = 39/);
+  assert.match(content, /CHATGPT_ADAPTER_VERSION = 40/);
+  assert.match(background, /CHATGPT_ADAPTER_VERSION = 40/);
   assert.match(content, /__gptNodeCanvasMessageListener/);
   assert.match(content, /removeListener\(previousMessageListener\)/);
   assert.match(content, /addListener\(currentMessageListener\)/);
@@ -326,11 +329,16 @@ test("browser results are recovered by a service-worker alarm without opening th
 
 test("ChatGPT image responses wait for hydrated image DOM before completing", async () => {
   const source = await readFile(new URL("public/contentScript.js", root), "utf8");
+  const background = await readBackgroundSource();
   assert.match(source, /function expectsGeneratedImages\(prompt\)/);
   assert.match(source, /function responseIndicatesGeneratedImage\(text\)/);
-  assert.match(source, /const imageReady = result\.imageFileCount === 0 && result\.galleryReady && \(result\.images\.length > 0 \|\| !imageClaimed/);
-  assert.match(source, /waitForCompletion\(previousTurnCount, assertCompletionConversation, input\.prompt\)/);
-  assert.match(source, /waitForCompletion\(0, assertCompletionConversation, input\.prompt\)/);
+  assert.match(source, /const imageExpected = expectsImages \|\| expectsGeneratedImages\(prompt\)/);
+  assert.match(source, /const imageReady = result\.imageFileCount === 0 && result\.galleryReady && \(result\.images\.length > 0 \|\| !imageExpected && !imageClaimed\)/);
+  assert.doesNotMatch(source, /Date\.now\(\) - started > 20e3/);
+  assert.match(source, /waitForCompletion\(previousTurnCount, assertCompletionConversation, input\.prompt, input\.expectsImages === true \|\| input\.images\.length > 0\)/);
+  assert.match(source, /waitForCompletion\(0, assertCompletionConversation, input\.prompt, input\.expectsImages === true\)/);
+  assert.match(background, /prompt: request\.prompt,\s*images: request\.images,\s*expectsImages: true/);
+  assert.match(background, /prompt: appendAspectRatioPrompt\(task\.prompt, task\.aspectRatio \?\? "auto"\),\s*images: \[\],\s*expectsImages: true/);
   assert.match(source, /const hasNewTurn = turns\.length > previousTurnCount;/);
   assert.doesNotMatch(source, /result\.images\.length > 0 && result\.hasCurrentGallery/);
 });
@@ -613,17 +621,36 @@ test("Windows API Worker has install, start, uninstall, and health-check scripts
   assert.match(packageJson, /api-worker:start:windows/);
   assert.match(packageJson, /api-worker:uninstall:windows/);
   assert.match(install, /\[Environment\]::GetFolderPath\("Startup"\)/);
+  assert.match(install, /node-runtime\\node\.exe/);
   assert.match(install, /Node\.js 20 or newer/);
   assert.match(install, /& \$startScript -ForceRestart/);
   assert.match(server, /workerVersion: 2/);
   assert.match(server, /apiModels: PIXEL_FLOW_API_MODELS/);
   assert.match(start, /Invoke-RestMethod -Uri \$healthUrl/);
+  assert.match(start, /node-runtime\\node\.exe/);
+  assert.match(start, /Test-Path -LiteralPath \$bundledNodePath/);
   assert.match(start, /api-worker\.windows\.pid/);
   assert.match(start, /Get-NetTCPConnection -LocalAddress "127\.0\.0\.1" -LocalPort 43129/);
   assert.match(start, /apiModels -contains "gpt-image-2\.5-sunburst"/);
   assert.match(start, /Stop-Process -Id \$runningProcess\.ProcessId -Force/);
   assert.match(uninstall, /Get-CimInstance Win32_Process/);
   assert.match(uninstall, /CommandLine\.Contains\(\$serverPath\)/);
+});
+
+test("macOS API Worker supports double-click startup on Apple Silicon and Intel", async () => {
+  const install = await readFile(new URL("api-worker/install.sh", root), "utf8");
+  const start = await readFile(new URL("api-worker/start-macos.sh", root), "utf8");
+  const launcher = await readFile(new URL("api-worker/start-api-worker.command", root), "utf8");
+  for (const source of [install, start]) {
+    assert.match(source, /node-runtime\/macos-arm64\/node/);
+    assert.match(source, /node-runtime\/macos-x64\/node/);
+    assert.match(source, /uname -m/);
+  }
+  assert.match(start, /curl --fail --silent --show-error/);
+  assert.match(start, /api-worker\.macos\.pid/);
+  assert.match(start, /nohup "\$node_bin" "\$server_path"/);
+  assert.match(launcher, /"\$script_dir\/start-macos\.sh"/);
+  assert.match(launcher, /Press Return to close this window/);
 });
 
 
