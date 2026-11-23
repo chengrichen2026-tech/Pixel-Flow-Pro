@@ -4492,7 +4492,13 @@ function resolveBrowserTaskConversationUrl(message, senderUrl, provider) {
 }
 //#endregion
 //#region src/background/chatgpt-adapter-bridge.ts
-var isCurrentAdapter$1 = (value) => Boolean(value && typeof value === "object" && value.adapterVersion === 38);
+var ChatGptAdapterReconnectError = class extends Error {
+	constructor(detail) {
+		super(`ChatGPT 页面脚本重新连接失败（${detail}），请刷新该标签页后重试`);
+		this.name = "ChatGptAdapterReconnectError";
+	}
+};
+var isCurrentAdapter$1 = (value) => Boolean(value && typeof value === "object" && value.adapterVersion === 39);
 async function probeAdapter(tabs, tabId, message) {
 	try {
 		const state = await tabs.sendMessage(tabId, {
@@ -4505,13 +4511,43 @@ async function probeAdapter(tabs, tabId, message) {
 		return;
 	}
 }
-async function sendWithCurrentChatGptAdapter(tabs, scripting, tabId, message) {
-	if (!await probeAdapter(tabs, tabId, message)) {
-		await scripting.executeScript({
-			target: { tabId },
-			files: ["contentScript.js"]
-		});
-		if (!await probeAdapter(tabs, tabId, message)) throw new Error("ChatGPT 页面脚本重新连接失败，请刷新该标签页后重试");
+async function sendWithCurrentChatGptAdapter(tabs, scripting, tabId, message, options = {}) {
+	const pollIntervalMs = options.pollIntervalMs ?? 300;
+	const waitForAdapter = async (timeoutMs) => {
+		const deadline = Date.now() + timeoutMs;
+		do {
+			if (await probeAdapter(tabs, tabId, message)) return true;
+			const remaining = deadline - Date.now();
+			if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, Math.min(pollIntervalMs, remaining)));
+		} while (Date.now() < deadline);
+		return false;
+	};
+	const initialProbeMs = options.initialProbeMs ?? 600;
+	const injectedProbeMs = options.injectedProbeMs ?? 4e3;
+	const refreshedProbeMs = options.refreshedProbeMs ?? 7e3;
+	let lastError = "页面脚本未响应";
+	if (!await waitForAdapter(initialProbeMs)) {
+		try {
+			await scripting.executeScript({
+				target: { tabId },
+				files: ["contentScript.js"]
+			});
+		} catch (error) {
+			lastError = error instanceof Error ? error.message : String(error);
+		}
+		if (!await waitForAdapter(injectedProbeMs) && options.refreshTab) {
+			try {
+				await options.refreshTab();
+				await scripting.executeScript({
+					target: { tabId },
+					files: ["contentScript.js"]
+				});
+			} catch (error) {
+				lastError = error instanceof Error ? error.message : String(error);
+			}
+			if (!await waitForAdapter(refreshedProbeMs)) lastError = "刷新标签页后页面脚本仍未响应";
+		}
+		if (!await waitForAdapter(0)) throw new ChatGptAdapterReconnectError(lastError);
 	}
 	return tabs.sendMessage(tabId, {
 		...message,
@@ -4603,13 +4639,15 @@ var TabRegistry = class {
 		this.taskTabs.set(taskId, {
 			tabId,
 			conversationUrl: safeBrowserUrl(conversationUrl, provider),
-			provider
+			provider,
+			reloadSafe: false
 		});
 	}
 	async restoreProject(tasks) {
 		for (const task of tasks) this.taskTabs.set(task.taskId, {
 			conversationUrl: task.conversationUrl,
-			provider: "chatgpt"
+			provider: "chatgpt",
+			reloadSafe: false
 		});
 	}
 	async ensure(taskId, conversationUrl, requestedProvider) {
@@ -4622,6 +4660,7 @@ var TabRegistry = class {
 			const baseUrl = safeBrowserUrl(void 0, provider);
 			if (tab.id !== void 0 && expectedUrl === baseUrl && liveConversationUrl) {
 				this.taskTabs.set(taskId, {
+					...mapped,
 					tabId: tab.id,
 					conversationUrl: liveConversationUrl,
 					provider
@@ -4644,7 +4683,8 @@ var TabRegistry = class {
 			if (error instanceof ConversationUnavailableError) throw error;
 			this.taskTabs.set(taskId, {
 				conversationUrl: mapped.conversationUrl,
-				provider
+				provider,
+				reloadSafe: false
 			});
 		}
 		if (this.tabs.query && expectedUrl !== safeBrowserUrl(void 0, provider)) try {
@@ -4654,7 +4694,8 @@ var TabRegistry = class {
 				this.taskTabs.set(taskId, {
 					tabId: existing.id,
 					conversationUrl: existing.url ?? expectedUrl,
-					provider
+					provider,
+					reloadSafe: false
 				});
 				await this.groupTab(existing.id);
 				return {
@@ -4671,7 +4712,8 @@ var TabRegistry = class {
 		this.taskTabs.set(taskId, {
 			tabId: tab.id,
 			conversationUrl: tab.url ?? expectedUrl,
-			provider
+			provider,
+			reloadSafe: true
 		});
 		await this.groupTab(tab.id);
 		return {
@@ -4692,7 +4734,8 @@ var TabRegistry = class {
 			const previous = this.taskTabs.get(taskId);
 			this.taskTabs.set(taskId, {
 				conversationUrl: conversationUrl ?? previous?.conversationUrl ?? safeBrowserUrl(void 0, provider),
-				provider
+				provider,
+				reloadSafe: false
 			});
 			mapped = await this.ensure(taskId, conversationUrl ?? previous?.conversationUrl, provider);
 		}
@@ -4702,7 +4745,8 @@ var TabRegistry = class {
 	updateConversation(taskId, conversationUrl, provider = "chatgpt") {
 		const mapped = this.taskTabs.get(taskId) ?? {
 			conversationUrl: safeBrowserUrl(void 0, provider),
-			provider
+			provider,
+			reloadSafe: false
 		};
 		this.taskTabs.set(taskId, {
 			...mapped,
@@ -4712,6 +4756,10 @@ var TabRegistry = class {
 	}
 	ownsTab(taskId, tabId) {
 		return tabId !== void 0 && this.taskTabs.get(taskId)?.tabId === tabId;
+	}
+	canReloadTab(taskId, tabId) {
+		const mapped = this.taskTabs.get(taskId);
+		return tabId !== void 0 && mapped?.tabId === tabId && mapped.reloadSafe;
 	}
 	taskForTab(tabId) {
 		for (const [taskId, entry] of this.taskTabs) if (entry.tabId === tabId) return taskId;
@@ -4726,7 +4774,8 @@ var TabRegistry = class {
 		if (!mapped || mapped.tabId === void 0) return false;
 		this.taskTabs.set(taskId, {
 			conversationUrl: mapped.conversationUrl,
-			provider: mapped.provider
+			provider: mapped.provider,
+			reloadSafe: false
 		});
 		try {
 			await this.tabs.remove(mapped.tabId);
@@ -5557,6 +5606,32 @@ async function waitForTabReady(tabId, timeoutMs = 3e4) {
 		chrome.tabs.onRemoved.addListener(removed);
 	});
 }
+async function reloadTabAndWait(tabId, timeoutMs = 3e4) {
+	await new Promise((resolve, reject) => {
+		let settled = false;
+		const cleanup = () => {
+			clearTimeout(timer);
+			chrome.tabs.onUpdated.removeListener(updated);
+			chrome.tabs.onRemoved.removeListener(removed);
+		};
+		const finish = (error) => {
+			if (settled) return;
+			settled = true;
+			cleanup();
+			error ? reject(error) : resolve();
+		};
+		const updated = (changedId, info) => {
+			if (changedId === tabId && info.status === "complete") finish();
+		};
+		const removed = (removedId) => {
+			if (removedId === tabId) finish(/* @__PURE__ */ new Error("ChatGPT任务标签页在恢复连接时被关闭"));
+		};
+		const timer = setTimeout(() => finish(/* @__PURE__ */ new Error("刷新ChatGPT任务标签页后等待页面就绪超过30秒")), timeoutMs);
+		chrome.tabs.onUpdated.addListener(updated);
+		chrome.tabs.onRemoved.addListener(removed);
+		chrome.tabs.reload(tabId).catch(finish);
+	});
+}
 async function broadcast(message) {
 	try {
 		await chrome.runtime.sendMessage(message);
@@ -6246,7 +6321,7 @@ async function startActiveTeamWebJob(active) {
 	browserTaskMessages.set(key, recoveryMessage(message));
 	await saveBrowserTaskMessages();
 	scheduleBrowserResultRecoveryAlarm();
-	await sendWithCurrentChatGptAdapter(chrome.tabs, chrome.scripting, mapped.tabId, message);
+	await sendWithCurrentChatGptAdapter(chrome.tabs, chrome.scripting, mapped.tabId, message, { refreshTab: message.phase === "preparing_tab" && tabRegistry.canReloadTab(key, mapped.tabId) ? () => reloadTabAndWait(mapped.tabId) : void 0 });
 }
 async function teamWebWorkerTick() {
 	if (teamWebTickPromise) return teamWebTickPromise;
@@ -6689,9 +6764,9 @@ async function executeTask(projectId, taskId) {
 		await saveBrowserTaskMessages();
 		scheduleBrowserResultRecoveryAlarm();
 		if (provider === "gemini") await sendWithCurrentGeminiAdapter(chrome.tabs, chrome.scripting, mapped.tabId, message);
-		else await sendWithCurrentChatGptAdapter(chrome.tabs, chrome.scripting, mapped.tabId, message);
+		else await sendWithCurrentChatGptAdapter(chrome.tabs, chrome.scripting, mapped.tabId, message, { refreshTab: message.phase === "preparing_tab" && tabRegistry.canReloadTab(key, mapped.tabId) ? () => reloadTabAndWait(mapped.tabId) : void 0 });
 	} catch (error) {
-		const reason = error instanceof ConversationUnavailableError ? "conversation_unavailable" : "selector_missing";
+		const reason = error instanceof ConversationUnavailableError ? "conversation_unavailable" : error instanceof ChatGptAdapterReconnectError ? "adapter_reconnect_failed" : "selector_missing";
 		if (!await updateScheduler(async () => {
 			if (!queue.running.includes(key)) return false;
 			queue = fail(queue, key, reason);

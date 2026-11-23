@@ -1,6 +1,6 @@
 import { concreteBrowserConversationUrl, expectedBrowserConversationMatches, safeBrowserUrl, type BrowserProvider } from "./chatgpt-url.ts";
 
-type TabEntry = { tabId?: number; conversationUrl: string; provider: BrowserProvider };
+type TabEntry = { tabId?: number; conversationUrl: string; provider: BrowserProvider; reloadSafe: boolean };
 type TabGrouping = { group?(tabId: number): Promise<void>; managedTabs?(): Promise<chrome.tabs.Tab[]> };
 
 export class ConversationUnavailableError extends Error {
@@ -25,11 +25,11 @@ export class TabRegistry {
   }
 
   map(taskId: string, tabId?: number, conversationUrl?: string, provider: BrowserProvider = "chatgpt"): void {
-    this.taskTabs.set(taskId, { tabId, conversationUrl: safeBrowserUrl(conversationUrl, provider), provider });
+    this.taskTabs.set(taskId, { tabId, conversationUrl: safeBrowserUrl(conversationUrl, provider), provider, reloadSafe: false });
   }
 
   async restoreProject(tasks: Array<{ taskId: string; conversationUrl: string }>): Promise<void> {
-    for (const task of tasks) this.taskTabs.set(task.taskId, { conversationUrl: task.conversationUrl, provider: "chatgpt" });
+    for (const task of tasks) this.taskTabs.set(task.taskId, { conversationUrl: task.conversationUrl, provider: "chatgpt", reloadSafe: false });
   }
 
   async ensure(taskId: string, conversationUrl?: string, requestedProvider?: BrowserProvider): Promise<{ tabId: number; conversationUrl: string }> {
@@ -42,7 +42,7 @@ export class TabRegistry {
         const liveConversationUrl = concreteBrowserConversationUrl(tab.url, provider);
         const baseUrl = safeBrowserUrl(undefined, provider);
         if (tab.id !== undefined && expectedUrl === baseUrl && liveConversationUrl) {
-          this.taskTabs.set(taskId, { tabId: tab.id, conversationUrl: liveConversationUrl, provider });
+          this.taskTabs.set(taskId, { ...mapped, tabId: tab.id, conversationUrl: liveConversationUrl, provider });
           await this.groupTab(tab.id);
           return { tabId: tab.id, conversationUrl: liveConversationUrl };
         }
@@ -53,7 +53,7 @@ export class TabRegistry {
         if (tab.id !== undefined) throw new ConversationUnavailableError(provider);
       } catch (error) {
         if (error instanceof ConversationUnavailableError) throw error;
-        this.taskTabs.set(taskId, { conversationUrl: mapped.conversationUrl, provider });
+        this.taskTabs.set(taskId, { conversationUrl: mapped.conversationUrl, provider, reloadSafe: false });
       }
     }
     if (this.tabs.query && expectedUrl !== safeBrowserUrl(undefined, provider)) {
@@ -62,7 +62,7 @@ export class TabRegistry {
         const candidates = await this.tabs.query({ url: [provider === "gemini" ? "https://gemini.google.com/app*" : "https://chatgpt.com/*"] });
         const existing = candidates.find(candidate => candidate.id !== undefined && !claimedTabIds.has(candidate.id) && expectedBrowserConversationMatches(candidate.url, expectedUrl, provider));
         if (existing?.id !== undefined) {
-          this.taskTabs.set(taskId, { tabId: existing.id, conversationUrl: existing.url ?? expectedUrl, provider });
+          this.taskTabs.set(taskId, { tabId: existing.id, conversationUrl: existing.url ?? expectedUrl, provider, reloadSafe: false });
           await this.groupTab(existing.id);
           return { tabId: existing.id, conversationUrl: existing.url ?? expectedUrl };
         }
@@ -70,7 +70,7 @@ export class TabRegistry {
     }
     const tab = await this.tabs.create({ url: expectedUrl, active: false });
     if (tab.id === undefined) throw new Error("浏览器没有返回新标签页编号");
-    this.taskTabs.set(taskId, { tabId: tab.id, conversationUrl: tab.url ?? expectedUrl, provider });
+    this.taskTabs.set(taskId, { tabId: tab.id, conversationUrl: tab.url ?? expectedUrl, provider, reloadSafe: true });
     await this.groupTab(tab.id);
     return { tabId: tab.id, conversationUrl: tab.url ?? expectedUrl };
   }
@@ -87,7 +87,7 @@ export class TabRegistry {
     } catch (error) {
       if (!(error instanceof ConversationUnavailableError)) throw error;
       const previous = this.taskTabs.get(taskId);
-      this.taskTabs.set(taskId, { conversationUrl: conversationUrl ?? previous?.conversationUrl ?? safeBrowserUrl(undefined, provider), provider });
+      this.taskTabs.set(taskId, { conversationUrl: conversationUrl ?? previous?.conversationUrl ?? safeBrowserUrl(undefined, provider), provider, reloadSafe: false });
       mapped = await this.ensure(taskId, conversationUrl ?? previous?.conversationUrl, provider);
     }
     await this.tabs.update(mapped.tabId, { active: true });
@@ -95,11 +95,15 @@ export class TabRegistry {
   }
 
   updateConversation(taskId: string, conversationUrl?: string, provider: BrowserProvider = "chatgpt"): void {
-    const mapped = this.taskTabs.get(taskId) ?? { conversationUrl: safeBrowserUrl(undefined, provider), provider };
+    const mapped = this.taskTabs.get(taskId) ?? { conversationUrl: safeBrowserUrl(undefined, provider), provider, reloadSafe: false };
     this.taskTabs.set(taskId, { ...mapped, provider, conversationUrl: safeBrowserUrl(conversationUrl, provider) });
   }
 
   ownsTab(taskId: string, tabId?: number): boolean { return tabId !== undefined && this.taskTabs.get(taskId)?.tabId === tabId; }
+  canReloadTab(taskId: string, tabId?: number): boolean {
+    const mapped = this.taskTabs.get(taskId);
+    return tabId !== undefined && mapped?.tabId === tabId && mapped.reloadSafe;
+  }
   taskForTab(tabId: number): string | undefined { for (const [taskId, entry] of this.taskTabs) if (entry.tabId === tabId) return taskId; }
 
   async close(taskId: string): Promise<void> {
@@ -111,7 +115,7 @@ export class TabRegistry {
   async hibernate(taskId: string): Promise<boolean> {
     const mapped = this.taskTabs.get(taskId);
     if (!mapped || mapped.tabId === undefined) return false;
-    this.taskTabs.set(taskId, { conversationUrl: mapped.conversationUrl, provider: mapped.provider });
+    this.taskTabs.set(taskId, { conversationUrl: mapped.conversationUrl, provider: mapped.provider, reloadSafe: false });
     try { await this.tabs.remove(mapped.tabId); return true; } catch { return false; }
   }
 

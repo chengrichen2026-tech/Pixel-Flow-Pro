@@ -2,7 +2,7 @@
 // @ts-check
 (() => {
   // src/shared/protocol.ts
-  var CHATGPT_ADAPTER_VERSION = 38;
+  var CHATGPT_ADAPTER_VERSION = 39;
   var taskTypes = /* @__PURE__ */ new Set([
     "RUN_TASK",
     "CANCEL_TASK",
@@ -379,11 +379,23 @@
       const prototype = composer instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
       const setter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
       setter?.call(composer, text);
+      composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
+      composer.dispatchEvent(new Event("change", { bubbles: true }));
     } else {
-      composer.textContent = text;
+      const selection = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(composer);
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      if (!document.execCommand("insertText", false, text)) {
+        throw new AdapterError("selector_missing", "ChatGPT \u8F93\u5165\u533A\u62D2\u7EDD\u63A5\u6536\u63D0\u793A\u8BCD");
+      }
     }
-    composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
-    composer.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+  function composerText(composer) {
+    if (!composer) return "";
+    if (composer instanceof HTMLTextAreaElement || composer instanceof HTMLInputElement) return composer.value;
+    return composer.innerText || composer.textContent || "";
   }
   function isResponseGenerating() {
     // ChatGPT keeps inactive composer controls mounted after generation ends.
@@ -654,6 +666,11 @@
     const currentComposer = findComposer();
     if (!currentComposer) throw new AdapterError("selector_missing", "\u53C2\u8003\u56FE\u4E0A\u4F20\u540E\u627E\u4E0D\u5230 ChatGPT \u8F93\u5165\u533A");
     setComposerText(currentComposer, input.prompt);
+    await waitUntil(
+      () => normalizeTurnText(composerText(findComposer())) === normalizeTurnText(input.prompt),
+      5e3,
+      new AdapterError("selector_missing", "ChatGPT \u8F93\u5165\u533A\u672A\u4FDD\u7559\u672C\u6B21\u63D0\u793A\u8BCD")
+    );
     await input.onPhase?.("sending");
     await waitUntil(
       () => {

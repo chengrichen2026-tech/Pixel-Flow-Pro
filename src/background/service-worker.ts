@@ -28,7 +28,7 @@ import { KeyedSerialQueue } from "./keyed-serial-queue";
 import { base64ToBytes, bytesToBase64, decodeBase64, sha256Hex } from "./binary";
 import { CHATGPT_ADAPTER_VERSION, isExtensionMessage } from "./protocol";
 import { concreteBrowserConversationUrl, concreteChatGptConversationUrl, expectedBrowserConversationMatches, expectedChatGptConversationMatches, resolveBrowserTaskConversationUrl, resolveTaskConversationUrl } from "./chatgpt-url";
-import { probeAdapter, sendWithCurrentChatGptAdapter } from "./chatgpt-adapter-bridge";
+import { ChatGptAdapterReconnectError, probeAdapter, sendWithCurrentChatGptAdapter } from "./chatgpt-adapter-bridge";
 import { probeGeminiAdapter, sendWithCurrentGeminiAdapter } from "./gemini-adapter-bridge";
 import { TaskTabGrouper } from "./task-tab-grouper";
 import { ConversationUnavailableError, TabRegistry } from "./tab-registry";
@@ -156,6 +156,32 @@ async function waitForTabReady(tabId, timeoutMs = 30_000) {
     }, timeoutMs);
     chrome.tabs.onUpdated.addListener(updated);
     chrome.tabs.onRemoved.addListener(removed);
+  });
+}
+async function reloadTabAndWait(tabId, timeoutMs = 30_000) {
+  await new Promise((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => {
+      clearTimeout(timer);
+      chrome.tabs.onUpdated.removeListener(updated);
+      chrome.tabs.onRemoved.removeListener(removed);
+    };
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      error ? reject(error) : resolve();
+    };
+    const updated = (changedId, info) => {
+      if (changedId === tabId && info.status === "complete") finish();
+    };
+    const removed = (removedId) => {
+      if (removedId === tabId) finish(new Error("ChatGPT任务标签页在恢复连接时被关闭"));
+    };
+    const timer = setTimeout(() => finish(new Error("刷新ChatGPT任务标签页后等待页面就绪超过30秒")), timeoutMs);
+    chrome.tabs.onUpdated.addListener(updated);
+    chrome.tabs.onRemoved.addListener(removed);
+    void chrome.tabs.reload(tabId).catch(finish);
   });
 }
 async function broadcast(message) {
@@ -807,7 +833,11 @@ async function startActiveTeamWebJob(active) {
   browserTaskMessages.set(key, recoveryMessage(message));
   await saveBrowserTaskMessages();
   scheduleBrowserResultRecoveryAlarm();
-  await sendWithCurrentChatGptAdapter(chrome.tabs, chrome.scripting, mapped.tabId, message);
+  await sendWithCurrentChatGptAdapter(chrome.tabs, chrome.scripting, mapped.tabId, message, {
+    refreshTab: message.phase === "preparing_tab" && tabRegistry.canReloadTab(key, mapped.tabId)
+      ? () => reloadTabAndWait(mapped.tabId)
+      : undefined
+  });
 }
 async function teamWebWorkerTick() {
   if (teamWebTickPromise) return teamWebTickPromise;
@@ -1155,9 +1185,17 @@ async function executeTask(projectId, taskId) {
     await saveBrowserTaskMessages();
     scheduleBrowserResultRecoveryAlarm();
     if (provider === "gemini") await sendWithCurrentGeminiAdapter(chrome.tabs, chrome.scripting, mapped.tabId, message);
-    else await sendWithCurrentChatGptAdapter(chrome.tabs, chrome.scripting, mapped.tabId, message);
+    else await sendWithCurrentChatGptAdapter(chrome.tabs, chrome.scripting, mapped.tabId, message, {
+      refreshTab: message.phase === "preparing_tab" && tabRegistry.canReloadTab(key, mapped.tabId)
+        ? () => reloadTabAndWait(mapped.tabId)
+        : undefined
+    });
   } catch (error) {
-    const reason = error instanceof ConversationUnavailableError ? "conversation_unavailable" : "selector_missing";
+    const reason = error instanceof ConversationUnavailableError
+      ? "conversation_unavailable"
+      : error instanceof ChatGptAdapterReconnectError
+        ? "adapter_reconnect_failed"
+        : "selector_missing";
     const handled = await updateScheduler(async () => {
       if (!queue.running.includes(key)) return false;
       queue = fail(queue, key, reason);

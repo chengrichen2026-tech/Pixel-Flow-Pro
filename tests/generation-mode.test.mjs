@@ -292,8 +292,8 @@ test("ChatGPT image progress percentages are not completed as text results", asy
 test("reinjected ChatGPT adapter replaces a stale page listener after extension reload", async () => {
   const content = await readFile(new URL("public/contentScript.js", root), "utf8");
   const background = await readBackgroundSource();
-  assert.match(content, /CHATGPT_ADAPTER_VERSION = 38/);
-  assert.match(background, /CHATGPT_ADAPTER_VERSION = 38/);
+  assert.match(content, /CHATGPT_ADAPTER_VERSION = 39/);
+  assert.match(background, /CHATGPT_ADAPTER_VERSION = 39/);
   assert.match(content, /__gptNodeCanvasMessageListener/);
   assert.match(content, /removeListener\(previousMessageListener\)/);
   assert.match(content, /addListener\(currentMessageListener\)/);
@@ -564,6 +564,8 @@ test("browser tasks keep reference upload and prompt submission in one adapter t
   assert.match(content, /await uploadImages\(input\.images\)/);
   assert.match(content, /const currentComposer = findComposer\(\)/);
   assert.match(content, /setComposerText\(currentComposer, input\.prompt\)/);
+  assert.match(content, /document\.execCommand\("insertText", false, text\)/);
+  assert.match(content, /normalizeTurnText\(composerText\(findComposer\(\)\)\) === normalizeTurnText\(input\.prompt\)/);
   assert.doesNotMatch(content, /setComposerText\(page\.composer, input\.prompt\)/);
   assert.doesNotMatch(content, /findUploadInput\(\) \?\? resolvedInput/);
 });

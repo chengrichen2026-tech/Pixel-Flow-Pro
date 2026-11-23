@@ -107,7 +107,8 @@ test("remote team web jobs reuse the existing ChatGPT adapter and upload to task
   assert.match(background, /TEAM_WEB_PROJECT_ID = "pixel-flow-team-web-worker"/);
   assert.match(background, /async function startActiveTeamWebJob\(active\)/);
   assert.match(background, /TEAM_WEB_MAX_CONCURRENCY = 5/);
-  assert.match(background, /sendWithCurrentChatGptAdapter\(chrome\.tabs, chrome\.scripting, mapped\.tabId, message\)/);
+  assert.match(background, /sendWithCurrentChatGptAdapter\(chrome\.tabs, chrome\.scripting, mapped\.tabId, message, \{/);
+  assert.match(background, /message\.phase === "preparing_tab" && tabRegistry\.canReloadTab\(key, mapped\.tabId\)/);
   assert.match(background, /async function handleTeamWebPageTaskMessage/);
   assert.match(background, /uploadTeamWebStorageResult\(active\.job\.id, image, imageIndex\)/);
   assert.match(background, /result-storage-finalize/);
