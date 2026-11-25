@@ -1,4 +1,4 @@
-export const GEMINI_ADAPTER_VERSION = 4;
+export const GEMINI_ADAPTER_VERSION = 6;
 
 type TaskMessage = { projectId: string; taskId: string; [key: string]: unknown };
 

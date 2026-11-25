@@ -4554,7 +4554,7 @@ async function sendWithCurrentChatGptAdapter(tabs, scripting, tabId, message, op
 		type: "EXECUTE_IN_CHATGPT_V3"
 	});
 }
-var isCurrentAdapter = (value) => Boolean(value && typeof value === "object" && value.adapterVersion === 4);
+var isCurrentAdapter = (value) => Boolean(value && typeof value === "object" && value.adapterVersion === 6);
 async function probeGeminiAdapter(tabs, tabId, message) {
 	try {
 		const state = await tabs.sendMessage(tabId, {

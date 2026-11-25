@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import vm from "node:vm";
 import { readBackgroundSource } from "./helpers/background-source.mjs";
 
 const root = new URL("../", import.meta.url);
@@ -17,7 +18,7 @@ test("Gemini web mode is packaged and dispatched through its own local adapter",
   assert.match(background, /sendWithCurrentGeminiAdapter/);
   assert.match(background, /type: provider === "gemini" \? "EXECUTE_IN_GEMINI" : "EXECUTE_IN_CHATGPT"/);
   assert.match(background, /type: provider === "gemini" \? "RESUME_GEMINI_RESULT" : "RESUME_CHATGPT_RESULT"/);
-  assert.match(content, /GEMINI_ADAPTER_VERSION = 4/);
+  assert.match(content, /GEMINI_ADAPTER_VERSION = 6/);
   assert.match(content, /input\[type="file"\]/);
   assert.match(content, /generatedImages\(latest\)/);
   assert.match(content, /naturalWidth >= 256/);
@@ -36,14 +37,140 @@ test("Gemini web mode is packaged and dispatched through its own local adapter",
 
 test("Gemini reference uploads wait for current-composer previews and preserve the prompt", async () => {
   const content = await readFile(new URL("public/geminiContentScript.js", root), "utf8");
-  assert.match(content, /editor\(\)\?\.closest\("fieldset"\) \|\| document/);
+  assert.match(content, /editor\(\)\?\.closest\('fieldset, input-area-v2/);
   assert.match(content, /input\[type="file"\]/);
-  assert.match(content, /\/image\\\/\/i\.test\(input\.accept \|\| ""\)/);
+  assert.match(content, /!accept \|\| accept\.includes\("\*\/\*"\)/);
   assert.match(content, /root\.querySelectorAll\("uploader-file-preview"\)\.length/);
   assert.match(content, /node\.getClientRects\(\)\.length > 0/);
-  assert.match(content, /attachmentPreviewCount\(root\) >= previewsBefore \+ images\.length/);
+  assert.match(content, /for \(const \[index, image\] of images\.entries\(\)\)/);
+  assert.match(content, /const fileInput = await findUploadInput\(\)/);
+  assert.match(content, /fileInput\.dispatchEvent\(new Event\("input"/);
+  assert.match(content, /new ClipboardEvent\("paste"/);
+  assert.match(content, /new DragEvent\(type/);
+  assert.match(content, /attachmentPreviewCount\(root\) >= expectedPreviewCount/);
+  const resolver = content.slice(content.indexOf("async function findUploadInput("), content.indexOf("async function uploadImages("));
+  assert.doesNotMatch(resolver, /\.click\(/);
   assert.match(content, /await setPrompt\(promptEditor, prompt\)/);
   assert.match(content, /promptMatches\(target, prompt\) && button/);
+});
+
+test("Gemini code upload accepts generic hidden inputs and re-resolves one input per image", async () => {
+  const content = await readFile(new URL("public/geminiContentScript.js", root), "utf8");
+  const section = content.slice(content.indexOf("const decodeBase64"), content.indexOf("const normalizePromptText"));
+  let previewCount = 0;
+  let inputQueries = 0;
+  const uploaded = [];
+  class FakeInput {
+    constructor() {
+      this.accept = "";
+      this.isConnected = true;
+      this.disabled = false;
+      this.value = "occupied";
+      this.files = [];
+    }
+    hasAttribute() { return false; }
+    getAttribute() { return ""; }
+    dispatchEvent(event) {
+      if (event.type !== "change") return;
+      uploaded.push(this.files.map(file => file.name));
+      previewCount += 1;
+      activeInput = new FakeInput();
+    }
+  }
+  class FakeDataTransfer {
+    constructor() {
+      this.files = [];
+      this.items = { add: file => this.files.push(file) };
+    }
+  }
+  class FakeFile {
+    constructor(_parts, name, options) { this.name = name; this.type = options.type; }
+  }
+  class FakeEvent {
+    constructor(type) { this.type = type; }
+  }
+  let activeInput = new FakeInput();
+  const composer = {
+    querySelectorAll(selector) {
+      if (selector === 'input[type="file"]') { inputQueries += 1; return [activeInput]; }
+      if (selector === "uploader-file-preview") return Array.from({ length: previewCount }, () => ({}));
+      return [];
+    }
+  };
+  const document = { querySelectorAll: () => [] };
+  const context = vm.createContext({
+    atob,
+    document,
+    editor: () => ({ closest: () => composer }),
+    HTMLInputElement: FakeInput,
+    DataTransfer: FakeDataTransfer,
+    File: FakeFile,
+    Event: FakeEvent,
+    GeminiAdapterError: class extends Error {},
+    pageMessage: async () => {},
+    sleep: async () => {}
+  });
+  vm.runInContext(`${section}\nthis.runUpload = uploadImages;`, context);
+  await context.runUpload({ projectId: "p", taskId: "t" }, [
+    { base64: "YQ==", name: "one.png", mimeType: "image/png" },
+    { base64: "Yg==", name: "two.png", mimeType: "image/png" }
+  ]);
+  assert.deepEqual(uploaded, [["one.png"], ["two.png"]]);
+  assert.ok(inputQueries >= 2, "each image resolves the current live file input");
+});
+
+test("Gemini code upload pastes files when the page has no mounted file input", async () => {
+  const content = await readFile(new URL("public/geminiContentScript.js", root), "utf8");
+  const section = content.slice(content.indexOf("const decodeBase64"), content.indexOf("const normalizePromptText"));
+  let previewCount = 0;
+  const events = [];
+  class FakeInput {}
+  class FakeDataTransfer {
+    constructor() {
+      this.files = [];
+      this.items = { add: file => this.files.push(file) };
+    }
+  }
+  class FakeFile {
+    constructor(_parts, name, options) { this.name = name; this.type = options.type; }
+  }
+  class FakeEvent {
+    constructor(type, init = {}) { this.type = type; Object.assign(this, init); }
+  }
+  const composer = {
+    querySelectorAll(selector) {
+      if (selector === "uploader-file-preview") return Array.from({ length: previewCount }, () => ({}));
+      return [];
+    }
+  };
+  const target = {
+    closest: () => composer,
+    dispatchEvent(event) {
+      events.push(event.type);
+      if (event.type === "paste") previewCount += event.clipboardData.files.length;
+    }
+  };
+  const document = { querySelectorAll: () => [] };
+  const context = vm.createContext({
+    atob,
+    document,
+    editor: () => target,
+    HTMLInputElement: FakeInput,
+    DataTransfer: FakeDataTransfer,
+    File: FakeFile,
+    Event: FakeEvent,
+    ClipboardEvent: FakeEvent,
+    DragEvent: FakeEvent,
+    GeminiAdapterError: class extends Error {},
+    pageMessage: async () => {},
+    sleep: async () => {}
+  });
+  vm.runInContext(`${section}\nthis.runUpload = uploadImages;`, context);
+  await context.runUpload({ projectId: "p", taskId: "t" }, [
+    { base64: "YQ==", name: "pasted.png", mimeType: "image/png" }
+  ]);
+  assert.deepEqual(events, ["paste"]);
+  assert.equal(previewCount, 1);
 });
 
 test("Gemini uses the same guarded local-web concurrency and persistent run mode", async () => {

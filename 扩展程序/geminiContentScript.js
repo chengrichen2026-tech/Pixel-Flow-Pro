@@ -1,6 +1,6 @@
 // @ts-check
 (() => {
-  const GEMINI_ADAPTER_VERSION = 4;
+  const GEMINI_ADAPTER_VERSION = 6;
   const scope = globalThis;
   const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
   const taskKey = input => `${input.projectId}:${input.taskId}`;
@@ -78,18 +78,36 @@
   };
 
   function composerRoot() {
-    return editor()?.closest("fieldset") || document;
+    return editor()?.closest('fieldset, input-area-v2, .input-area-container, [data-test-id="input-area"]') || document;
+  }
+
+  /**
+   * @param {Element} input
+   * @returns {input is HTMLInputElement}
+   */
+  function usableUploadInput(input) {
+    if (!(input instanceof HTMLInputElement) || !input.isConnected || input.disabled || input.hasAttribute("capture") || input.hasAttribute("webkitdirectory")) return false;
+    const accept = (input.accept || input.getAttribute("accept") || "").toLowerCase();
+    return !accept || accept.includes("*/*") || /image\/|\.(?:png|jpe?g|webp|gif|avif|heic|heif)\b/i.test(accept);
   }
 
   function imageUploadInput(root = composerRoot()) {
-    for (const input of root.querySelectorAll('input[type="file"]')) {
-      if (input instanceof HTMLInputElement && input.isConnected && !input.disabled && /image\//i.test(input.accept || "")) return input;
-    }
-    return undefined;
+    const local = [...root.querySelectorAll('input[type="file"]')];
+    const global = root === document ? [] : [...document.querySelectorAll('input[type="file"]')];
+    const candidates = [...new Set([...local, ...global])].filter(usableUploadInput);
+    return candidates.sort((left, right) => {
+      const leftAccept = (left.accept || left.getAttribute("accept") || "").toLowerCase();
+      const rightAccept = (right.accept || right.getAttribute("accept") || "").toLowerCase();
+      return Number(!/image\//i.test(leftAccept)) - Number(!/image\//i.test(rightAccept));
+    })[0];
   }
 
   function attachmentPreviewCount(root = composerRoot()) {
-    return root.querySelectorAll("uploader-file-preview").length;
+    return Math.max(
+      root.querySelectorAll("uploader-file-preview").length,
+      root.querySelectorAll('file-preview, [data-test-id*="file-preview"], [data-test-id*="attachment-preview"]').length,
+      root.querySelectorAll('button[aria-label*="Remove file" i], button[aria-label*="Remove attachment" i], button[aria-label*="删除文件"], button[aria-label*="移除文件"]').length
+    );
   }
 
   function visibleUploadBusy(root = composerRoot()) {
@@ -98,36 +116,75 @@
   }
 
   async function findUploadInput() {
-    let input = imageUploadInput();
-    if (input) return input;
-    const uploadButton = [...document.querySelectorAll("button")].find(button => /upload|上传|添加文件|add files/i.test(`${button.getAttribute("aria-label") || ""} ${button.textContent || ""}`));
-    uploadButton?.click();
-    const started = Date.now();
-    while (Date.now() - started < 5_000) {
-      input = imageUploadInput();
+    for (let attempt = 0; attempt < 15; attempt += 1) {
+      const input = imageUploadInput();
       if (input) return input;
       await sleep(100);
     }
     return undefined;
   }
 
+  function dispatchCodePaste(file) {
+    const target = editor();
+    if (!target) return false;
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    target.dispatchEvent(new ClipboardEvent("paste", { bubbles: true, cancelable: true, composed: true, clipboardData: transfer }));
+    return true;
+  }
+
+  function dispatchCodeDrop(file) {
+    const target = editor();
+    if (!target) return false;
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    for (const type of ["dragenter", "dragover", "drop"]) {
+      target.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, composed: true, dataTransfer: transfer }));
+    }
+    return true;
+  }
+
+  async function waitForUploadSignal(expectedPreviewCount, timeoutMs) {
+    const started = Date.now();
+    while (Date.now() - started < timeoutMs) {
+      const root = composerRoot();
+      if (attachmentPreviewCount(root) >= expectedPreviewCount || visibleUploadBusy(root)) return true;
+      await sleep(100);
+    }
+    return false;
+  }
+
   async function uploadImages(input, images) {
     if (!images?.length) return;
     await pageMessage({ type: "TASK_STATUS", projectId: input.projectId, taskId: input.taskId, status: "uploading" });
-    const fileInput = await findUploadInput();
-    if (!fileInput) throw new GeminiAdapterError("selector_missing", "找不到 Gemini 图片上传入口");
     const previewsBefore = attachmentPreviewCount();
-    const transfer = new DataTransfer();
-    images.forEach((image, index) => transfer.items.add(new File([decodeBase64(image.base64)], image.name || `reference-${index + 1}.png`, { type: image.mimeType || "image/png" })));
-    fileInput.files = transfer.files;
-    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
-    const started = Date.now();
-    while (Date.now() - started < 60_000) {
+    if (previewsBefore > 0) throw new GeminiAdapterError("upload_failed", "Gemini 输入区已有附件，已停止发送以避免混入上一次参考图");
+    for (const [index, image] of images.entries()) {
+      const file = new File([decodeBase64(image.base64)], image.name || `reference-${index + 1}.png`, { type: image.mimeType || "image/png" });
+      const expectedPreviewCount = previewsBefore + index + 1;
+      const fileInput = await findUploadInput();
+      if (fileInput) {
+        const transfer = new DataTransfer();
+        transfer.items.add(file);
+        fileInput.value = "";
+        fileInput.files = transfer.files;
+        fileInput.dispatchEvent(new Event("input", { bubbles: true }));
+        fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+      } else {
+        if (!dispatchCodePaste(file)) throw new GeminiAdapterError("selector_missing", `找不到 Gemini 第 ${index + 1} 张图片的代码上传目标`);
+        if (!await waitForUploadSignal(expectedPreviewCount, 2_000)) dispatchCodeDrop(file);
+      }
+      const started = Date.now();
+      while (Date.now() - started < 60_000) {
+        const root = composerRoot();
+        if (!visibleUploadBusy(root) && attachmentPreviewCount(root) >= expectedPreviewCount) break;
+        await sleep(500);
+      }
       const root = composerRoot();
-      if (!visibleUploadBusy(root) && attachmentPreviewCount(root) >= previewsBefore + images.length) return;
-      await sleep(500);
+      if (visibleUploadBusy(root) || attachmentPreviewCount(root) < expectedPreviewCount) {
+        throw new GeminiAdapterError("upload_failed", `Gemini 第 ${index + 1} 张参考图上传超时`);
+      }
     }
-    throw new GeminiAdapterError("upload_failed", "Gemini 参考图上传超时");
   }
 
   const normalizePromptText = value => String(value || "").replace(/\u00a0/g, " ").replace(/\r\n?/g, "\n").trim();
